@@ -42,7 +42,7 @@ const path=require('node:path'),assert=require('node:assert/strict');
     await page.locator('#boardTabs button').filter({hasText:'全部',exact:true}).click();
     await choose('dispenser');assert.equal(await page.locator('#boardState fieldset').count(),2);
     assert.equal(await page.locator('[data-property="facing"] button').count(),6);await page.getByRole('button',{name:'facing=east',exact:true}).click();await page.getByRole('button',{name:'triggered=true',exact:true}).click();
-    assert.equal(await page.locator('[data-property="facing"]').innerText(),'方向');
+    for(const label of ['方向','东','西','南','北','上','下'])assert((await page.locator('[data-property="facing"]').innerText()).includes(label));
     await choose('observer');assert.equal(await page.locator('#boardState fieldset').count(),1);
     await choose('rail');assert.equal(await page.locator('[data-property="shape"] button').count(),10);
     let projected=await preview(page.locator('#boardPalette [data-block="rail"] canvas'),'rail',{},'icon');assert(projected.width>=24&&projected.height>=24,'palette rail keeps its readable face');

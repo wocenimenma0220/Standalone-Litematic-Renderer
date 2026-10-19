@@ -1,0 +1,562 @@
+{
+  "version": 3,
+  "description": "右上红石块已满足上方准连接供电，但投掷器尚未收到邻居更新。运行不会自行发射；在投掷器左边放一个普通方块唤醒，再推进4gt，向右侧箱子输送1件。",
+  "view": "side",
+  "zoom": 52,
+  "pan": {
+    "x": 520,
+    "y": 280
+  },
+  "cells": [
+    [
+      "0,0",
+      {
+        "id": "dropper",
+        "states": {
+          "facing": "east",
+          "triggered": "false"
+        }
+      }
+    ],
+    [
+      "1,0",
+      {
+        "id": "chest",
+        "states": {
+          "facing": "north",
+          "type": "single",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "1,-1",
+      {
+        "id": "redstone_block",
+        "states": {}
+      }
+    ]
+  ],
+  "timing": {
+    "version": 1,
+    "plane": "side",
+    "cells": [
+      [
+        "0,0,0",
+        {
+          "id": "dropper",
+          "states": {
+            "facing": "east",
+            "triggered": "false"
+          }
+        }
+      ],
+      [
+        "1,0,0",
+        {
+          "id": "chest",
+          "states": {
+            "facing": "north",
+            "type": "single",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "1,1,0",
+        {
+          "id": "redstone_block",
+          "states": {}
+        }
+      ]
+    ],
+    "time": 0,
+    "phase": "AT",
+    "tasks": [],
+    "scheduled": [],
+    "selected": [],
+    "events": [],
+    "tickers": [],
+    "trace": [
+      {
+        "id": 1,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "容器编辑",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "slot": 0,
+        "before": null,
+        "after": {
+          "id": "stone",
+          "count": 8,
+          "max": 64
+        }
+      },
+      {
+        "id": 2,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "玩家编辑",
+        "pos": [
+          1,
+          1,
+          0
+        ]
+      },
+      {
+        "id": 3,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "set",
+        "pos": [
+          1,
+          1,
+          0
+        ],
+        "cell": {
+          "id": "redstone_block",
+          "states": {}
+        },
+        "flags": 3,
+        "placed": true
+      },
+      {
+        "id": 4,
+        "parent": 3,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "状态变化",
+        "pos": [
+          1,
+          1,
+          0
+        ],
+        "before": null,
+        "after": {
+          "id": "redstone_block",
+          "states": {}
+        },
+        "flags": 3
+      },
+      {
+        "id": 5,
+        "parent": 3,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "onPlace",
+        "pos": [
+          1,
+          1,
+          0
+        ]
+      },
+      {
+        "id": 6,
+        "parent": 3,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "afterSet",
+        "pos": [
+          1,
+          1,
+          0
+        ],
+        "cell": {
+          "id": "redstone_block",
+          "states": {}
+        },
+        "before": null,
+        "flags": 3
+      },
+      {
+        "id": 7,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "east",
+        "block": "air"
+      },
+      {
+        "id": 8,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          2,
+          1,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "west",
+        "block": "air"
+      },
+      {
+        "id": 9,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "up",
+        "block": "air"
+      },
+      {
+        "id": 10,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          1,
+          2,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "down",
+        "block": "air"
+      },
+      {
+        "id": 11,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          1,
+          1,
+          -1
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "south",
+        "block": "air"
+      },
+      {
+        "id": 12,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "north",
+        "block": "air"
+      },
+      {
+        "id": 13,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "east"
+      },
+      {
+        "id": 14,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          2,
+          1,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "west"
+      },
+      {
+        "id": 15,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          1,
+          1,
+          -1
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "south"
+      },
+      {
+        "id": 16,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          1,
+          1,
+          1
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "north"
+      },
+      {
+        "id": 17,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "up"
+      },
+      {
+        "id": 18,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          1,
+          2,
+          0
+        ],
+        "source": [
+          1,
+          1,
+          0
+        ],
+        "direction": "down"
+      }
+    ],
+    "serial": 18,
+    "order": 0,
+    "parent": 18,
+    "halted": false,
+    "steps": 15,
+    "revision": 18,
+    "components": {
+      "version": 1,
+      "containers": [
+        [
+          "0,0,0",
+          {
+            "type": "dropper",
+            "slots": [
+              {
+                "id": "stone",
+                "count": 8,
+                "max": 64
+              },
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "cooldown": -1,
+            "lastTick": -1,
+            "token": 0
+          }
+        ],
+        [
+          "1,0,0",
+          {
+            "type": "chest",
+            "slots": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ],
+            "cooldown": -1,
+            "lastTick": -1,
+            "token": 0
+          }
+        ]
+      ],
+      "outputs": [],
+      "contacts": [],
+      "entityToken": 0
+    },
+    "analog": {
+      "version": 1,
+      "sources": [],
+      "enderSlots": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "devices": {
+      "version": 1,
+      "toggles": [],
+      "outputs": [],
+      "random": "25214904170"
+    },
+    "pistons": {
+      "version": 1,
+      "moving": []
+    }
+  },
+  "inventory": {
+    "items": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "cursor": null
+  }
+}

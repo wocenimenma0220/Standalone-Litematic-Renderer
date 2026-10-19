@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "view": "side",
+  "zoom": 64,
+  "pan": { "x": 300, "y": 300 },
+  "cells": [
+    ["0,0", { "id": "piston", "states": { "facing": "up", "extended": "false" } }],
+    ["0,-1", { "id": "observer", "states": { "facing": "east", "powered": "false" } }],
+    ["1,-2", { "id": "observer", "states": { "facing": "west", "powered": "false" } }],
+    ["-1,0", { "id": "redstone_block", "states": {} }]
+  ]
+}

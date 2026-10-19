@@ -94,6 +94,8 @@ Java 堆上限默认根据机器总内存与启动时可用内存选择。可通
 
 发布前同步 `package.ps1`、`webapp/package.json`、`webapp/package-lock.json`、`tools/launcher/Launcher.cs` 中的版本，并更新 README 和更新记录。文档修改不需要重编译程序或改写已发布的版本标签。
 
+当前测试版对外名称为 `1.2.0test-v1`；npm/Electron包的语义版本为 `1.2.0-test-v1`，`displayVersion`、窗口标题和启动器ProductVersion保持对外名称，Windows数值文件版本为 `1.2.0.0`。
+
 渲染和大投影技术细节见 [LOD_STREAMING.md](../评估与测评/LOD_STREAMING.md)、[RESEARCH_NOTES.md](../评估与测评/RESEARCH_NOTES.md) 和 [综合评估](../评估与测评/投影渲染与区块缓存综合评估.md)。
 
 ## 更改投影模式（1.1.4）

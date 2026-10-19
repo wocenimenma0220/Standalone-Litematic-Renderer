@@ -1,0 +1,720 @@
+{
+  "version": 3,
+  "view": "top",
+  "cells": [
+    [
+      "1,0",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "1,4",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "2,0",
+      {
+        "id": "powered_rail",
+        "states": {
+          "powered": "true",
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "2,4",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "3,0",
+      {
+        "id": "detector_rail",
+        "states": {
+          "powered": "false",
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "3,4",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "4,0",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "4,4",
+      {
+        "id": "powered_rail",
+        "states": {
+          "powered": "true",
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "5,0",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "5,4",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "east_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "0,1",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "north_south",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "6,1",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "north_south",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "0,2",
+      {
+        "id": "powered_rail",
+        "states": {
+          "powered": "true",
+          "shape": "north_south",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "6,2",
+      {
+        "id": "powered_rail",
+        "states": {
+          "powered": "true",
+          "shape": "north_south",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "0,3",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "north_south",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "6,3",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "north_south",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "0,0",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "south_east",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "6,0",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "south_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "0,4",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "north_east",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "6,4",
+      {
+        "id": "rail",
+        "states": {
+          "shape": "north_west",
+          "waterlogged": "false"
+        }
+      }
+    ],
+    [
+      "4,5",
+      {
+        "id": "redstone_block",
+        "states": {}
+      }
+    ],
+    [
+      "-1,2",
+      {
+        "id": "redstone_block",
+        "states": {}
+      }
+    ],
+    [
+      "7,2",
+      {
+        "id": "redstone_block",
+        "states": {}
+      }
+    ],
+    [
+      "3,-1",
+      {
+        "id": "comparator",
+        "states": {
+          "facing": "south",
+          "mode": "compare",
+          "powered": "false"
+        }
+      }
+    ],
+    [
+      "3,-2",
+      {
+        "id": "redstone_lamp",
+        "states": {
+          "lit": "false"
+        }
+      }
+    ],
+    [
+      "2,1",
+      {
+        "id": "redstone_block",
+        "states": {}
+      }
+    ]
+  ],
+  "timing": {
+    "version": 1,
+    "plane": "top",
+    "cells": [
+      [
+        "1,0,0",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "1,0,4",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "2,0,0",
+        {
+          "id": "powered_rail",
+          "states": {
+            "powered": "true",
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "2,0,4",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "3,0,0",
+        {
+          "id": "detector_rail",
+          "states": {
+            "powered": "false",
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "3,0,4",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "4,0,0",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "4,0,4",
+        {
+          "id": "powered_rail",
+          "states": {
+            "powered": "true",
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "5,0,0",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "5,0,4",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "east_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "0,0,1",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "north_south",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "6,0,1",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "north_south",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "0,0,2",
+        {
+          "id": "powered_rail",
+          "states": {
+            "powered": "true",
+            "shape": "north_south",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "6,0,2",
+        {
+          "id": "powered_rail",
+          "states": {
+            "powered": "true",
+            "shape": "north_south",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "0,0,3",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "north_south",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "6,0,3",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "north_south",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "0,0,0",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "south_east",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "6,0,0",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "south_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "0,0,4",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "north_east",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "6,0,4",
+        {
+          "id": "rail",
+          "states": {
+            "shape": "north_west",
+            "waterlogged": "false"
+          }
+        }
+      ],
+      [
+        "4,0,5",
+        {
+          "id": "redstone_block",
+          "states": {}
+        }
+      ],
+      [
+        "-1,0,2",
+        {
+          "id": "redstone_block",
+          "states": {}
+        }
+      ],
+      [
+        "7,0,2",
+        {
+          "id": "redstone_block",
+          "states": {}
+        }
+      ],
+      [
+        "3,0,-1",
+        {
+          "id": "comparator",
+          "states": {
+            "facing": "south",
+            "mode": "compare",
+            "powered": "false"
+          }
+        }
+      ],
+      [
+        "3,0,-2",
+        {
+          "id": "redstone_lamp",
+          "states": {
+            "lit": "false"
+          }
+        }
+      ],
+      [
+        "2,0,1",
+        {
+          "id": "redstone_block",
+          "states": {}
+        }
+      ]
+    ],
+    "time": 0,
+    "phase": "AT",
+    "tasks": [],
+    "scheduled": [],
+    "selected": [],
+    "events": [],
+    "tickers": [],
+    "trace": [
+      {
+        "id": 1,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "实体生成",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "entity": 1,
+        "type": "chest_minecart"
+      }
+    ],
+    "serial": 1,
+    "order": 0,
+    "parent": null,
+    "halted": false,
+    "steps": 0,
+    "revision": 1,
+    "components": {
+      "version": 1,
+      "containers": [],
+      "outputs": [],
+      "contacts": [],
+      "entityToken": 0
+    },
+    "analog": {
+      "version": 1,
+      "sources": [],
+      "enderSlots": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "devices": {
+      "version": 1,
+      "toggles": [],
+      "outputs": [],
+      "random": "25214904170"
+    },
+    "pistons": {
+      "version": 1,
+      "moving": []
+    },
+    "entities": {
+      "version": 1,
+      "nextId": 2,
+      "items": [
+        [
+          1,
+          {
+            "id": 1,
+            "type": "chest_minecart",
+            "pos": [
+              1.5,
+              0.0625,
+              0.5
+            ],
+            "previous": [
+              1.5,
+              0.0625,
+              0.5
+            ],
+            "velocity": [
+              0.2,
+              0,
+              0
+            ],
+            "width": 0.98,
+            "height": 0.7,
+            "facing": "east",
+            "age": 0,
+            "enabled": true,
+            "fuel": 0,
+            "fuse": -1,
+            "onGround": false,
+            "passengers": [],
+            "container": {
+              "type": "chest_minecart",
+              "slots": [
+                {
+                  "id": "stone",
+                  "count": 64,
+                  "max": 64
+                },
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              ],
+              "cooldown": 0,
+              "lastTick": -1,
+              "token": 0
+            }
+          }
+        ]
+      ]
+    }
+  },
+  "inventory": {
+    "version": 1,
+    "items": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "cursor": null
+  },
+  "zoom": 50,
+  "pan": {
+    "x": 260,
+    "y": 200
+  }
+}

@@ -3,7 +3,7 @@
 (function(root) {
   const key=(x,y)=>`${x},${y}`, LIMIT=192;
   const piston=cell=>cell?.id==='piston'||cell?.id==='sticky_piston';
-  const headDefinition={id:'piston_head',name:'活塞头',defaults:{facing:'north',type:'normal',short:'false'},properties:{facing:['north','south','east','west','up','down'],type:['normal','sticky'],short:['false']},facing:['north','south','east','west','up','down'],replaceable:false};
+  const headDefinition={id:'piston_head',name:'活塞头',defaults:{facing:'north',type:'normal',short:'false'},properties:{facing:['north','south','east','west','up','down'],type:['normal','sticky'],short:['false','true']},facing:['north','south','east','west','up','down'],replaceable:false};
   function pistonOffset(cell,view='side') {
     const facing=cell?.states?.facing;
     return facing==='east'?[1,0]:facing==='west'?[-1,0]:view==='top'?(facing==='north'?[0,-1]:facing==='south'?[0,1]:[0,0]):(facing==='up'?[0,-1]:facing==='down'?[0,1]:[0,0]);

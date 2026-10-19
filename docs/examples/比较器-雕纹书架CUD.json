@@ -1,0 +1,1632 @@
+{
+  "version": 3,
+  "description": "书架当前模拟量为1，但比较器仍缓存6。占用状态未变化，原版没有发送对应CUD。给比较器一次邻居更新，再推进2gt，可看到输出改为1。",
+  "view": "top",
+  "zoom": 52,
+  "pan": {
+    "x": 520,
+    "y": 280
+  },
+  "cells": [
+    [
+      "0,0",
+      {
+        "id": "chiseled_bookshelf",
+        "states": {
+          "facing": "north",
+          "slot_0_occupied": "true",
+          "slot_1_occupied": "false",
+          "slot_2_occupied": "false",
+          "slot_3_occupied": "false",
+          "slot_4_occupied": "false",
+          "slot_5_occupied": "true"
+        }
+      }
+    ],
+    [
+      "-1,0",
+      {
+        "id": "comparator",
+        "states": {
+          "facing": "east",
+          "mode": "compare",
+          "powered": "true"
+        }
+      }
+    ]
+  ],
+  "timing": {
+    "version": 1,
+    "plane": "top",
+    "cells": [
+      [
+        "0,0,0",
+        {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "true"
+          }
+        }
+      ],
+      [
+        "-1,0,0",
+        {
+          "id": "comparator",
+          "states": {
+            "facing": "east",
+            "mode": "compare",
+            "powered": "true"
+          }
+        }
+      ]
+    ],
+    "time": 2,
+    "phase": "AT",
+    "tasks": [],
+    "scheduled": [],
+    "selected": [],
+    "events": [],
+    "tickers": [],
+    "trace": [
+      {
+        "id": 1,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "容器编辑",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "slot": 0,
+        "before": null,
+        "after": {
+          "id": "book",
+          "count": 1,
+          "max": 64
+        }
+      },
+      {
+        "id": 2,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "容器状态同步",
+        "pos": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "id": 3,
+        "parent": 2,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "set",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "cell": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "false"
+          }
+        },
+        "flags": 3
+      },
+      {
+        "id": 4,
+        "parent": 3,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "状态变化",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "before": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north"
+          }
+        },
+        "after": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "false"
+          }
+        },
+        "flags": 3
+      },
+      {
+        "id": 5,
+        "parent": 3,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "afterSet",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "cell": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "false"
+          }
+        },
+        "before": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north"
+          }
+        },
+        "flags": 3
+      },
+      {
+        "id": 6,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "east",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 7,
+        "parent": 6,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "登记计划刻",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "type": "comparator",
+        "triggerTick": 2,
+        "priority": 0,
+        "subTickOrder": 0
+      },
+      {
+        "id": 8,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "west",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 9,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          -1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "up",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 10,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "down",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 11,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          0,
+          -1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "south",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 12,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          0,
+          1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "north",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 13,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "比较器更新",
+        "pos": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "id": 14,
+        "parent": 13,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "east",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 15,
+        "parent": 14,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "计划刻去重",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "type": "comparator"
+      },
+      {
+        "id": 16,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "east"
+      },
+      {
+        "id": 17,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "west"
+      },
+      {
+        "id": 18,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          0,
+          -1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "south"
+      },
+      {
+        "id": 19,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          0,
+          1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "north"
+      },
+      {
+        "id": 20,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          -1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "up"
+      },
+      {
+        "id": 21,
+        "parent": 5,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "down"
+      },
+      {
+        "id": 22,
+        "parent": 21,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "容器编辑",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "slot": 5,
+        "before": null,
+        "after": {
+          "id": "book",
+          "count": 1,
+          "max": 64
+        }
+      },
+      {
+        "id": 23,
+        "parent": 21,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "容器状态同步",
+        "pos": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "id": 24,
+        "parent": 23,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "set",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "cell": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "true"
+          }
+        },
+        "flags": 3
+      },
+      {
+        "id": 25,
+        "parent": 24,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "状态变化",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "before": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "false"
+          }
+        },
+        "after": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "true"
+          }
+        },
+        "flags": 3
+      },
+      {
+        "id": 26,
+        "parent": 24,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "afterSet",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "cell": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "true"
+          }
+        },
+        "before": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "false"
+          }
+        },
+        "flags": 3
+      },
+      {
+        "id": 27,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "east",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 28,
+        "parent": 27,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "计划刻去重",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "type": "comparator"
+      },
+      {
+        "id": 29,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "west",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 30,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          -1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "up",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 31,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "down",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 32,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          0,
+          -1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "south",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 33,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          0,
+          0,
+          1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "north",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 34,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "比较器更新",
+        "pos": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "id": 35,
+        "parent": 34,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "NC",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "east",
+        "block": "chiseled_bookshelf"
+      },
+      {
+        "id": 36,
+        "parent": 35,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "计划刻去重",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "type": "comparator"
+      },
+      {
+        "id": 37,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "east"
+      },
+      {
+        "id": 38,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "west"
+      },
+      {
+        "id": 39,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          0,
+          -1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "south"
+      },
+      {
+        "id": 40,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          0,
+          1
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "north"
+      },
+      {
+        "id": 41,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          -1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "up"
+      },
+      {
+        "id": 42,
+        "parent": 26,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "PP",
+        "pos": [
+          0,
+          1,
+          0
+        ],
+        "source": [
+          0,
+          0,
+          0
+        ],
+        "direction": "down"
+      },
+      {
+        "id": 43,
+        "parent": null,
+        "gt": 1,
+        "phase": "WTU",
+        "kind": "阶段",
+        "name": "WTU"
+      },
+      {
+        "id": 44,
+        "parent": null,
+        "gt": 1,
+        "phase": "TT",
+        "kind": "阶段",
+        "name": "TT"
+      },
+      {
+        "id": 45,
+        "parent": null,
+        "gt": 1,
+        "phase": "CT",
+        "kind": "阶段",
+        "name": "CT"
+      },
+      {
+        "id": 46,
+        "parent": null,
+        "gt": 1,
+        "phase": "BE",
+        "kind": "阶段",
+        "name": "BE"
+      },
+      {
+        "id": 47,
+        "parent": null,
+        "gt": 1,
+        "phase": "EU",
+        "kind": "阶段",
+        "name": "EU"
+      },
+      {
+        "id": 48,
+        "parent": null,
+        "gt": 1,
+        "phase": "TE",
+        "kind": "阶段",
+        "name": "TE"
+      },
+      {
+        "id": 49,
+        "parent": null,
+        "gt": 1,
+        "phase": "AT",
+        "kind": "阶段",
+        "name": "AT"
+      },
+      {
+        "id": 50,
+        "parent": null,
+        "gt": 2,
+        "phase": "WTU",
+        "kind": "阶段",
+        "name": "WTU"
+      },
+      {
+        "id": 51,
+        "parent": null,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "阶段",
+        "name": "TT"
+      },
+      {
+        "id": 52,
+        "parent": 6,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "TT",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "type": "comparator",
+        "triggerTick": 2,
+        "priority": 0,
+        "subTickOrder": 0
+      },
+      {
+        "id": 53,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "比较器输出",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "before": 0,
+        "after": 6
+      },
+      {
+        "id": 54,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "set",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "cell": {
+          "id": "comparator",
+          "states": {
+            "facing": "east",
+            "mode": "compare",
+            "powered": "true"
+          }
+        },
+        "flags": 2
+      },
+      {
+        "id": 55,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "状态变化",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "before": {
+          "id": "comparator",
+          "states": {
+            "facing": "east",
+            "mode": "compare",
+            "powered": "false"
+          }
+        },
+        "after": {
+          "id": "comparator",
+          "states": {
+            "facing": "east",
+            "mode": "compare",
+            "powered": "true"
+          }
+        },
+        "flags": 2
+      },
+      {
+        "id": 56,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          0,
+          0
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "block": "comparator"
+      },
+      {
+        "id": 57,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -3,
+          0,
+          0
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "east",
+        "block": "comparator"
+      },
+      {
+        "id": 58,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          -1,
+          0
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "up",
+        "block": "comparator"
+      },
+      {
+        "id": 59,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          1,
+          0
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "down",
+        "block": "comparator"
+      },
+      {
+        "id": 60,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          0,
+          -1
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "south",
+        "block": "comparator"
+      },
+      {
+        "id": 61,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          0,
+          1
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "north",
+        "block": "comparator"
+      },
+      {
+        "id": 62,
+        "parent": 54,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "afterSet",
+        "pos": [
+          -1,
+          0,
+          0
+        ],
+        "cell": {
+          "id": "comparator",
+          "states": {
+            "facing": "east",
+            "mode": "compare",
+            "powered": "true"
+          }
+        },
+        "before": {
+          "id": "comparator",
+          "states": {
+            "facing": "east",
+            "mode": "compare",
+            "powered": "false"
+          }
+        },
+        "flags": 2
+      },
+      {
+        "id": 63,
+        "parent": 62,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "PP",
+        "pos": [
+          -2,
+          0,
+          0
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "direction": "east"
+      },
+      {
+        "id": 64,
+        "parent": 62,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "PP",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "direction": "west"
+      },
+      {
+        "id": 65,
+        "parent": 62,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "PP",
+        "pos": [
+          -1,
+          0,
+          -1
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "direction": "south"
+      },
+      {
+        "id": 66,
+        "parent": 62,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "PP",
+        "pos": [
+          -1,
+          0,
+          1
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "direction": "north"
+      },
+      {
+        "id": 67,
+        "parent": 62,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "PP",
+        "pos": [
+          -1,
+          -1,
+          0
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "direction": "up"
+      },
+      {
+        "id": 68,
+        "parent": 62,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "PP",
+        "pos": [
+          -1,
+          1,
+          0
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "direction": "down"
+      },
+      {
+        "id": 69,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          0,
+          0
+        ],
+        "source": [
+          -1,
+          0,
+          0
+        ],
+        "block": "comparator"
+      },
+      {
+        "id": 70,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -3,
+          0,
+          0
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "east",
+        "block": "comparator"
+      },
+      {
+        "id": 71,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          -1,
+          0
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "up",
+        "block": "comparator"
+      },
+      {
+        "id": 72,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          1,
+          0
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "down",
+        "block": "comparator"
+      },
+      {
+        "id": 73,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          0,
+          -1
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "south",
+        "block": "comparator"
+      },
+      {
+        "id": 74,
+        "parent": 52,
+        "gt": 2,
+        "phase": "TT",
+        "kind": "NC",
+        "pos": [
+          -2,
+          0,
+          1
+        ],
+        "source": [
+          -2,
+          0,
+          0
+        ],
+        "direction": "north",
+        "block": "comparator"
+      },
+      {
+        "id": 75,
+        "parent": null,
+        "gt": 2,
+        "phase": "CT",
+        "kind": "阶段",
+        "name": "CT"
+      },
+      {
+        "id": 76,
+        "parent": null,
+        "gt": 2,
+        "phase": "BE",
+        "kind": "阶段",
+        "name": "BE"
+      },
+      {
+        "id": 77,
+        "parent": null,
+        "gt": 2,
+        "phase": "EU",
+        "kind": "阶段",
+        "name": "EU"
+      },
+      {
+        "id": 78,
+        "parent": null,
+        "gt": 2,
+        "phase": "TE",
+        "kind": "阶段",
+        "name": "TE"
+      },
+      {
+        "id": 79,
+        "parent": null,
+        "gt": 2,
+        "phase": "AT",
+        "kind": "阶段",
+        "name": "AT"
+      },
+      {
+        "id": 80,
+        "parent": null,
+        "gt": 2,
+        "phase": "AT",
+        "kind": "容器编辑",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "slot": 0,
+        "before": {
+          "id": "book",
+          "count": 1,
+          "max": 64
+        },
+        "after": {
+          "id": "written_book",
+          "count": 1,
+          "max": 16
+        }
+      },
+      {
+        "id": 81,
+        "parent": null,
+        "gt": 2,
+        "phase": "AT",
+        "kind": "容器状态同步",
+        "pos": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "id": 82,
+        "parent": 81,
+        "gt": 2,
+        "phase": "AT",
+        "kind": "set",
+        "pos": [
+          0,
+          0,
+          0
+        ],
+        "cell": {
+          "id": "chiseled_bookshelf",
+          "states": {
+            "facing": "north",
+            "slot_0_occupied": "true",
+            "slot_1_occupied": "false",
+            "slot_2_occupied": "false",
+            "slot_3_occupied": "false",
+            "slot_4_occupied": "false",
+            "slot_5_occupied": "true"
+          }
+        },
+        "flags": 3
+      }
+    ],
+    "serial": 82,
+    "order": 1,
+    "parent": 82,
+    "halted": false,
+    "steps": 2,
+    "revision": 82,
+    "components": {
+      "version": 1,
+      "containers": [
+        [
+          "0,0,0",
+          {
+            "type": "chiseled_bookshelf",
+            "slots": [
+              {
+                "id": "written_book",
+                "count": 1,
+                "max": 16
+              },
+              null,
+              null,
+              null,
+              null,
+              {
+                "id": "book",
+                "count": 1,
+                "max": 64
+              }
+            ],
+            "cooldown": -1,
+            "lastTick": -1,
+            "token": 0,
+            "lastInteracted": 0
+          }
+        ]
+      ],
+      "outputs": [
+        [
+          "-1,0,0",
+          6
+        ]
+      ],
+      "contacts": [],
+      "entityToken": 0
+    },
+    "analog": {
+      "version": 1,
+      "sources": [],
+      "enderSlots": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "devices": {
+      "version": 1,
+      "toggles": [],
+      "outputs": [],
+      "random": "25214904170"
+    },
+    "pistons": {
+      "version": 1,
+      "moving": []
+    }
+  },
+  "inventory": {
+    "items": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "cursor": null
+  }
+}

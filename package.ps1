@@ -27,9 +27,9 @@ param(
     [switch]$SkipRootLauncherCopy,
     [ValidatePattern('^[\p{L}\p{N}_-]+$')]
     [string]$PackageName = '投影预览',
-    [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?$')]
-    [string]$Version = '1.1.5',
-    [string]$ZipName = 'Litematic-Viewer-1.1.5-win-x64'
+    [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?(-?[A-Za-z][A-Za-z0-9.-]*)?$')]
+    [string]$Version = '1.2.0test-v1',
+    [string]$ZipName = 'Litematic-Viewer-1.2.0test-v1-win-x64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -144,6 +144,10 @@ New-Item -ItemType Directory -Path (Join-Path $stageDir 'logs') -Force | Out-Nul
 Copy-Item $launcherExe -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $ProjectRoot 'README.md') -Destination $stageDir
 Copy-Item -LiteralPath (Join-Path $ProjectRoot 'docs') -Destination $stageDir -Recurse
+# Keep the test scope visible beside the launcher as well as in docs.
+$scopeText = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'docs/二维微时序测试版说明.md'))
+$scopeText = $scopeText.Replace('](REDSTONE-', '](docs/REDSTONE-').Replace('](examples/', '](docs/examples/')
+[IO.File]::WriteAllText((Join-Path $stageDir '二维微时序测试版说明.md'), $scopeText, [Text.UTF8Encoding]::new($false))
 $evaluationDocs = Join-Path $ProjectRoot '评估与测评'
 if (Test-Path -LiteralPath $evaluationDocs) {
     Copy-Item -LiteralPath $evaluationDocs -Destination $stageDir -Recurse

@@ -265,7 +265,11 @@ def render(variant, view='side', offset=(0,0,0)):
     for element_index,element in enumerate(data.get('elements', [])):
         element_areas[element_index]={'north':0,'up':0,'east':0}
         a,b,c = element['from']; d,e,f = element['to']
-        vertices = {'north':[(a,e,c),(d,e,c),(d,b,c),(a,b,c)], 'south':[(d,e,f),(a,e,f),(a,b,f),(d,b,f)], 'west':[(a,e,f),(a,e,c),(a,b,c),(a,b,f)], 'east':[(d,e,c),(d,e,f),(d,b,f),(d,b,c)], 'up':[(a,e,c),(d,e,c),(d,e,f),(a,e,f)], 'down':[(a,b,f),(d,b,f),(d,b,c),(a,b,c)]}
+        # FaceInfo/CuboidFace UV corners are vanilla vertices 0,3,2,1:
+        # (minU,minV), (maxU,minV), (maxU,maxV), (minU,maxV).
+        # Vertical faces must start on their own UV-left edge, rather than
+        # screen-left; otherwise directional textures are mirrored.
+        vertices = {'north':[(d,e,c),(a,e,c),(a,b,c),(d,b,c)], 'south':[(a,e,f),(d,e,f),(d,b,f),(a,b,f)], 'west':[(a,e,c),(a,e,f),(a,b,f),(a,b,c)], 'east':[(d,e,f),(d,e,c),(d,b,c),(d,b,f)], 'up':[(a,e,c),(d,e,c),(d,e,f),(a,e,f)], 'down':[(a,b,f),(d,b,f),(d,b,c),(a,b,c)]}
         for direction,face in element.get('faces', {}).items():
             points = [transform(p,element.get('rotation')) for p in vertices[direction]]
             quads.append((points,face,element_index))
@@ -358,7 +362,6 @@ def generate_piston_parts():
     visuals=[]
     for state,variant in data['variants'].items():
         states=dict(pair.split('=') for pair in state.split(','))
-        if states['short']!='false':continue
         visuals.append({'when':states,'sprite':render(variant),'top':render(variant,'top'),
                         'overlap':{'sprite':render(variant,offset=directions[states['facing']]),'top':render(variant,'top',directions[states['facing']])}})
     atlas=Image.new('RGBA',(64*32,math.ceil(len(sprite_images)/64)*32))
@@ -374,8 +377,9 @@ if '--piston-parts' in sys.argv:
 catalog = []
 for path in sorted((ASSETS / 'blockstates').glob('*.json')):
     name = path.stem
-    item_alias = {'redstone_wire':'redstone','tripwire':'string'}.get(name,name)
-    if not (ASSETS / 'items' / (item_alias + '.json')).exists() and name not in ['water','lava','nether_portal']:
+    item_alias = {'redstone_wire':'redstone','tripwire':'string','redstone_wall_torch':'redstone_torch','water_cauldron':'cauldron','lava_cauldron':'cauldron','powder_snow_cauldron':'cauldron'}.get(name,name)
+    if name.endswith('candle_cake'): item_alias = name.removesuffix('_cake')
+    if not (ASSETS / 'items' / (item_alias + '.json')).exists() and name not in ['water','lava','nether_portal','fire']:
         continue
     if name in ['air','cave_air','void_air']:
         continue
@@ -441,7 +445,7 @@ for path in sorted((ASSETS / 'blockstates').glob('*.json')):
     cats = membership.get(item_alias, [])
     if not cats:
         cats = ['natural_blocks' if re.search(r'ore|leaves|sapling|flower|grass|mushroom|coral|vine|roots|bush', name) else 'building_blocks']
-    if name in ['water','lava','nether_portal']: cats = ['special']
+    if name in ['water','lava','nether_portal','fire']: cats = ['special']
     # Water can replace these non-solid vanilla blocks; waterlogged blocks keep their geometry.
     replaceable = bool(re.search(r'flower|sapling|torch|redstone_wire|rail|carpet|button|pressure_plate|short_grass|tall_grass|fern|dead_bush|tripwire|repeater|comparator|lever',name))
     properties={k:sorted(v,key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x)) for k,v in props.items()}
@@ -449,7 +453,9 @@ for path in sorted((ASSETS / 'blockstates').glob('*.json')):
     defaults={k:next((v for v in preferred if v in values),values[0]) for k,values in properties.items()}
     if 'shape' in properties and 'north_south' in properties['shape']: defaults['shape']='north_south'
     if 'enabled' in properties: defaults['enabled']='true'
-    catalog.append({'id':name,'name':lang.get('block.minecraft.'+name,name), 'categories':list(dict.fromkeys(cats)), 'properties':properties,'defaults':defaults,'facing':facing,'axis':'axis' in props and 'facing' not in props,'waterlogged':wet,'activation':activation,'replaceable':replaceable,'visuals':visuals,'multipart':multipart})
+    if name in ['redstone_torch','redstone_wall_torch']: defaults['lit']='true'
+    display_name = {'redstone_wall_torch':'墙上红石火把','water_cauldron':'装水的炼药锅','lava_cauldron':'装岩浆的炼药锅','powder_snow_cauldron':'装细雪的炼药锅'}.get(name,lang.get('block.minecraft.'+name,name))
+    catalog.append({'id':name,'name':display_name, 'categories':list(dict.fromkeys(cats)), 'properties':properties,'defaults':defaults,'facing':facing,'axis':'axis' in props and 'facing' not in props,'waterlogged':wet,'activation':activation,'replaceable':replaceable,'visuals':visuals,'multipart':multipart})
 
 # Fluid / portal sprites have no model geometry.
 for block in catalog:

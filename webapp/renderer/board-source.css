@@ -1,0 +1,8 @@
+.board-source-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 8px 0; }
+.board-source-controls[hidden] { display: none; }
+.board-source-controls label { display: flex; align-items: center; gap: 6px; }
+.board-source-controls input[type="number"] { width: 76px; }
+.board-source-controls input[type="checkbox"] { width: auto; }
+.board-source-dialog { max-width: min(640px, 90vw); }
+.board-inventory-slot img { width: 32px; height: 32px; image-rendering: pixelated; object-fit: contain; }
+.board-inventory-grid.is-small-container { grid-auto-columns: 42px; grid-template-columns: none !important; grid-auto-flow: column; justify-content: center; margin: 8px auto 20px; }

@@ -1,0 +1,14 @@
+'use strict';
+/* Small source-specific controls; shares the existing container/editor styles. */
+(function(root){
+  const direction={north:'北',south:'南',east:'东',west:'西',up:'上',down:'下'};
+  root.BoardSourceControls=function(host,context,pos){host.replaceChildren();const world=context.world(),fields=world.sourceFields(pos);if(!fields.length){host.hidden=true;return;}host.hidden=false;const data=world.sourceSettingsAt?.(pos)||world.sourceAt(pos),inputs=new Map();
+    for(const f of fields){const label=document.createElement('label');label.textContent=f.label+' ';let input;if(f.options){input=document.createElement('select');for(const value of f.options){const option=document.createElement('option');option.value=value;option.textContent=direction[value]||value;input.append(option);}input.value=data[f.key]||(f.key==='facing'?'north':f.options[0]);}else{input=document.createElement('input');input.type=f.type||'number';if(f.type==='checkbox')input.checked=!!data[f.key];else{input.min=f.min;input.max=f.max;input.step=String(f.step||1);input.value=data[f.key]??(f.type==='text'?'':f.min===1?1:0);}}input.dataset.sourceField=f.key;label.append(input);host.append(label);inputs.set(f.key,input);}
+    const apply=document.createElement('button'),error=document.createElement('span');apply.type='button';apply.textContent='应用';apply.dataset.sourceApply='true';error.setAttribute('role','status');apply.onclick=()=>{try{const values={};for(const f of fields){const input=inputs.get(f.key);values[f.key]=f.type==='checkbox'?input.checked:f.options||f.type==='text'?input.value:Number(input.value);}context.remember();world.setSourceData(pos,values);world.finish();context.changed();error.textContent='已应用';}catch(e){error.textContent=e.message;}};host.append(apply,error);
+  };
+  root.BoardSourcePanel=class{
+    constructor(context){this.context=context;const dialog=document.createElement('dialog');dialog.id='boardSourceDialog';dialog.className='board-container-dialog board-source-dialog';const title=document.createElement('div');title.className='dialog-title';this.title=document.createElement('h2');const close=document.createElement('button');close.textContent='关闭';title.append(this.title,close);this.controls=document.createElement('div');this.controls.className='board-source-controls';const note=document.createElement('p');note.textContent='设置外部输入后，按元件原版规则发送更新。';dialog.append(title,this.controls,note);document.body.append(dialog);this.dialog=dialog;close.onclick=()=>this.close();dialog.addEventListener('cancel',event=>{event.preventDefault();this.close();});}
+    open(pos){const s=this.context.world().get(pos);this.title.textContent=this.context.defs.get(s.id)?.name||s.id;BoardSourceControls(this.controls,this.context,pos);this.dialog.showModal();}
+    close(){this.dialog.close();this.context.closed();}
+  };
+})(typeof window!=='undefined'?window:globalThis);
