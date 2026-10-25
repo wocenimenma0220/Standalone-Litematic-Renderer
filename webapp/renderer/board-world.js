@@ -1,5 +1,5 @@
 'use strict';
-/* Pure simulation model, shared by the editor and regression checks. */
+/** 界面与回归共用的纯二维模型。 */
 (function(root) {
   const key=(x,y)=>`${x},${y}`, LIMIT=192;
   const piston=cell=>cell?.id==='piston'||cell?.id==='sticky_piston';
@@ -15,7 +15,7 @@
       const def=this.catalog.get(cell?.id);if(!def)return null;
       const states={...def.defaults};
       for(const [name,value] of Object.entries(cell.states||{}))if(def.properties?.[name]?.includes(String(value)))states[name]=String(value);
-      // Read previously saved boards without losing their chosen states.
+      // 兼容旧画布格式，保留用户选择的状态。
       if(!cell.states){if(def.facing.includes(cell.facing))states[def.axis?'axis':'facing']=cell.facing;if(def.waterlogged)states.waterlogged=String(!!cell.waterlogged);if(def.activation&&cell.active!==undefined)states[def.activation]=def.activation==='enabled'?String(!cell.active):def.activation==='sculk_sensor_phase'?(cell.active?'active':'inactive'):def.activation==='power'?(cell.active?'15':'0'):String(!!cell.active);}
       if(cell.id.endsWith('_slab')&&states.type==='double')states.waterlogged='false';
       return {id:cell.id,states,facing:states.facing||states.axis,waterlogged:states.waterlogged==='true',active:def.activation==='enabled'?states.enabled==='false':def.activation==='power'?Number(states.power)>0:def.activation==='sculk_sensor_phase'?states.sculk_sensor_phase==='active':states[def.activation]==='true'};
@@ -68,7 +68,7 @@
     }
     source(x,y) { const b=this.get(x,y);return b?.id==='water'||b?.waterlogged; }
     tick() {
-      // Synchronous updates: no update-order bias; only sources persist without supply.
+      // 水流同步更新，避免遍历顺序造成偏差；无补给时只保留水源。
       const candidates=new Set(this.water.keys());
       for(const [k,b] of this.cells)if(b.id==='water'||b.waterlogged)candidates.add(k);
       const directions=this.view==='top'?[[0,-1],[0,1],[-1,0],[1,0]]:[[0,1],[-1,0],[1,0]];
@@ -84,14 +84,14 @@
         let level=8;
         for(const [dx,dy] of (this.view==='top'?directions:[[-1,0],[1,0]])){
           const neighbor=at(x+dx,y+dy);
-          // Prefer falling; horizontal distance resets after a fall reaches a supporting surface.
+          // 优先下落，落到支撑面后重新计算横向传播距离。
           if(neighbor&&(this.view==='top'||!this.passable(x+dx,y+1)))level=Math.min(level,neighbor.level+1);
         }
         if(level<=7)next.set(k,{level,falling:false});
       }
-      // Water breaks washable components and waterlogs compatible blocks.
+      // 水流冲掉可冲刷元件，并使兼容方块进入含水状态。
       for(const [k] of next){const b=this.cells.get(k);if(!b||b.id==='water'||b.waterlogged)continue;const def=this.catalog.get(b.id);if(def?.replaceable)this.cells.delete(k);}
-      // Contact with lava follows source/flow distinction (lava is a static palette block).
+      // 接触熔岩时区分水源和流水，熔岩本身作为静态目录方块。
       for(const [k,b] of [...this.cells])if(b.id==='lava'){
         const [x,y]=k.split(',').map(Number);
         if([[0,-1],[0,1],[-1,0],[1,0]].some(([dx,dy])=>next.has(key(x+dx,y+dy))))this.cells.set(k,{id:'obsidian'});
@@ -103,7 +103,7 @@
       if(!Array.isArray(data)||data.length>150000)throw new Error('画布数据无效');
       const result=new Map();
       for(const entry of data){if(!Array.isArray(entry)||entry.length!==2)throw new Error('画布数据无效');const [k,b]=entry;if(!/^-?\d+,-?\d+$/.test(k)||!this.catalog.has(b?.id)||b.id==='piston_head')continue;const [x,y]=k.split(',').map(Number);if(!inside(x,y))continue;result.set(key(x,y),this.normalize(b));}
-      // Rebuild linked heads, including old saves that only contained extended bases.
+      // 恢复活塞联动头部，也修复只保存伸出底座的旧画布。
       for(const [k,cell] of [...result]){
         const head=this.pistonHead(cell),[dx,dy]=pistonOffset(cell,this.view);if(!head||!dx&&!dy)continue;
         const [x,y]=k.split(',').map(Number),hx=x+dx,hy=y+dy;

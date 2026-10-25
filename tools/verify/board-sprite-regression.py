@@ -1,4 +1,4 @@
-"""Check readable palette icons and faithful side/top state projections."""
+"""检查工具栏图标可读性，以及侧视、俯视状态预览是否忠于真实投影。"""
 import json
 from pathlib import Path
 from PIL import Image

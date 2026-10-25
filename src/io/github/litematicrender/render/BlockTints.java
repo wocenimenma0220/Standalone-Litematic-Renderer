@@ -2,41 +2,20 @@ package io.github.litematicrender.render;
 
 import io.github.litematicrender.world.BlockState;
 
-/**
- * Per-block and per-face tinting, ported from vanilla's {@code BlockColors.createDefault()} and
- * {@code BlockTintSources}.
- *
- * <p>Tint is selected by the model's {@code tintindex}, not by texture name. That distinction
- * matters: redstone dust's tint comes from its {@code power} property, so an unpowered wire is a
- * dark, almost black red while a powered one is bright — matching on the sprite name alone cannot
- * express that, and produced uniform bright red for every wire.
- */
+/** 按原版 BlockColors 和 BlockTintSources 计算方块染色；染色来源由 tintindex 决定，不能根据纹理名称猜测。 */
 public final class BlockTints {
-    /**
-     * Vanilla {@code BlockTintSources.constant(-10380959)} for spruce leaves: {@code 0xFF61A261}.
-     */
+    /** 原版云杉树叶固定颜色：0xFF61A261。 */
     public static final int SPRUCE = (-10380959) & 0xFFFFFF;
-    /**
-     * Vanilla {@code BlockTintSources.constant(-8345771)} for birch leaves: {@code 0xFF80A755}.
-     */
+    /** 原版白桦树叶固定颜色：0xFF80A755。 */
     public static final int BIRCH = (-8345771) & 0xFFFFFF;
-    /** Vanilla {@code BlockTintSources.constant(-2046180)} for attached stems. */
+    /** 原版已连接作物茎的固定颜色。 */
     public static final int ATTACHED_STEM = (-2046180) & 0xFFFFFF;
-    /** Vanilla {@code BlockColors.LILY_PAD_DEFAULT} = -9321636. */
+    /** 原版睡莲默认颜色。 */
     public static final int LILY_PAD_DEFAULT = (-9321636) & 0xFFFFFF;
-    /** Vanilla {@code BlockColors.LILY_PAD_IN_WORLD} = -14647248. */
+    /** 原版睡莲在世界中的颜色。 */
     public static final int LILY_PAD_IN_WORLD = (-14647248) & 0xFFFFFF;
 
-    /**
-     * Vanilla {@code RedstoneWireBlock.COLORS}: a 16-entry ramp from dark red (power 0) to bright
-     * red (power 15), computed as
-     * <pre>
-     *   power = i / 15
-     *   red   = power * 0.6 + (power &gt; 0 ? 0.4 : 0.3)
-     *   green = clamp(power^2 * 0.7 - 0.5, 0, 1)
-     *   blue  = clamp(power^2 * 0.6 - 0.7, 0, 1)
-     * </pre>
-     */
+    /** 红石粉的 16 级颜色梯度，按原版信号强度公式从暗红渐变为亮红。 */
     private static final int[] REDSTONE_COLORS = buildRedstoneColors();
 
     private static int[] buildRedstoneColors() {
@@ -53,25 +32,19 @@ public final class BlockTints {
 
     private BlockTints() {}
 
-    /**
-     * Colour for a face, or -1 when nothing tints it.
-     *
-     * @param layer the model's {@code tintindex}
-     * @param spriteId the resolved sprite, used to tell apart blocks that share one tint layer
-     *                 (all leaves use layer 0 but differ in colour)
-     */
+    /** 返回面片的染色值；没有注册染色来源时返回 -1。 */
     public static int colorFor(BlockState state, String spriteId, int layer) {
         if (layer < 0) return -1;
         String id = state.blockId;
 
-        // --- vanilla BlockTintSources.redstone(): depends on the POWER property -------------
+
         if (id.equals("minecraft:redstone_wire")) {
             return redstoneColor(state);
         }
 
-        // --- grass family: one flat colour, since a schematic has no biome ------------------
+
         if (id.equals("minecraft:grass_block")) {
-            // grassBlock(): the top face is tinted, the sides are not.
+            // 草方块只染顶面，侧面保持原色。
             return layer == 0 && spriteId != null && spriteId.contains("grass_block_top")
                 ? Colormaps.GRASS_DEFAULT : -1;
         }
@@ -81,17 +54,17 @@ public final class BlockTints {
             return Colormaps.GRASS_DEFAULT;
         }
         if (id.equals("minecraft:pink_petals") || id.equals("minecraft:wildflowers")) {
-            return layer == 1 ? Colormaps.GRASS_DEFAULT : -1;      // BLANK_LAYER, grass()
+            return layer == 1 ? Colormaps.GRASS_DEFAULT : -1;
         }
 
-        // --- leaves: per species, matching BlockColors.register() ---------------------------
+
         if (id.endsWith("_leaves")) {
             return switch (id) {
                 case "minecraft:spruce_leaves" -> SPRUCE;
                 case "minecraft:birch_leaves" -> BIRCH;
                 case "minecraft:oak_leaves", "minecraft:jungle_leaves", "minecraft:acacia_leaves",
                      "minecraft:dark_oak_leaves", "minecraft:mangrove_leaves" -> Colormaps.FOLIAGE_DEFAULT;
-                default -> -1;                                     // cherry, azalea, pale oak: untinted
+                default -> -1;                                     // 樱花、杜鹃和苍白橡树树叶不染色。
             };
         }
         if (id.equals("minecraft:vine") || id.equals("minecraft:leaf_litter")) {
@@ -101,13 +74,13 @@ public final class BlockTints {
             return Colormaps.GRASS_DEFAULT;
         }
 
-        // --- water ---------------------------------------------------------------------------
+
         if (id.equals("minecraft:water") || id.equals("minecraft:bubble_column")
             || id.equals("minecraft:water_cauldron")) {
             return Colormaps.WATER_DEFAULT;
         }
 
-        // --- stems: colour ramps with AGE ----------------------------------------------------
+
         if (id.equals("minecraft:melon_stem") || id.equals("minecraft:pumpkin_stem")) {
             return stemColor(state);
         }
@@ -118,12 +91,12 @@ public final class BlockTints {
             return layer == 1 ? LILY_PAD_IN_WORLD : LILY_PAD_DEFAULT;
         }
 
-        // Anything else with a tintindex (models that ask for tint but have no registered source)
-        // is left untinted, which is what vanilla's BLANK_LAYER does.
+        // 未注册染色来源的模型保留原色，与原版 BLANK_LAYER 一致。
+
         return -1;
     }
 
-    /** Vanilla {@code RedstoneWireBlock.getColorForPower(power)}. */
+    /** 原版红石粉按信号强度计算颜色。 */
     public static int redstoneColor(BlockState state) {
         String p = state.getValue("power");
         int power = 0;
@@ -137,7 +110,7 @@ public final class BlockTints {
         return REDSTONE_COLORS[power];
     }
 
-    /** Vanilla {@code BlockTintSources.stem()}: {@code ARGB.color(age*32, 255-age*8, age*4)}. */
+    /** 原版作物茎按生长阶段计算颜色。 */
     private static int stemColor(BlockState state) {
         String a = state.getValue("age");
         int age = 0;

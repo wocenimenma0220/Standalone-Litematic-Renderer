@@ -9,7 +9,7 @@ import io.github.litematicrender.world.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Real palette states, partial geometry across LODs, and independent lighting/cache controls. */
+
 public final class RenderingControlsRegression {
     static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
     static List<SceneMesh.MeshQuad> faces(SceneMesh m){return VisualFixRegression.quads(m);}

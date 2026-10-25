@@ -10,5 +10,6 @@ function visit(file){
 }
 visit(path.join(root,'main.js'));visit(path.join(root,'preload.js'));
 for(const match of fs.readFileSync(path.join(root,'renderer/index.html'),'utf8').matchAll(/<script src="([^"]+)"/g))assert.ok(fs.existsSync(path.join(root,'renderer',match[1])),'Missing renderer script '+match[1]);
+for(const file of require(path.join(root,'renderer/board-loader.js')).scripts)assert.ok(fs.existsSync(path.join(root,'renderer',file)),'Missing lazy renderer script '+file);
 assert.equal(require(path.join(root,'package.json')).version,require('../../webapp/package.json').version);
 console.log('PASS: portable package contains all '+seen.size+' local modules and every renderer script');

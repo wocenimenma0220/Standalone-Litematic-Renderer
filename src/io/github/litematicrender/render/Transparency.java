@@ -1,13 +1,6 @@
 package io.github.litematicrender.render;
 
-/**
- * Vanilla {@code com.mojang.blaze3d.platform.Transparency}: what kinds of alpha a texture region
- * contains, which is the sole input to {@code ChunkSectionLayer.byTransparency}.
- *
- * <p>Two independent flags rather than an enum, because a sheet can be both — vanilla models that
- * as {@link #TRANSPARENT_AND_TRANSLUCENT}, and the distinction survives into the layer decision,
- * where "has translucent" wins over "has transparent".
- */
+/** 透明分类分别记录全透明和半透明像素，两种标志独立，并非互斥枚举。 */
 public record Transparency(boolean hasTransparent, boolean hasTranslucent) {
     public static final Transparency NONE = new Transparency(false, false);
     public static final Transparency TRANSPARENT = new Transparency(true, false);

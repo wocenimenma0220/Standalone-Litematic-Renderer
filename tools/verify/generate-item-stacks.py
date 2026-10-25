@@ -1,4 +1,4 @@
-"""Generate the shipped stack limits from the local 26.3 item registrations, including collections."""
+"""从本地 26.3 物品注册数据生成随包堆叠上限，包含集合定义。"""
 from pathlib import Path
 import hashlib, json, re
 

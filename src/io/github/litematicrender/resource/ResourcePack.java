@@ -18,16 +18,11 @@ import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-/**
- * One resource pack: either a directory (pack.mcmeta at root, assets/ below)
- * or a zip file. Reads through {@link PackSource} abstraction so both work.
- *
- * Resource lookup path: assets/&lt;namespace&gt;/&lt;path&gt;   (PackType.CLIENT_RESOURCES)
- */
+/** 单个资源包支持目录和 ZIP，统一通过 PackSource 读取命名空间资源。 */
 public final class ResourcePack implements AutoCloseable {
-    public final String id;          // display id, e.g. "vanilla" or file name
+    public final String id;
     public final PackSource source;
-    public final boolean imported;   // false for the built-in vanilla pack
+    public final boolean imported;
     private final Set<String> namespaces = new HashSet<>();
     private final Map<String, byte[]> cache = new HashMap<>();
     private boolean closed;
@@ -47,7 +42,7 @@ public final class ResourcePack implements AutoCloseable {
         return new ResourcePack(id, new ZipSource(zipFile), true);
     }
 
-    /** The built-in vanilla pack shipped inside litematic-render/assets/vanilla. */
+
     public static ResourcePack vanilla(Path vanillaRoot) throws IOException {
         return new ResourcePack("vanilla", new DirSource(vanillaRoot), false);
     }
@@ -56,7 +51,7 @@ public final class ResourcePack implements AutoCloseable {
         this.namespaces.clear();
         List<String> entries = this.source.listEntries("assets/");
         for (String entry : entries) {
-            // assets/<ns>/...
+
             String rest = entry.substring("assets/".length());
             int slash = rest.indexOf('/');
             if (slash > 0) {
@@ -73,7 +68,7 @@ public final class ResourcePack implements AutoCloseable {
         return this.namespaces.contains(ns.toLowerCase(Locale.ROOT));
     }
 
-    /** Read a resource; returns null when absent in this pack. */
+
     public synchronized byte[] read(String namespace, String path) {
         if (this.closed) return null;
         String key = namespace + ":" + path;
@@ -82,7 +77,7 @@ public final class ResourcePack implements AutoCloseable {
         String full = "assets/" + namespace + "/" + path;
         byte[] data = this.source.read(full);
         if (data != null) {
-            // don't cache huge files
+            // 大文件不进入内存缓存。
             if (data.length <= 4 * 1024 * 1024) this.cache.put(key, data);
         }
         return data;
@@ -97,7 +92,7 @@ public final class ResourcePack implements AutoCloseable {
         return this.read(namespace, path) != null;
     }
 
-    /** List resource paths (relative to namespace) under assets/&lt;ns&gt;/&lt;dir&gt;, recursing. */
+
     public List<String> listResources(String namespace, String dir, String suffix) {
         List<String> result = new ArrayList<>();
         String prefix = "assets/" + namespace + "/" + (dir.isEmpty() ? "" : dir + "/");
@@ -109,7 +104,7 @@ public final class ResourcePack implements AutoCloseable {
         return result;
     }
 
-    /** List (namespace, relPath) pairs across all namespaces, under assets/ns/dir. */
+
     public List<String[]> listAllNamespaced(String dir, String suffix) {
         Map<String, List<String>> byNs = new LinkedHashMap<>();
         for (String entry : this.source.listEntries("assets/")) {
@@ -168,13 +163,13 @@ public final class ResourcePack implements AutoCloseable {
 
         @Override
         public List<String> listEntries(String prefix) {
-            // Resource packs are session snapshots. Reloading creates a fresh source after
-            // content fingerprint validation, including additions and same-metadata edits.
+            // 资源包是会话快照；重新加载时重新验证内容指纹，包括新增文件和同元数据修改。
+
             if(assetEntries!=null&&prefix.equals("assets/"))return assetEntries;
             List<String> result = new ArrayList<>();
             Path base = this.root.resolve(prefix);
             if (!Files.isDirectory(base)) return result;
-            // Files.find reuses traversal attributes; a second stat per file is costly on Windows.
+            // 复用目录遍历得到的文件属性，避免 Windows 下逐文件重复查询。
             try (var stream = Files.find(base, Integer.MAX_VALUE, (file, attributes) -> attributes.isRegularFile()
                     || attributes.isSymbolicLink() && Files.isRegularFile(file))) {
                 stream.forEach(file -> {

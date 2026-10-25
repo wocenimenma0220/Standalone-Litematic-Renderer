@@ -3,7 +3,7 @@ import java.nio.file.*;
 import java.util.*;
 import javax.imageio.ImageIO;
 
-/** Decode the real GIF: faint pixels must survive and alpha coverage must stay stable between frames. */
+/** 解码实际 GIF，检查低透明度像素和帧间覆盖率稳定性。 */
 public class GifTransparencyRegression {
     static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
     public static void main(String[] args)throws Exception{

@@ -5,7 +5,7 @@ import io.github.litematicrender.world.BlockState;
 import java.util.Map;
 import java.util.Set;
 
-/** Static counterpart of vanilla OldMinecartBehavior.getPos/getPosOffs and oldRender. */
+/** 按原版旧式矿车轨道采样逻辑计算静态位置和姿态。 */
 public final class MinecartPose {
     private MinecartPose() {}
     @FunctionalInterface public interface Blocks { BlockState at(int x,int y,int z); }

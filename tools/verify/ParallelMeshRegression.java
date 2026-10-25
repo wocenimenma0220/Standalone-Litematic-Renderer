@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
-/** Exact serial/parallel files plus bounded publication, worker failures and cancellation. */
+/** 对比串行与并行文件字节，覆盖有界发布、线程失败和取消。 */
 public final class ParallelMeshRegression {
     static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
     static boolean workersAlive(){return Thread.getAllStackTraces().keySet().stream().anyMatch(t->t.isAlive()&&t.getName().startsWith("schematic-section-"));}

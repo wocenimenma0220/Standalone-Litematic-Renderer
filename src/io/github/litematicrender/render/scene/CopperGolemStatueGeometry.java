@@ -4,7 +4,7 @@ import io.github.litematicrender.world.BlockState;
 import java.util.Map;
 import static io.github.litematicrender.render.scene.EntityGeometry.*;
 
-/** Minecraft 26.3 CopperGolemModel pose layers and CopperGolemStatueBlockRenderer transforms. */
+/** 铜傀儡雕像采用 Minecraft 26.3 模型姿态和渲染变换。 */
 final class CopperGolemStatueGeometry {
     private static final Map<String,Part> POSES=Map.of(
         "standing",standing(),"running",running(),"sitting",sitting(),"star",star());
@@ -22,7 +22,7 @@ final class CopperGolemStatueGeometry {
     }
 
     private static Part root() {
-        // The statue overrides the living model's root y=24 and rotates it by PI around Z.
+        // 雕像覆盖生物模型的根节点高度，并绕 Z 轴旋转半周。
         Part root=new Part();root.rz=Math.PI;return root;
     }
 

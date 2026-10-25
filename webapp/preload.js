@@ -1,6 +1,6 @@
 'use strict';
 
-/** Exposes a narrow, explicit API to the renderer; no Node objects cross the boundary. */
+/** 仅向界面暴露明确接口，不跨边界传递 Node 对象。 */
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 contextBridge.exposeInMainWorld('exportsApi',{
@@ -63,7 +63,7 @@ contextBridge.exposeInMainWorld('engine', {
     ipcRenderer.on('app:openFile', h);
     return () => ipcRenderer.removeListener('app:openFile', h);
   },
-  exportScene: (options = {}) => ipcRenderer.invoke('engine:exportScene', { force: options.force === true, realLighting: options.realLighting === true, streaming: options.streaming === true, lightingEnabled: options.lightingEnabled !== false }),
+  exportScene: (options = {}) => ipcRenderer.invoke('engine:exportScene', { force: options.force === true, realLighting: options.realLighting === true, streaming: options.streaming === true, lightingEnabled: options.lightingEnabled !== false, progressId: options.progressId }),
   releaseStreaming: () => ipcRenderer.invoke('engine:releaseStreaming'),
   beginPreview: (options)=>ipcRenderer.invoke('engine:beginPreview',options),
   previewStatus: (id,options={})=>ipcRenderer.invoke('engine:previewStatus',{id,...options}),

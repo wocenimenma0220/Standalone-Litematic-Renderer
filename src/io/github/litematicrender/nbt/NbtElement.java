@@ -6,10 +6,7 @@ import io.github.litematicrender.nbt.NbtScalars.*;
 import java.io.DataInput;
 import java.io.IOException;
 
-/**
- * Base of the tag value hierarchy. Ported from fi.dy.masa.malilib.util.data.tag.BaseData,
- * cleaned of Codec dependencies.
- */
+/** NBT 标签基类，源自 malilib BaseData，移除了 Codec 依赖。 */
 public abstract class NbtElement {
     public abstract int type();
 

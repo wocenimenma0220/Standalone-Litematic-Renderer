@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.List;
 import javax.imageio.ImageIO;
 
-/** Small representative faces/cubes from vanilla resources; independent of scene generation. */
+/** 材料图标使用原版代表面或立方体，不依赖场景生成。 */
 final class MaterialIcons {
     private final ResourceManager resources;
     private final Map<String,String> cache=new HashMap<>();
@@ -22,7 +22,7 @@ final class MaterialIcons {
         if(id==null)return null;id=id.contains(":")?id:"minecraft:"+id;
         if(id.contains("..")||!id.matches("[a-z0-9_.-]+:[a-z0-9_./-]+"))return null;
         String[] parts=id.split(":",2);
-        // The original art stays recognizable even when a schematic resource pack replaces models.
+
         return parts[0].equals("minecraft")?resources.vanillaPack().read(parts[0],directory+parts[1]+suffix):resources.getResource(parts[0],directory+parts[1]+suffix).orElse(null);
     }
     private Map<String,Object> json(String id,String directory) {

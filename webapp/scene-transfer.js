@@ -10,7 +10,7 @@ function crc32(bytes){let value=0xffffffff;for(const byte of bytes)value=CRC_TAB
 const INLINE_LIMIT = 32 * 1024 * 1024;
 const CHUNK_LIMIT = 8 * 1024 * 1024;
 
-/** One bounded, read-only capability for the current exported scene; never accepts a path from UI. */
+/** 当前场景的只读传输能力受大小和归属限制，不接受界面提供的任意文件路径。 */
 class SceneTransfer {
   constructor() { this.current = null;this.scenes=new Map();this.decoding=false;this.peakScratchBytes=0;this.generation=0; }
   async readPage(owner,id,page) {

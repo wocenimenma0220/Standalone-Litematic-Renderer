@@ -46,7 +46,7 @@ async function check(mesh,atlas,mode) {
   if(details.length<4)details.push({before:before.visibleQuads,after:after.visibleQuads});
  }
  if(mode===0&&minimumRatio>.9)throw new Error('Closed-room geometry was not excluded');
- // Orbit remains complete and old meshes remain readable in the other GPU regressions.
+
  const orbit={orbit:true,rotationDeg:45,slantDeg:30,zoom:1};view.draw({...orbit,occlusion:false});const a=pixels();view.draw(orbit);const b=pixels();
  if(a.some((v,i)=>v!==b[i])||gl.getError())throw new Error('Orbit/GL regression');
  const camera=cameras[0];view.draw(camera);const indexed=pixels();

@@ -5,11 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Minimal JSON parser (RFC 8259 subset sufficient for resource pack files:
- * models, blockstates, mcmeta, pack.mcmeta, lang).
- * Values map to: Map&lt;String,Object&gt;, List&lt;Object&gt;, String, Double, Boolean, null.
- */
+/** 资源文件所需的轻量 JSON 解析器，覆盖模型、方块状态、动画和语言定义。 */
 public final class MiniJson {
     private MiniJson() {}
 
@@ -180,7 +176,6 @@ public final class MiniJson {
         }
     }
 
-    // ---------- convenience accessors ----------
 
     public static String asString(Object o, String def) {
         return o instanceof String s ? s : def;

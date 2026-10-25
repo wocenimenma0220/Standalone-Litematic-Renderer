@@ -6,7 +6,7 @@ import io.github.litematicrender.schematic.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Investigation only: instrumented SceneBuilder lives outside the shipping classes. */
+
 public class WorldRenderProfile {
     public static void main(String[] args)throws Exception {
         Path root=Path.of(args[0]),file=Path.of(args[1]),output=Path.of(args[2]);Files.createDirectories(output);

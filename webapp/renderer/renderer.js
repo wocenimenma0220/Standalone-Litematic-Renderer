@@ -1,14 +1,6 @@
 'use strict';
 
-/**
- * Renderer UI.
- *
- * Talks to the Java engine only through the preload bridge. Camera changes stay on the GPU;
- * "导出 PNG" re-renders at the selected resolution and writes the file.
- *
- * The drag/zoom interaction follows quickcraft's preview: 0.015 radians per pixel for rotation
- * (with pitch clamped to ±85 degrees) and an exponential zoom of exp(scroll * 0.12).
- */
+/** 预览界面通过预加载桥调用 Java；相机变化留在 GPU，导出按所选分辨率重新渲染。拖动旋转参考 quickcraft，俯仰限制为 ±85 度，缩放采用指数变化。 */
 
 const $ = (id) => document.getElementById(id);
 
@@ -89,7 +81,7 @@ const state = {
   stopping: false, stopped: false, fileOpening: false, engineNeedsOpen: false,
   zoom: 1,
   packs: [],
-  /** WebGL viewer; once ready, camera changes never reach the JVM. */
+  /** GPU 预览就绪后，相机变化不再调用 JVM。 */
   view: null,
   viewReady: false,
   previewBackend: 'gpu', cpuPreview: false, cpuPreviewReady: false,
@@ -97,7 +89,7 @@ const state = {
   geometryBudgetMB:256,
   preloadMode:'streaming',
   viewDistance:6,
-  /** Fly (inside-the-build) mode state. */
+
   fly: false,
   flyPos: [0, 0, 0],
   flyYaw: 0,
@@ -114,14 +106,9 @@ const state = {
 };
 
 const PREVIEW_FULL_SIZE = 2048;
-/**
- * While dragging, the preview renders small so it keeps up with the cursor; the full-size render
- * follows on release. Back-face culling means this is only about fill rate now — the geometry cost
- * is paid once per camera change regardless of resolution.
- */
+/** 拖动时降低绘图分辨率，松开后恢复原尺寸，减少像素填充开销。 */
 const INTERACTIVE_MAX_EDGE = 512;
 
-// --------------------------------------------------------------------- log
 
 function log(message, cls) {
   const line = document.createElement('div');
@@ -178,7 +165,6 @@ function updateButtons() {
   updatePackButtons();
 }
 
-// ------------------------------------------------------------------ engine
 
 function renderParams(width, height) {
   const transparent = els.bgMode.value === 'checker' || els.transparent.checked;
@@ -204,18 +190,7 @@ function hexToInt(hex) {
   return parseInt(hex.replace('#', ''), 16) & 0xFFFFFF;
 }
 
-/**
- * Renders a preview at the viewport's exact pixel size.
- *
- * <p>Rendering at a fixed size and letting the browser scale it destroyed texture quality: a
- * 2048px image shown in an 880px viewport is resampled by the compositor, and bilinear
- * downsampling of 16x16 pixel art produces exactly the soft, muddy look this renderer exists to
- * avoid. Sizing the render to the display area means every texel maps to a screen pixel, so the
- * texture arrives at its native sharpness. Compression is a separate, later step — only the
- * exported file is compressed.
- *
- * @param interactive when true, renders at reduced resolution so the frame returns during a drag
- */
+/** 按视口实际设备像素尺寸渲染，避免浏览器二次缩放破坏纹理清晰度。 */
 let cpuPreviewRunning = false, cpuPreviewPending = null, lastCpuPreviewKey = null;
 function invalidateCpuPreview() {
   state.previewGeneration++;
@@ -267,13 +242,7 @@ async function pumpCpuPreviews() {
   cpuPreviewRunning=false;
 }
 
-/**
- * The viewport's size in device pixels, so a render maps one texel to one screen pixel.
- *
- * <p>The upper bound was removed on request so a large schematic can be debugged at whatever size
- * the viewport actually is. Only a floor remains, so a tiny window still produces something legible
- * rather than a handful of pixels.
- */
+/** 视口设备像素大小保证一对一采样，支持大投影原尺寸调试。 */
 function viewportPixelSize() {
   const dpr = window.devicePixelRatio || 1;
   const rect = els.viewport.getBoundingClientRect();
@@ -285,13 +254,8 @@ function viewportPixelSize() {
   };
 }
 
-// ------------------------------------------------------------- WebGL viewer
 
-/**
- * Prepares the WebGL viewer: the engine bakes geometry once, the browser uploads it, and every
- * later camera change is only a matrix update. That is the point of the exercise — the JVM is not
- * involved in a drag at all.
- */
+/** 引擎一次生成几何，浏览器复用已上传缓冲，后续相机操作只更新矩阵。 */
 let gpuBuildGeneration=0;
 function previewViewPriority(){
   const view=state.view,ready=state.viewReady&&view;
@@ -305,7 +269,18 @@ function updateProgressiveStatus(stats){
   if(!stats||state.scenePreparing||state.overview)return;
   setStatus(stats.running?'模型准备完成，正在载入当前视角…':stats.budgetLimited?'已显示当前预算内的细节，可调整视角或提高缓存上限。':'3D 视图已就绪。',stats.running||stats.budgetLimited?'':'ok');
 }
+function showPreviewStage(stage){
+  const labels={resources:'正在准备材质资源…',skins:'正在准备玩家皮肤…',indexing:'正在整理投影数据…',lighting:'正在计算光照…',geometry:'正在生成方块与实体模型…',atlas:'正在整理材质贴图…',optimizing:'正在整理透明材质与遮挡关系…',cached:'正在读取已生成模型…',textures:'正在准备材质图片…',encoding:'正在整理模型数据…',transfer:'正在导入模型数据…',decoding:'正在解码材质贴图…',upload:'正在将模型与材质上传至显卡…'};
+  if(!labels[stage])return;
+  els.busyText.textContent=labels[stage];setStatus(labels[stage],'');
+}
+function handlePreviewProgress(evt){
+  // 只接收当前加载任务的进度，取消或切换投影后忽略迟到事件。
+  if(evt.progressId!==String(gpuBuildGeneration)||!state.rendering||state.fileOpening||state.stopping||state.largeProjection||state.cpuPreview)return;
+  showPreviewStage(evt.stage);
+}
 async function buildView(options = {}) {
+  if(window.projectionEditor?.pending&&!options.editsCommitted)await window.projectionEditor.settle();
   if(window.projectionEditor?.dirty&&!options.editsCommitted)await window.projectionEditor.flush(false);
   if(state.stopping)return;
   if(state.engineNeedsOpen){await loadFile(state.file);return;}
@@ -334,7 +309,7 @@ async function buildView(options = {}) {
     return;
   }
   state.cpuPreview=false;state.cpuPreviewReady=false;updatePreviewBackend();
-  setBusy(true, state.lodPreview ? '生成分块模型…' : '准备 3D 视图…');
+  setBusy(true, state.largeProjection ? '生成分块模型…' : '生成完整模型…');
   let streamed = state.largeProjection;
   try {
     if(state.largeProjection) {
@@ -380,14 +355,14 @@ async function buildView(options = {}) {
             drawView();return;
           }
         }
-        if(shown&&!live){const labels={indexing:'整理区块',lighting:'计算全局光照',sprites:'准备特殊方块贴图'};setStatus('总览已显示，'+(labels[status.stage]||'正在准备光照与贴图')+'…','');}
+        if(shown&&!live){const labels={skins:'准备玩家皮肤',indexing:'整理区块',lighting:'计算全局光照',sprites:'准备特殊方块贴图'};setStatus('总览已显示，'+(labels[status.stage]||'正在准备光照与贴图')+'…','');}
         if(status.stage==='failed')throw Error(status.error||'完整场景准备失败');
         if(status.stage==='cancelled')return;
         await new Promise(resolve=>setTimeout(resolve,status.next<status.published?0:150));
       }
       return;
     }
-    const res = await window.engine.exportScene({force:options.force===true,realLighting:els.realLighting.checked,lightingEnabled:els.lightingEnabled.checked,streaming:false});
+    const res = await window.engine.exportScene({force:options.force===true,realLighting:els.realLighting.checked,lightingEnabled:els.lightingEnabled.checked,streaming:false,progressId:String(generation)});
     if(generation!==gpuBuildGeneration)return;
     streamed=!!res.meshTransfer;await applyGpuScene(res,{...options,generation});
   } catch (err) {
@@ -403,11 +378,11 @@ async function buildView(options = {}) {
       els.placeholder.classList.remove('hidden');
       return;
     }
-    // Surface this prominently: a silent fallback once hid a total WebGL failure behind the CPU
-    // path, which looked like "WebGL does not work" rather than a bug worth reading.
+    // GPU 失败必须显示明确错误，不能被 CPU 回退静默掩盖。
+
     log('3D 视图不可用，回退到 CPU 渲染：' + (err && err.stack ? err.stack : err), 'err');
     setStatus('3D 视图失败：' + (err && err.message ? err.message : err), 'err');
-    // Also mirror the failure into the title so it can be read without a screenshot.
+
     const stack = (err && err.stack ? err.stack : '').split('\n').slice(0, 4).join(' <- ');
     document.title = '投影预览 · 3D 预览不可用';
     state.cpuPreview=true;state.cpuPreviewReady=false;updatePreviewBackend();
@@ -420,20 +395,31 @@ async function buildView(options = {}) {
 
 async function applyGpuScene(res,options={}) {
   state.overview=res.overview===true;
-    // Decode the atlas without fetch: the page's CSP has no `data:` in connect-src, so fetching a
-    // data URL is blocked. Building the Blob locally avoids the network path entirely.
-    //
-    // premultiplyAlpha must be 'none'. The default lets the decoder multiply RGB by alpha, so a
-    // white stained-glass texel (255,255,255,163) arrives as (163,163,163,163); the shader then
-    // blends that already-darkened colour and glass reads grey in 3D while the CPU path, which
-    // reads the PNG's straight-alpha values, stays white. Straight alpha is what the blend
-    // function (SRC_ALPHA, ONE_MINUS_SRC_ALPHA) expects.
+    const isCurrent=()=>options.generation==null||options.generation===gpuBuildGeneration;
+    if(!isCurrent())throw Error('预览任务已更新');
+    if(!res.overview&&state.rendering)showPreviewStage('decoding');
+    // 直接将数据 URL 解码为 Blob，避免触发 CSP 禁止的 fetch 路径。
+
+    // 图集解码禁用预乘透明度，保持与 SRC_ALPHA 混合及 CPU PNG 原始像素一致，防止玻璃变灰。
+
+
     const atlasImage = await createImageBitmap(base64ToBlob(res.atlasDataUrl), {
       premultiplyAlpha: 'none',
       colorSpaceConversion: 'none',
     });
-    const isCurrent=()=>options.generation==null||options.generation===gpuBuildGeneration;
     if(!isCurrent()){atlasImage.close();throw Error('预览任务已更新');}
+    if(!res.overview&&state.rendering){
+      showPreviewStage('upload');
+      // 先绘制当前阶段，再执行同步的模型解析和显卡上传。
+      await new Promise(resolve=>{
+        let frame;
+        const finish=()=>{clearTimeout(timer);cancelAnimationFrame(frame);resolve();};
+        // 后台窗口可能暂停绘制，不能让模型加载一直等待动画帧。
+        const timer=setTimeout(finish,50);
+        frame=requestAnimationFrame(()=>{frame=requestAnimationFrame(finish);});
+      });
+      if(!isCurrent()){atlasImage.close();throw Error('预览任务已更新');}
+    }
 
     if (!state.view) state.view = new GpuView(els.gl);
     const streamed = !!res.meshTransfer;
@@ -458,7 +444,7 @@ async function applyGpuScene(res,options={}) {
         })
       : streamed
       ? await state.view.uploadMeshStream((offset,length)=>window.engine.readSceneChunk(res.meshTransfer.id,offset,length),res.meshTransfer.size,
-        (loaded,total)=>{if(isCurrent())els.busyText.textContent=`载入大投影… ${Math.floor(loaded/Math.max(1,total)*100)}%`;},isCurrent)
+        (loaded,total)=>{if(isCurrent()){const text=`正在导入模型至显卡… ${Math.floor(loaded/Math.max(1,total)*100)}%`;els.busyText.textContent=text;setStatus(text,'');}},isCurrent)
       : state.view.uploadMesh(res.meshArrayBuffer);
     if(!isCurrent()){atlasImage.close();throw Error('预览任务已更新');}
     state.view.setFrameBounds(res.min,res.max);
@@ -481,7 +467,7 @@ async function applyGpuScene(res,options={}) {
     els.placeholder.classList.add('hidden');
     if (!options.preserveCamera) resetFlyToCenter();
     drawView();
-    if(!res.overview)updateProgressiveStatus(state.view.stream?.stats());
+    if(!res.overview){if(state.view.stream)updateProgressiveStatus(state.view.stream.stats());else setStatus('3D 视图已就绪。','ok');}
     if(!res.overview&&state.preloadMode!=='streaming')startPreload();else updatePreloadInfo();
     const mib = (res.meshBytes / 1048576).toFixed(1);
     const v = state.view;
@@ -490,10 +476,10 @@ async function applyGpuScene(res,options={}) {
     reportFraming();
     log(`${res.overview?'简化总览已生成':'模型数据已载入'}：${stats.quads.toLocaleString()} 面，${mib} MB，准备 ${res.exportMillis} ms`, 'ok');
     if(res.diskCacheHit)log('已复用磁盘场景缓存，跳过模型重建。','ok');if(res.cacheWarning)log(res.cacheWarning);if(!res.overview)refreshSceneCacheInfo().catch(()=>{});
-    window.engine.previewDiagnostic(`preview ready: ${stats.quads} faces; chunked=${streamed}`).catch(()=>{});
+    window.engine.previewDiagnostic(`preview ready: ${stats.quads} faces; sectioned=${!!state.view.stream}; chunkedTransfer=${streamed}`).catch(()=>{});
 }
 
-/** Turns a `data:image/png;base64,...` URL into a Blob, without going through fetch. */
+
 function base64ToBlob(dataUrl) {
   const comma = dataUrl.indexOf(',');
   const meta = dataUrl.slice(0, comma);
@@ -504,18 +490,13 @@ function base64ToBlob(dataUrl) {
   return new Blob([bytes], { type: mime ? mime[1] : 'image/png' });
 }
 
-/**
- * Mirrors the framing numbers into the window title.
- *
- * <p>Screenshots proved unreliable for reading these — the header truncates and the interesting
- * half is off screen — so the title carries them where a test harness can read them directly.
- */
+
 function reportFraming() {
   const v = state.view;
   if (!v) return;
   const m = v.lastM;
   if (!m) return;
-  // Push the model centre and one corner through the matrix the GPU actually received.
+
   const c = v.center;
   const proj = (X, Y, Z) => {
     const x = m[0] * X + m[4] * Y + m[8] * Z + m[12];
@@ -534,27 +515,17 @@ function reportFraming() {
     + ` | centre=(${pc[0].toFixed(2)},${pc[1].toFixed(2)})`;
   document.title = state.info ? `${state.info.name} · 投影预览` : '投影预览';
 }
-/**
- * The viewer backdrop, from the 背景 selector.
- *
- * <p>A bright backdrop exists because translucent blocks — glass and water above all — composite
- * against whatever is behind them. Their textures are authored to be seen against the in-game sky,
- * which is bright; over the dark checkerboard a 46%-alpha white reads as grey, which is correct
- * compositing but useless for judging whether the texture is right. The checkerboard stays an
- * option because it is still the honest way to see which pixels are transparent.
- *
- * @returns an [r,g,b,a] clear colour, or null for transparent (the CSS checkerboard shows through)
- */
+/** 按背景选择返回 RGBA 清屏颜色，透明时返回空值。明亮背景便于检查玻璃和水的颜色，棋盘格用于辨认透明像素。 */
 function backdropColor() {
   switch (els.bgMode.value) {
-    case 'sky':  return [0.55, 0.70, 1.00, 1];   // the in-game sky at noon
+    case 'sky':  return [0.55, 0.70, 1.00, 1];
     case 'white': return [1, 1, 1, 1];
     case 'dark':  return [0.16, 0.18, 0.21, 1];
     case 'color': {
       const color = hexToInt(els.bg.value);
       return [(color >>> 16 & 255)/255,(color >>> 8 & 255)/255,(color & 255)/255,1];
     }
-    default:      return null;                    // transparent
+    default:      return null;
   }
 }
 
@@ -565,7 +536,7 @@ let lastDrawnView = null;
 const INTERACTION_EDGE = 768;
 const REFINE_DELAY = 160;
 
-/** Merge slider/wheel input into one draw per display frame. */
+/** 将滑杆和滚轮输入合并为每个显示帧一次绘制。 */
 function scheduleView() {
   if (viewFrame) return;
   viewFrame = requestAnimationFrame(() => {
@@ -574,18 +545,18 @@ function scheduleView() {
   });
 }
 
-/** Completed geometry invalidates the image, without restarting interaction quality changes. */
+/** 几何完成只使画面失效，不重新启动交互质量调整。 */
 let streamViewTimer=0,lastStreamDraw=-Infinity;
 function scheduleStreamView() {
   if(viewFrame||streamViewTimer)return;
-  // Uploads can complete much faster than a large overview can be drawn. Batch automatic
-  // refreshes; pointer, wheel and fly camera changes continue to draw immediately.
+  // 自动上传刷新按批次合并，指针、滚轮和漫游相机仍即时绘制。
+
   const interval=state.scenePreparing?250:100;
   const delay=state.view?.stream?.running?Math.max(0,interval-(performance.now()-lastStreamDraw)):0;
   streamViewTimer=setTimeout(()=>{streamViewTimer=0;if(viewFrame)return;viewFrame=requestAnimationFrame(()=>{viewFrame=0;lastStreamDraw=performance.now();drawView(dragging||state.fly&&state.flyLookActive);});},delay);
 }
 
-/** Reuse the displayed frame while idle; restore native resolution after motion ends. */
+/** 空闲时复用已显示帧，运动结束后恢复原生分辨率。 */
 function drawView(interactive = false) {
   if(state.stopping||state.stopped||state.fileOpening)return;
   updateCoordinates();
@@ -624,14 +595,7 @@ function drawView(interactive = false) {
   state.flyDirty=false;
 }
 
-/**
- * Orbit camera: the whole build stays framed and the two sliders drive the angles.
- *
- * <p>This carries no eye position on purpose. quickcraft's preview builds its model-view as
- * {@code translate(centre) * rotate * scale * translate(-centre)} under a fixed orthographic box,
- * so the camera direction lives in the rotation and the framing lives in the scale — deriving an
- * eye point as well would apply the fit twice.
- */
+/** 环绕模式使用正交相机，保持完整模型取景。 */
 function orbitCamera() {
   return {
     orbit: true,
@@ -641,11 +605,7 @@ function orbitCamera() {
   };
 }
 
-/**
- * Fly camera for inspecting the interior: a perspective view from inside the build, driven by WASD
- * plus the mouse. Perspective is what makes an interior legible — once you are among the blocks an
- * orthographic projection carries no depth cue at all.
- */
+/** 漫游使用建筑内部的透视相机，按键移动与鼠标转向分开处理。 */
 function flyCamera() {
   const yaw = state.flyYaw, pitch = state.flyPitch;
   const dir = [
@@ -664,7 +624,7 @@ function flyCamera() {
   };
 }
 
-/** Start at the schematic centre, independent of bounds size or view distance. */
+
 function resetFlyToCenter() {
   if(!state.view)return;
   state.flyPos=Array.from(state.view.center);
@@ -677,7 +637,7 @@ function updateCoordinates() {
   if(visible)els.coordinates.textContent=state.flyPos.map((v,i)=>['X','Y','Z'][i]+': '+v.toFixed(2)).join('  ');
 }
 
-/** Moves the fly camera from the held keys; runs only while that mode is active. */
+/** 只在漫游活动时按帧处理持续按下的移动键。 */
 function flyTick(time) {
   if (!state.fly || !state.viewReady) {
     state.animHandle = 0;
@@ -706,7 +666,6 @@ function flyTick(time) {
   state.animHandle = requestAnimationFrame(flyTick);
 }
 
-// ------------------------------------------------------------------- events
 
 function syncAngleLabels() {
   els.rotationVal.textContent = Math.round(els.rotation.value) + '°';
@@ -714,7 +673,7 @@ function syncAngleLabels() {
   els.zoomVal.textContent = state.zoom.toFixed(2) + '×';
 }
 
-// A slider never floods the engine: wait for it to settle, then render at full size.
+
 let sliderTimer = null;
 function onSliderCommit() {
   clearTimeout(sliderTimer);
@@ -732,13 +691,12 @@ els.zoom.addEventListener('input', () => {
   applyZoomToPreview();
 });
 
-/** Zoom is applied to the displayed image, so it stays instant and needs no re-render. */
+
 function applyZoomToPreview() {
   els.preview.style.transform = '';
   scheduleView();
 }
 
-// --- drag to rotate, wheel to zoom (quickcraft's coefficients) ---------------
 
 const DRAG_RADIANS_PER_PIXEL = 0.015;
 const MOUSE_LOOK_RADIANS_PER_PIXEL = 0.0025;
@@ -751,7 +709,7 @@ let flyPress=null,hoverPoint=null;
 els.viewport.addEventListener('pointerdown', (e) => {
   if(e.target.closest('.block-inspector'))return;
   if(state.fly)return;
-  // Right button (2) and left button (0) both drag, per the request.
+
   if (e.button !== 0 && e.button !== 2) return;
   dragging = true;
   dragX = e.clientX;
@@ -763,7 +721,7 @@ els.viewport.addEventListener('pointerdown', (e) => {
 els.viewport.addEventListener('mousedown',e=>{
   if(state.fly&&mouseShortcut('inspect',e)&&!e.target.closest('.block-inspector'))flyPress={distance:0,x:e.clientX,y:e.clientY,resume:!state.flyLookActive};
 });
-// Pointer Lock guarantees mousemove events, including platforms that suppress pointermove.
+// 鼠标锁定使用 mousemove，兼容不发送 pointermove 的平台。
 els.viewport.addEventListener('mousemove', (e) => {
   if(state.fly){
     const locked=document.pointerLockElement===els.viewport;
@@ -771,9 +729,9 @@ els.viewport.addEventListener('mousemove', (e) => {
     let dx=0,dy=0;
     if(!locked)return;
     dx=e.movementX;dy=e.movementY;
-    // Reacquiring Pointer Lock can warp the OS cursor back to its anchor. That first
-    // nonzero delta is a new input baseline, not a turn; zero-delta focus events
-    // must not consume it. Resume normal relative input on the very next event.
+    // 重新锁定后的第一个非零鼠标增量仅作为新基准，不用于转向；零增量事件不能消耗该基准。
+
+
     if(state.flyDiscardLockDelta){if(dx||dy)state.flyDiscardLockDelta=false;return;}
     if(flyPress)flyPress.distance+=Math.hypot(dx,dy);
     state.flyYaw-=dx*MOUSE_LOOK_RADIANS_PER_PIXEL;
@@ -790,7 +748,7 @@ els.viewport.addEventListener('pointermove', (e) => {
   dragX = e.clientX;
   dragY = e.clientY;
 
-  // Rotation is in degrees on the slider; convert quickcraft's radians-per-pixel.
+
   const degPerPixel = DRAG_RADIANS_PER_PIXEL * (180 / Math.PI);
   let rotation = Number(els.rotation.value) + dx * degPerPixel;
   let slant = Number(els.slant.value) + dy * degPerPixel;
@@ -802,8 +760,8 @@ els.viewport.addEventListener('pointermove', (e) => {
   els.slant.value = String(Math.round(slant));
   syncAngleLabels();
 
-  // Coalesce to one request per animation frame. Firing per pointermove event would queue far
-  // more renders than the engine can retire, and the display only refreshes this often anyway.
+  // 指针移动只合并为每帧一次绘制请求，避免排队超过引擎处理能力。
+
   if (!dragPending) {
     dragPending = true;
     requestAnimationFrame(() => {
@@ -845,7 +803,7 @@ els.viewport.addEventListener(
   (e) => {
     if(e.target.closest('.block-inspector'))return;
     e.preventDefault();
-    // quickcraft: scale *= exp(amount * 0.12). Wheel deltas are large, so normalise by 100.
+
     state.zoom *= Math.exp(-e.deltaY / 100 * 0.12);
     state.zoom = Math.max(0.05, Math.min(20, state.zoom));
     els.zoom.value = String(state.zoom);
@@ -882,10 +840,10 @@ els.bg.addEventListener('change', () => {
   els.bgMode.value = 'color';
   els.bgMode.dispatchEvent(new Event('change'));
 });
-/** Paints the viewport's CSS backdrop to match the selected mode. */
+
 function applyBackdrop(resetExport = false) {
   const mode = els.bgMode.value;
-  // The checkerboard visualizes empty pixels; it is never part of an export.
+  // 棋盘格仅表示透明背景，不进入导出图片。
   if (resetExport || mode === 'checker') els.transparent.checked = mode === 'checker';
   els.transparent.disabled = mode === 'checker';
   els.bg.disabled = els.transparent.checked;
@@ -904,7 +862,7 @@ els.bgMode.addEventListener('change', async () => {
   catch (error) { log('背景设置失败：' + error.message, 'err'); }
 });
 
-/** The CSS colour matching each backdrop option, so the DOM and the framebuffer agree. */
+
 function cssColor(mode) {
   switch (mode) {
     case 'sky':   return '#8cb3ff';
@@ -1000,13 +958,8 @@ window.__uiReady = (async () => {
   } catch (error) { log('界面设置加载失败：' + error.message, 'err'); }
 })();
 
-// --- WASD fly mode ----------------------------------------------------------
 
-/**
- * Fly mode swaps the orbit camera for a perspective one inside the build. Movement is driven by a
- * requestAnimationFrame loop rather than by key events, so a held key moves continuously instead of
- * once per repeat, and the frame rate follows the display.
- */
+/** 漫游按帧推进而非按键重复事件，保证持续移动平滑且不依赖系统按键重复速度。 */
 function updateFlyMouseHint() {
   els.flyMouseHint.classList.toggle('hidden',!state.fly);
   els.flyMouseHint.textContent=state.flyLockPending?'正在锁定鼠标…':state.flyLookActive?`鼠标已锁定；${shortcutHint('close')} 释放鼠标并暂停视角。`:`鼠标已释放，视角暂停。点击预览区重新锁定；${shortcutHint('fly')} 退出漫游。`;
@@ -1020,8 +973,8 @@ function pauseFlyLook(release=true) {
   updateFlyMouseHint();
 }
 function activateFlyLook() {
-  // Both pointerlockchange and the request promise can report the same acquisition.
-  // Only the transition to active arms the baseline reset.
+  // 指针锁定事件和请求回调可能重复报告同次获取，只在进入活动状态时重置基准。
+
   if(!state.flyLookActive)state.flyDiscardLockDelta=true;
   state.flyLookActive=true;state.flyLockPending=false;hoverPoint=null;
   els.viewport.focus({preventScroll:true});updateFlyMouseHint();
@@ -1088,8 +1041,8 @@ function setFly(on) {
 
 els.flyBtn.addEventListener('click', () => setFly(!state.fly));
 
-// While the viewport owns input, keep Tab / Space / Enter / Alt from focusing or
-// activating page controls. This does not stop action handlers or form typing.
+// 视口拥有输入时阻止 Tab、空格、回车和 Alt 激活页面控件，表单输入保留正常行为。
+
 function preventPreviewKeyDefault(event){
   if(shortcutInputTarget(event)||document.querySelector('dialog[open]'))return;
   if(state.fly&&(state.flyLookActive||state.flyLockPending)||state.selection?.enabled&&isShortcut('nudge',event))event.preventDefault();
@@ -1112,26 +1065,21 @@ window.addEventListener('keydown', (e) => {
   if (!state.fly||!state.flyLookActive) return;
   if (['forward','backward','left','right','up','down','boost'].some(action=>isShortcut(action,e))) {
     state.keys.add(normalizedKey(e.code));
-    e.preventDefault();          // Space would otherwise scroll the panel
+    e.preventDefault();
     if (!state.animHandle) state.animHandle = requestAnimationFrame(flyTick);
   }
 });
 
 window.addEventListener('keyup', (e) => state.keys.delete(normalizedKey(e.code)));
-// A window that loses focus never delivers the keyup, which would leave the camera drifting.
+// 窗口失焦后可能收不到 keyup，必须清空按键状态，避免相机持续漂移。
 window.addEventListener('blur', () => {state.keys.clear();if(state.fly)pauseFlyLook();});
 
-// --- viewport resize --------------------------------------------------------
 
-/**
- * The canvas is sized from its CSS box on every frame, so it follows the window automatically. The
- * observer only exists to repaint immediately on resize rather than waiting for the next input.
- */
+/** 画布每帧按 CSS 布局调整大小，ResizeObserver 负责缩放后立即触发绘制。 */
 if (typeof ResizeObserver !== 'undefined') {
   new ResizeObserver(() => drawView()).observe(els.viewport);
 }
 
-// ------------------------------------------------------------ File menu
 
 function toggleFileMenu(force) {
   const show = force === undefined ? els.menuFileDrop.classList.contains('hidden') : force;
@@ -1192,6 +1140,7 @@ function discardPreview() {
   els.streamInfo.textContent='';els.stats.textContent='—';
 }
 function stopRendering() {
+  if(window.projectionEditor?.pending)return window.projectionEditor.settle().then(()=>stopRendering());
   if(window.projectionEditor?.dirty)return window.projectionEditor.flush(false).then(()=>stopRendering());
   if(stopRenderPromise)return stopRenderPromise;
   const stopping=++fileOpenGeneration;
@@ -1199,7 +1148,7 @@ function stopRendering() {
   discardPreview();
   els.placeholder.textContent='渲染已停止，点击「重新渲染」继续';
   setBusy(true,'正在强制停止渲染…');
-  // Startup resources have no schematic yet; cancelling a pending open need not kill initialization.
+  // 启动资源初始化时尚未打开投影，取消排队打开无需中断资源初始化。
   stopRenderPromise=(async()=>{
     if(state.resourcesLoaded)await window.engine.forceStop();
     log('已强制停止当前预览。');
@@ -1252,6 +1201,7 @@ window.addEventListener('drop',event=>{
 });
 
 async function loadFile(file) {
+  await window.projectionEditor?.settle();
   if(window.projectionEditor?.dirty)await window.projectionEditor.flush(false);
   const recovery=hasActiveRender()||state.stopping?stopRendering():Promise.resolve();
   const opening=++fileOpenGeneration;
@@ -1262,7 +1212,7 @@ async function loadFile(file) {
   setStatus('正在打开投影…','');
   els.open.disabled = true;
   setBusy(true, '读取投影…');
-  // Frame each new build from a known state; a leftover zoom would open the file mid-detail.
+  // 新投影从已知缩放开始取景，避免沿用旧视角而直接进入局部细节。
   state.zoom = 1;
   els.zoom.value = '1';
   syncAngleLabels();
@@ -1399,8 +1349,13 @@ function resolveProjectionMode(){
   $('projectionModeInfo').textContent=state.projectionMode==='auto'?`自动选择：${state.largeProjection?'分块加载，先显示总览':'完整加载'}。可手动指定加载方式。`:state.largeProjection?'先显示总览，再逐块补充完整细节。':'一次载入完整模型，适合较小投影。';
 }
 $('projectionMode').addEventListener('change',async()=>{
-  const previous=state.projectionMode;state.projectionMode=$('projectionMode').value;
-  try{await window.appUi.setProjectionMode(state.projectionMode);if(state.file)await buildView({preserveCamera:true});else{resolveProjectionMode();updateButtons();}}
+  const previous=state.projectionMode,wasLarge=state.largeProjection;state.projectionMode=$('projectionMode').value;
+  try{
+    await window.appUi.setProjectionMode(state.projectionMode);resolveProjectionMode();
+    // 自动选择与手动指定得到相同加载方式时，复用已显示的模型。
+    if(state.file&&(wasLarge!==state.largeProjection||!state.viewReady))await buildView({preserveCamera:true});
+    else{updateButtons();updatePreloadInfo();}
+  }
   catch(error){state.projectionMode=previous;$('projectionMode').value=previous;resolveProjectionMode();log(error.message,'err');}
 });
 els.showCoordinates.addEventListener('change',async()=>{
@@ -1449,6 +1404,10 @@ async function saveGeometryBudget() {
   } catch(error) {log('更新几何缓存失败：'+error.message,'err');}
 }
 function updatePreloadInfo(stats=state.view?.stream?.stats()) {
+  if(state.previewBackend==='cpu'||!state.largeProjection){
+    els.preloadInfo.textContent=state.previewBackend==='cpu'?'预渲染用于 GPU 分块预览。':'完整加载无需分块预渲染。';
+    els.preload.textContent='开始预渲染';return;
+  }
   const job=stats?.preload;
   const labels={running:'后台预渲染',complete:'预渲染就绪',paused:'预渲染已暂停',limited:'缓存上限已到，可提高上限后继续',error:'预渲染中断，请查看日志后重试'};
   els.preloadInfo.textContent=job?`${labels[job.status]||'预渲染'} · ${job.prepared} / ${job.total} 区块`:state.scenePreparing?'完整区块正在生成，已生成部分会随视角载入。':'随视角按需加载，缓存中的细节可重复使用。';
@@ -1555,7 +1514,6 @@ function escapeHtml(s) {
   );
 }
 
-// -------------------------------------------------------- resource packs
 
 function applyResourceList(res) {
   state.resourcesLoaded=true;
@@ -1678,16 +1636,16 @@ function renderPackList() {
   updatePackButtons();
 }
 
-// ------------------------------------------------------- wake-up
 
 window.engine.onEvent((evt) => {
+  if(evt.event==='previewProgress'){handlePreviewProgress(evt);return;}
   if (evt.event === 'stderr' && evt.message && evt.message.trim()) {
     const text = evt.message.trim();
     if (/unresolved|error|exception|failed/i.test(text)) log(text, 'err');
   }
 });
 
-// A schematic passed on the command line opens once the engine is up.
+
 window.engine.onOpenFile((file) => {
   log(`命令行指定投影：${file}`);
   pendingOpen = file;
@@ -1727,8 +1685,11 @@ window.__resourcesReady=new Promise(resolve=>{finishResourceInitialization=resol
     log(`Java 运行时：${st.java}（${st.javaSource}）`);
     const t0 = performance.now();
     state.packs = await window.packs.list();
+    setStatus('正在加载材质包…','');
+    if(state.fileOpening)els.busyText.textContent='正在加载材质包…';
     const res = await window.engine.loadResources(null);
     applyResourceList(res);
+    if(!state.file&&!state.fileOpening)setStatus('材质包已就绪，请打开投影。','ok');
     finishResourceInitialization(true);
     if (res.builtinPacks && res.builtinPacks.length) {
       log(`内置材质包：${res.builtinPacks.join('，')}`, 'ok');
@@ -1764,7 +1725,7 @@ $('clearCacheOnExit').addEventListener('change',async()=>{
 });
 window.__uiReady?.then(()=>refreshSceneCacheInfo().catch(()=>{}));
 
-// Material lists use the parsed schematic and never request scene geometry.
+// 材料清单只使用解析后的投影，不请求场景几何。
 let materialReport=null,materialWaterAsIce=false,materialSourceFile=null;
 function drawMaterials() {
   const query=$('materialSearch').value.trim().toLowerCase();

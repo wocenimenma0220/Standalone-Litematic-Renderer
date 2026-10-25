@@ -6,15 +6,9 @@ import io.github.litematicrender.nbt.NbtList;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Decodes the parts of block-entity NBT that a static render can actually show.
- *
- * <p>Vanilla draws these with a {@code BlockEntityRenderer} we do not have, so the values are
- * read straight out of the schematic's {@code TileEntities} and turned into something the scene
- * builder can place.
- */
+/** 读取静态渲染需要的方块实体 NBT，补充原版实体渲染器负责的外观数据。 */
 public final class BlockEntityData {
-    /** A sign: up to four lines per side, plus the dye colour. */
+
     public record Sign(List<String> frontLines, List<String> backLines, int frontColor, int backColor,
                        boolean glowingFront, boolean glowingBack) {
         public boolean hasText() {
@@ -45,12 +39,7 @@ public final class BlockEntityData {
         return result;
     }
 
-    /**
-     * Reads a sign block entity.
-     *
-     * <p>Two layouts exist: 1.20+ uses {@code front_text}/{@code back_text} compounds with a
-     * {@code messages} list of JSON strings; older files store {@code Text1..Text4} on the root.
-     */
+    /** 兼容旧版 Text1～Text4 和新版 front_text/back_text 的 messages 布局。 */
     public static Sign readSign(NbtCompound te) {
         List<String> front = new ArrayList<>();
         List<String> back = new ArrayList<>();
@@ -72,7 +61,7 @@ public final class BlockEntityData {
                 glowBack = backTag.getBooleanOrDefault("has_glowing_text", false);
             }
         } else {
-            // Pre-1.20 layout: Text1..Text4 on the block entity itself.
+
             for (int i = 1; i <= 4; i++) {
                 String s = te.getStringOrDefault("Text" + i, "");
                 front.add(plainText(s));
@@ -91,14 +80,14 @@ public final class BlockEntityData {
         }
     }
 
-    /** Read visible component text only; preserve Unicode escapes, literal strings and extra arrays. */
+    /** 只提取可见文本，保留 Unicode 转义、字符串和 extra 数组。 */
     public static String plainText(String raw) {
         if (raw == null || raw.isEmpty()) return "";
         try { return componentText(io.github.litematicrender.util.MiniJson.parse(raw)); }
         catch (RuntimeException e) { return raw; }
     }
 
-    /** Newer game versions may store components directly as NBT instead of JSON strings. */
+    /** 新版本文本组件也可能直接使用 NBT，而非 JSON 字符串。 */
     public static String nbtText(io.github.litematicrender.nbt.NbtElement value) {
         if (value instanceof io.github.litematicrender.nbt.NbtScalars.NbtString text) return plainText(text.value);
         if (value instanceof NbtCompound compound) {
@@ -129,7 +118,7 @@ public final class BlockEntityData {
         return "";
     }
 
-    /** Vanilla dye colours, used for the text colour of a sign. */
+
     static int dyeColor(String name) {
         return switch (name) {
             case "white" -> 0xFFFFFF;

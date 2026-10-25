@@ -1,6 +1,5 @@
 'use strict';
-/* 26.3 ComparatorBlock, HopperBlockEntity, ButtonBlock and pressure plates.
- * UI supplies pressure contacts; no entity, random-tick or experimental-redstone simulation. */
+/** 参考 Java 26.3 比较器、漏斗、按钮和压力板规则；压力接触可由界面输入。 */
 (function(root){
   const B=typeof module!=='undefined'?require('./board-timing.js'):root.BoardTiming;
   const {TimingWorld,DIR,OPP,NC,diode}=B,P=TimingWorld.prototype;

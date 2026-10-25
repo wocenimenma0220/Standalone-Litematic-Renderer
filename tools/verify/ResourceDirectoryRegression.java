@@ -4,7 +4,7 @@ import io.github.litematicrender.resource.ResourcePack;
 import java.nio.file.*;
 import java.util.*;
 
-/** Resource directory snapshots must preserve listings and refresh after content changes. */
+
 public final class ResourceDirectoryRegression {
     static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
     public static void main(String[] args)throws Exception {

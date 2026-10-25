@@ -1,6 +1,5 @@
 'use strict';
-/* Stack operations corresponding to AbstractContainerMenu PICKUP, QUICK_MOVE,
- * PICKUP_ALL, SWAP and QUICK_CRAFT. Item components survive mouse operations and participate in stack equality. */
+/** 对应原版容器拿取、快速转移、收集、交换和均分；物品组件参与堆叠相等性判断。 */
 (function(root){
   const canonical=value=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,canonical(value[k])])):value;
   const copy=value=>JSON.parse(JSON.stringify(value)),same=(a,b)=>!!a&&!!b&&a.id===b.id&&a.max===b.max&&JSON.stringify(canonical(a.components||{}))===JSON.stringify(canonical(b.components||{}))&&(a.damage||0)===(b.damage||0);

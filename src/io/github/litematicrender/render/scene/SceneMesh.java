@@ -3,9 +3,7 @@ package io.github.litematicrender.render.scene;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Geometry grouped by material. Opaque layers write depth; all blending layers are sorted together.
- */
+/** 按材质组织几何；不透明面写深度，所有混合面统一排序。 */
 public final class SceneMesh {
     public SectionVisibility visibility;
     public java.util.Map<String, Object> skinReport = java.util.Map.of();
@@ -13,35 +11,30 @@ public final class SceneMesh {
     public enum Layer { SOLID, CUTOUT, PORTAL, FLUID, TRANSLUCENT, WATER_MASK }
 
     public static final class MeshQuad {
-        public final float x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3; // world coords
-        /** per-vertex uv fractions within the sprite (0..1) */
+        public final float x0, y0, z0, x1, y1, z1, x2, y2, z2, x3, y3, z3;
+
         public final float u0, v0, u1, v1, u2, v2, u3, v3;
         public final String spriteId;
-        /** Visual effects do not enlarge automatic framing or intercept block selection. */
+        /** 装饰效果不扩大自动取景范围，也不参与方块拾取。 */
         public boolean decorativeEffect(){return spriteId!=null&&spriteId.startsWith("litematicrender:beacon/");}
-        public final int rgb;              // used when spriteId == null
-        /** When set, the quad samples this image directly (UV in [0,1]) instead of the atlas. */
+        public final int rgb;
+        /** 指定独立图片时直接采样该图片，UV 范围为 0～1。 */
         public final io.github.litematicrender.render.Image image;
         public final float tintR, tintG, tintB;
-        /** cardinal lighting for the whole quad (vanilla CardinalLighting) */
+
         public final float shade;
-        /** per-vertex ambient occlusion, or null for flat (unculled / AO-disabled) quads */
+        /** 每顶点 AO；平面光照或禁用 AO 时为空。 */
         public final float[] ao;
-        /** Optional final per-corner RGB, including smooth light, tint, cardinal shade and AO. */
+        /** 最终顶点颜色可包含平滑光照、染色、方向光和 AO。 */
         public int[] vertexColors;
         public MeshQuad colors(int[] colors) { this.vertexColors=colors; return this; }
         public final Layer layer;
-        public final float cx, cy, cz;     // center (for depth sorting)
-        /**
-         * The quad belongs to a model face with no fixed orientation (a cross-shaped plant, a torch
-         * side), so it must be drawn from both sides. Vanilla renders those with
-         * {@code withCull(false)}, and back-face culling must be skipped for them here too —
-         * otherwise half of a cross plane disappears.
-         */
+        public final float cx, cy, cz;
+        /** 十字植物和火把侧面等无固定朝向的面需双面绘制，不能剔除背面。 */
         public final boolean doubleSided;
-        /** Owning cell/region, independent of geometry extending outside its cell. */
+        /** 面片归属格与区域不随模型越界延伸而改变。 */
         public int blockX, blockY, blockZ;
-        /** Thin boundaries must retain their geometry in distant LODs. */
+        /** 远处 LOD 也需保留薄边界几何。 */
         public boolean lodProtected;
         public String regionName;
         public int entityIndex=-1;
@@ -97,19 +90,12 @@ public final class SceneMesh {
     public final List<MeshQuad> portal = new ArrayList<>();
     public final List<MeshQuad> fluid = new ArrayList<>();
     public final List<MeshQuad> translucent = new ArrayList<>();
-    /** Boat interior depth, written after visible opaque entities and before blending. */
+    /** 船内部遮水深度在不透明实体之后、混合层之前写入。 */
     public final List<MeshQuad> waterMask = new ArrayList<>();
     public int quadCount;
     public TranslucentBsp translucentBsp;
 
-    /**
-     * The blending buckets with each quad already subdivided into sortable pieces.
-     *
-     * <p>Subdivision depends only on geometry, so it is done once here instead of on every frame —
-     * it turns ~22 600 translucent quads into a much larger list, and redoing that per frame cost
-     * more than rasterizing the frame did. The camera-dependent back-to-front sort still happens
-     * per frame, but on a flat array it is cheap.
-     */
+    /** 半透明几何只在场景构建时细分一次，每帧仅按相机重排。 */
     public final List<MeshQuad> portalSorted = new ArrayList<>();
     public final List<MeshQuad> fluidSorted = new ArrayList<>();
     public final List<MeshQuad> translucentSorted = new ArrayList<>();

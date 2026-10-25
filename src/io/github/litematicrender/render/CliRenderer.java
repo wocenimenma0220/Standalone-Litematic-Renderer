@@ -9,57 +9,35 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/**
- * Command-line render: schematic → PNG. All geometry and shading decisions live in
- * {@link SchematicRenderer}; this class only loads resources, drives it and reports timings.
- */
+/** 命令行渲染入口：加载资源、调用 SchematicRenderer 并报告耗时。 */
 public final class CliRenderer {
     private CliRenderer() {}
 
-    /** Result of one render, for callers that want the numbers without parsing stdout. */
+
     public record Result(Image image, int blockKinds, int spriteCount, int atlasWidth, int atlasHeight,
                          int solidQuads, int cutoutQuads, int translucentQuads, long loadMillis,
                          long atlasMillis, long sceneMillis, long rasterMillis) {}
 
-    /**
-     * Loads the schematic and its resource pack, renders it and writes a PNG.
-     *
-     * @param schemFile   .litematic file
-     * @param vanillaRoot directory containing {@code assets/}
-     * @param outPng      destination PNG (may be null to skip writing)
-     * @param settings    camera and output settings
-     * @param verbose     print progress to stdout
-     */
-    /**
-     * Builds the resource stack the same way the GUI engine does: vanilla, then any packs found in
-     * {@code assets/builtin/}. Keeps the command line and the shell rendering identical.
-     */
+
+    /** 命令行与桌面界面使用相同的资源叠加顺序：原版、内置包、用户资源包。 */
     public static ResourceManager openResources(Path vanillaRoot, Path home) throws IOException {
         ResourceManager res = new ResourceManager(vanillaRoot);
         io.github.litematicrender.resource.BuiltinPacks.list(home).forEach(res::importPackUnchecked);
         return res;
     }
 
-    /**
-     * Renders a single frame.
-     *
-     * @param schemFile   .litematic file
-     * @param vanillaRoot directory containing {@code assets/}
-     * @param outPng      destination PNG (may be null to skip writing)
-     * @param settings    camera and output settings
-     * @param verbose     print progress to stdout
-     */
+
     public static Result renderToFile(Path schemFile, Path vanillaRoot, Path outPng,
                                       RenderSettings settings, boolean verbose) throws Exception {
-        // The project layout is <home>/assets/vanilla, so the home is two levels up from the
-        // vanilla root; fall back to the root itself when the layout differs.
+
+
         Path home = vanillaRoot.getParent() != null && vanillaRoot.getParent().getParent() != null
             ? vanillaRoot.getParent().getParent()
             : vanillaRoot;
         return renderToFile(schemFile, vanillaRoot, home, outPng, settings, verbose);
     }
 
-    /** Full form: {@code home} locates the built-in packs. */
+
     public static Result renderToFile(Path schemFile, Path vanillaRoot, Path home, Path outPng,
                                       RenderSettings settings, boolean verbose) throws Exception {
         RenderDiagnostics.reset();
@@ -102,9 +80,7 @@ public final class CliRenderer {
         }
     }
 
-    /**
-     * Renders one full camera revolution while advancing animated texture ticks.
-     */
+    /** 导出一整周相机旋转，并同步推进动态贴图。 */
     public static void renderAnimation(Path schemFile, Path vanillaRoot, Path outGif,
                                        RenderSettings settings, int ticks, int delayCs,
                                        boolean verbose) throws Exception {
@@ -155,13 +131,7 @@ public final class CliRenderer {
         }
     }
 
-    /**
-     * Command-line entry point used by {@code Main --render} and by {@code LitematicRender.exe --cli}:
-     * {@code <file.litematic> <assets/vanilla> <out.png> [width] [height] [rotation] [slant]}.
-     *
-     * <p>The camera angles are positional rather than flags so the historical width/height
-     * invocation keeps working unchanged; both default to the dimetric view the GUI opens on.
-     */
+    /** Main 和启动器的命令行入口，位置参数包括投影、资源、输出、尺寸及视角。 */
     public static void main(String[] args) throws Exception {
         if (args.length < 3) {
             System.err.println("usage: CliRenderer <file.litematic> <assets/vanilla> <out.png> "

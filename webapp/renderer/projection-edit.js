@@ -9,7 +9,7 @@
   let flyHotbarKey=null;
   let hoverTimer=0,hoverPoint=null,hoverRunning=false,hoverKey=null;
   let selected=null,category='building_blocks',tool='block',busy=false,session=0,originalFile=null,undo=0,redo=0,rotationGesture=false;
-  const api=window.projectionEditor={enabled:false,dirty:false,target:null,toggle,reset,refreshHints,refreshVisibility,interact,history,flush,export:exportProjection};
+  const api=window.projectionEditor={enabled:false,dirty:false,target:null,pending:null,settle:()=>api.pending,toggle,reset,refreshHints,refreshVisibility,interact,history,flush,export:exportProjection};
   const categories=[['building_blocks','建筑方块'],['colored_blocks','染色方块'],['natural_blocks','自然方块'],['functional_blocks','功能方块'],['redstone_blocks','红石方块'],['op_blocks','管理员方块'],['special','水 / 岩浆 / 地狱门'],['all','全部']];
   function status(message){info.textContent=message;}
   function refreshHints(){
@@ -133,6 +133,7 @@
   }
   async function refreshPatch(token=session){
     const view=state.view,bounds=state.selection.bounds(selectionWorld()),result=await window.engine.editPatch({selection:bounds||undefined});if(token!==session||view!==state.view||result.empty)return;
+    if(result.rebuildRequired){await flush(true);return;}
     const image=await createImageBitmap(base64ToBlob(result.atlasDataUrl),{premultiplyAlpha:'none',colorSpaceConversion:'none'});let full=null,selected=null;
     try{
       full=new GpuView(els.gl);full.uploadMesh(result.meshArrayBuffer);full.uploadAtlas(image);
@@ -145,40 +146,48 @@
     state.info={...state.info,...result.info};api.dirty=true;window.blockSearch?.clear();await refreshPatch(token);if(token!==session)return;showFileInfo(state.info);hoverKey=null;
   }
   async function flush(rebuild=false){
-    if(!api.dirty)return;const result=await window.engine.commitEdits();if(result.path)state.file=result.path;if(result.info)state.info=result.info;state.engineNeedsOpen=false;
+    if(!api.dirty)return;const token=session,result=await window.engine.commitEdits();if(token!==session)return;if(result.path)state.file=result.path;if(result.info)state.info=result.info;state.engineNeedsOpen=false;
     api.dirty=false;state.view?.clearEditPreview();if(rebuild)await buildView({force:true,preserveCamera:true,editsCommitted:true});showFileInfo(state.info);status('修改已统一更新。');
   }
   async function neighbors(position){return (await window.engine.editStates([[position[0]+1,position[1],position[2]],[position[0]-1,position[1],position[2]],[position[0],position[1]+1,position[2]],[position[0],position[1]-1,position[2]],[position[0],position[1],position[2]+1],[position[0],position[1],position[2]-1]])).blocks;}
-  async function mutate(request,message){
+  async function applyMutation(request,message,token){
+    if(token!==session||!api.enabled)return;
+    const bounds=state.selection.bounds(selectionWorld()),result=await window.engine.editBlock({...request,selection:bounds||undefined});await refresh(result,token);if(token===session)status(message+(result.changed?'':'（无变化）'));return result;
+  }
+  function operation(action){
     if(busy)return;busy=true;update();const token=session;
-    try{const bounds=state.selection.bounds(selectionWorld()),result=await window.engine.editBlock({...request,selection:bounds||undefined});await refresh(result,token);if(token===session)status(message+(result.changed?'':'（无变化）'));return result;}
+    const pending=(async()=>{try{return await action(token);}
     catch(error){if(token===session){status('修改失败：'+error.message);log(info.textContent,'err');}}
     finally{if(token===session){busy=false;update();}}
+    })();api.pending=pending;pending.finally(()=>{if(api.pending===pending)api.pending=null;});return pending;
   }
-  async function interact(button,event={}){
+  function interact(button,event={}){
     if(!api.enabled||busy||!state.viewReady||state.rendering||state.scenePreparing||state.overview)return;
-    const token=session,activeTool=tool,activeBlock=selected,rect=els.gl.getBoundingClientRect(),x=state.fly?rect.left+rect.width/2:event.clientX??rect.left+rect.width/2,y=state.fly?rect.top+rect.height/2:event.clientY??rect.top+rect.height/2;
+    return operation(token=>performInteraction(button,event,token));
+  }
+  async function performInteraction(button,event,token){
+    const activeTool=tool,activeBlock=selected,rect=els.gl.getBoundingClientRect(),x=state.fly?rect.left+rect.width/2:event.clientX??rect.left+rect.width/2,y=state.fly?rect.top+rect.height/2:event.clientY??rect.top+rect.height/2;
     drawView();const ray=state.view.rayFromScreen(x,y,true);if(!ray)return;const bounds=state.selection.bounds(selectionWorld());
-    busy=true;update();let hit;
-    try{hit=await window.engine.editPick({...ray,selection:bounds||undefined});}catch(error){status('拾取失败：'+error.message);return;}finally{if(token===session){busy=false;update();}}
+    const hit=await window.engine.editPick({...ray,selection:bounds||undefined});
     if(token!==session||!api.enabled)return;
     if(!hit?.hit){status('未指向可编辑方块；部分渲染开启时只拾取选区内部。');return;}
     if(button===1){const id=hit.id==='minecraft:piston_head'?'minecraft:'+(hit.states.type==='sticky'?'sticky_piston':'piston'):hit.id,definition=defs.get(id);if(definition){equip(definition);status('已吸取 '+definition.name+'（默认状态）');}else status('此方块未收录到工具箱：'+hit.id);return;}
     if(activeTool==='debug'){
       const definition=defs.get(hit.id);hit.states={...definition?.defaults,...hit.states};const result=stick.interact(hit,button===2,!!event.shiftKey);const message=hit.position.join(', ')+' · '+hit.id+' · '+result.message;
-      if(result.changed)await mutate({position:hit.position,id:hit.id,states:result.states},message);else status(message);return;
+      if(result.changed)await applyMutation({position:hit.position,id:hit.id,states:result.states},message,token);else status(message);return;
     }
-    if(button===0){const changes=ProjectionEditModel.removal(hit,await neighbors(hit.position));await mutate({changes},'已删除 '+hit.position.join(', '));return;}
+    if(button===0){const adjacent=await neighbors(hit.position);if(token!==session||!api.enabled)return;const changes=ProjectionEditModel.removal(hit,adjacent);await applyMutation({changes},'已删除 '+hit.position.join(', '),token);return;}
     if(button===2){
-      if(!event.shiftKey&&ProjectionEditModel.container(hit.id)){const result=await window.engine.inspectPosition(hit.position);if(result.hit)showInspection(result);return;}
+      if(!event.shiftKey&&ProjectionEditModel.container(hit.id)){const result=await window.engine.inspectPosition(hit.position);if(token===session&&api.enabled&&result.hit)showInspection(result);return;}
       if(!activeBlock){status('当前快捷栏为空，请从背包或方块工具栏选择物品。');return;}
       const position=ProjectionEditModel.adjacent(hit);if(!hit.face.some(Boolean)){status('当前位于方块内部，请从外侧点击表面。');return;}if(!ProjectionEditModel.within(position,bounds)){status('放置位置超出当前渲染选区，请扩大范围或关闭部分渲染。');return;}
-      const look=state.view._viewDir(),changes=ProjectionEditModel.placement(activeBlock,{position,face:hit.face,look,shift:!!event.shiftKey,neighbors:await neighbors(position),hitHeight:hit.point?hit.point[1]-position[1]:.5});
+      const look=state.view._viewDir(),adjacent=await neighbors(position);if(token!==session||!api.enabled)return;
+      const changes=ProjectionEditModel.placement(activeBlock,{position,face:hit.face,look,shift:!!event.shiftKey,neighbors:adjacent,hitHeight:hit.point?hit.point[1]-position[1]:.5});
       if(changes.some(change=>!ProjectionEditModel.within(change.position,bounds))){status('箱子另一半超出当前选区，请扩大范围。');return;}
-      const result=await mutate({changes},'已放置 '+activeBlock.name+' · '+position.join(', ')+'；退出后统一更新模型。');if(result?.changed)audio.play(activeBlock.id);
+      const result=await applyMutation({changes},'已放置 '+activeBlock.name+' · '+position.join(', ')+'；退出后统一更新模型。',token);if(token===session&&result?.changed)audio.play(activeBlock.id);
     }
   }
-  async function history(action){if(!api.enabled||busy||state.scenePreparing||state.rendering)return;return mutate({action},action==='undo'?'已撤销上一步修改。':'已重做上一步修改。');}
+  function history(action){if(!api.enabled||busy||state.scenePreparing||state.rendering)return;return operation(token=>applyMutation({action},action==='undo'?'已撤销上一步修改。':'已重做上一步修改。',token));}
   async function exportProjection(){
     if(!state.file||busy)return;const token=session;busy=true;update();
     try{const source=(originalFile||state.file).split(/[\\/]/).pop().replace(/\.litematic$/i,'');const result=await window.engine.exportEdited({suggested:source+'-修改.litematic'});if(result&&token===session)status('已导出：'+result.path+' · 作者 '+result.author);return result;}
@@ -203,7 +212,7 @@
     if(e.altKey&&!state.fly){rotationGesture=true;return;}if(rotationGesture&&type!=='pointerdown')return;rotationGesture=false;
     e.preventDefault();e.stopImmediatePropagation();if(type!=='pointerdown')return;
     if(state.fly&&!state.flyLookActive){resumeFlyLook();return;}
-    interact(e.button,e).catch(error=>status(error.message));
+    interact(e.button,e)?.catch(error=>status(error.message));
   },true);
   update();drawPalette();
   window.__uiReady.then(async()=>{const settings=await window.appUi.settings();inventory.restore(settings.editorInventory);selected=defs.get('minecraft:'+inventory.selected)||null;update();}).catch(error=>status('背包读取失败：'+error.message));

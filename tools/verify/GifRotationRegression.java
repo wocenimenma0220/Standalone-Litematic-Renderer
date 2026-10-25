@@ -12,7 +12,7 @@ import java.util.*;
 import javax.imageio.ImageIO;
 import org.w3c.dom.Node;
 
-/** Checks fixed-center framing and a GIF player's composited frames, including loop boundaries. */
+
 public final class GifRotationRegression {
     private static final double[] MIN={-30,7,-12}, MAX={-18,11,-10};
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
@@ -85,7 +85,7 @@ public final class GifRotationRegression {
             }
             check(changed&&departing>100,"rotation does not exercise pixels vacated by the model");
             var canvas=new BufferedImage(settings.width,settings.height,BufferedImage.TYPE_INT_ARGB);var graphics=canvas.createGraphics();
-            // Simulate a player for two complete loops, clearing each disposed full-frame image.
+
             try {
                 for(int step=0;step<frameCount*2;step++) {
                     graphics.setComposite(AlphaComposite.Clear);graphics.fillRect(0,0,settings.width,settings.height);

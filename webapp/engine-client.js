@@ -1,32 +1,19 @@
 'use strict';
 
-/**
- * JSON-RPC client for the Java render engine.
- *
- * The engine speaks one JSON object per line on stdout. Requests are serialised through a single
- * worker slot because the engine holds one "currently open schematic" plus one render at a time;
- * letting two renders overlap would produce confusing results and waste memory.
- */
+/** Java 引擎使用逐行 JSON-RPC，所有调用串行执行，保持当前投影和渲染状态一致。 */
 
 const { spawn } = require('node:child_process');
 const readline = require('node:readline');
 const {memoryPolicy}=require('./performance-policy');
 
 class EngineClient {
-  /**
-   * @param {object} opts
-   * @param {string} opts.javaExe
-   * @param {string} opts.classpath
-   * @param {string} opts.home            project root, passed as -Dlitematicrender.home
-   * @param {(evt: object) => void} [opts.onEvent]
-   * @param {(info: object) => void} [opts.onExit]
-   */
+  /** 构造参数包含 Java 路径、类路径、项目目录以及事件和退出回调。 */
   constructor(opts) {
     this.opts = opts;
     this.proc = null;
     this.nextId = 1;
     this.pending = new Map();
-    /** Serialises calls: each entry is a thunk returning a promise. */
+
     this.queue = [];
     this.busy = false;
     this.stderrTail = [];
@@ -60,9 +47,9 @@ class EngineClient {
       }
       this.proc = child;
 
-      // Both streams must be read as UTF-8. Node otherwise decodes a child's stdout/stderr with
-      // the process default (GBK on a zh-CN Windows), which turns any non-ASCII byte sequence —
-      // Chinese pack names, for instance — into replacement characters before JSON.parse sees it.
+      // 标准输出和错误流都显式按 UTF-8 解码，避免中文资源包名称在 JSON 解析前损坏。
+
+
       child.stdout.setEncoding('utf8');
       const rl = readline.createInterface({ input: child.stdout });
       rl.on('line', (line) => { if (this.proc === child && !this.forced) this._onLine(line); });
@@ -70,7 +57,7 @@ class EngineClient {
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (chunk) => {
         if (this.proc !== child || this.forced) return;
-        // Keep a bounded tail for diagnostics; the engine logs resolution failures here.
+        // 只保留有界的错误日志末尾，用于退出诊断。
         for (const l of String(chunk).split(/\r?\n/)) {
           if (!l.trim()) continue;
           this.stderrTail.push(l);
@@ -95,7 +82,7 @@ class EngineClient {
         reject(new Error('渲染引擎在启动完成前退出'));
       });
 
-      // The engine announces readiness itself once stdin is being read.
+
       const onReady = (evt) => {
         if (evt.event === 'ready') {
           cleanup();
@@ -145,7 +132,7 @@ class EngineClient {
     this.pending.clear();
   }
 
-  /** Queues a call; resolves with the engine's result object. */
+
   call(method, params) {
     if(this.stopping)return Promise.reject(new Error(this.forced ? '渲染已强制停止' : '应用正在退出'));
     return new Promise((resolve, reject) => {
@@ -190,18 +177,18 @@ class EngineClient {
     const proc = this.proc;
     if (!proc || proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
     this.stopping = new Promise(resolve => {
-      const killTimer = setTimeout(() => { try { proc.kill(); } catch { /* already gone */ } }, 5000);
+      const killTimer = setTimeout(() => { try { proc.kill(); } catch {   } }, 5000);
       proc.once('exit', () => { clearTimeout(killTimer); resolve(); });
       for(const job of this.queue.splice(0))job.reject(new Error('应用正在退出'));
       try {
         proc.stdin.write(JSON.stringify({ id: 0, method: 'cancelPreview', params: {} }) + '\n');
         proc.stdin.end(JSON.stringify({ id: 0, method: 'shutdown', params: {} }) + '\n');
-      } catch { try { proc.kill(); } catch { /* already gone */ } }
+      } catch { try { proc.kill(); } catch {   } }
     });
     return this.stopping;
   }
 
-  /** Out-of-band cancellation: a blocked RPC reader cannot process a queued cancel request. */
+  /** 强制取消不进入 RPC 队列，避免被阻塞的读取或渲染请求挡住。 */
   forceStop() {
     if (this.stopping) return this.stopping;
     const proc = this.proc;

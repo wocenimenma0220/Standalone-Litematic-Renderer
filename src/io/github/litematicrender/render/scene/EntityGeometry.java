@@ -8,7 +8,7 @@ import io.github.litematicrender.world.*;
 import io.github.litematicrender.util.MiniJson;
 import java.util.*;
 
-/** Static snapshots of the requested vanilla entities, using the bundled model dimensions and UV nets. */
+/** 使用原版模型尺寸和 UV 展开生成已支持实体的静态快照。 */
 public final class EntityGeometry {
     private static final Set<String> CARTS=Set.of("minecart","chest_minecart","furnace_minecart","hopper_minecart","tnt_minecart","command_block_minecart","spawner_minecart");
     public static final List<String> WOODS=List.of("oak","spruce","birch","jungle","acacia","dark_oak","mangrove","cherry","pale_oak","bamboo","poplar");
@@ -204,7 +204,7 @@ public final class EntityGeometry {
     private void item(SceneMesh mesh,NbtCompound stack,Mat matrix,String context,float[] light){
         if(empty(stack))return;String id=stack.getStringOrDefault("id","");if(!id.matches("[a-z0-9_.-]+:[a-z0-9_./-]+"))return;
         String[] name=id.split(":",2);String modelId=name[0]+":item/"+name[1];
-        // Current vanilla block items point directly at a block model through items/*.json.
+
         try{var bytes=baker.resources().getResource(name[0],"items/"+name[1]+".json").orElse(null);if(bytes!=null){var definition=MiniJson.parseObject(new String(bytes,java.nio.charset.StandardCharsets.UTF_8));if(definition.get("model") instanceof Map<?,?> node&&Set.of("minecraft:model","model").contains(String.valueOf(node.get("type")))&&node.get("model") instanceof String selected)modelId=selected.contains(":")?selected:"minecraft:"+selected;}}catch(Exception ignored){}
         var description=itemDescription(modelId,0);
         if(description.get("display") instanceof Map<?,?> display&&display.get(context) instanceof Map<?,?> transform){double[] t=vector(transform.get("translation"),0),r=vector(transform.get("rotation"),0),s=vector(transform.get("scale"),1);matrix=matrix.translate(t[0]/16,t[1]/16,t[2]/16).rotateX(Math.toRadians(r[0])).rotateY(Math.toRadians(r[1])).rotateZ(Math.toRadians(r[2])).scale(s[0],s[1],s[2]);}
@@ -215,7 +215,7 @@ public final class EntityGeometry {
         float[] u={0,1,1,0},v={0,0,1,1};
         face(mesh,new double[][]{{-.5,.5,-1.0/32},{.5,.5,-1.0/32},{.5,-.5,-1.0/32},{-.5,-.5,-1.0/32}},u,v,matrix,texture,light);
         face(mesh,new double[][]{{.5,.5,1.0/32},{-.5,.5,1.0/32},{-.5,-.5,1.0/32},{.5,-.5,1.0/32}},new float[]{1,0,0,1},v,matrix,texture,light);
-        // A pixel outline gives generated items their vanilla thickness without filling transparent holes.
+        // 物品轮廓保留原版厚度，并避免填满透明孔洞。
         int width=Math.min(64,pixels.width),height=Math.min(64,pixels.height);int[][] delta={{-1,0},{1,0},{0,-1},{0,1}};
         for(int y=0;y<height;y++)for(int x=0;x<width;x++)if(opaque(pixels,x,y,width,height))for(int side=0;side<4;side++)if(!opaque(pixels,x+delta[side][0],y+delta[side][1],width,height)){
             double x0=(double)x/width-.5,x1=(double)(x+1)/width-.5,y0=.5-(double)y/height,y1=.5-(double)(y+1)/height,a=-1.0/32,b=1.0/32;

@@ -28,13 +28,13 @@ const {SceneTransfer,crc32,BATCH_PAGE_LIMIT,BATCH_RAW_LIMIT}=require('../../weba
  assert.equal(stream.residents.size,384);assert.equal(stream.lodCounts[0],384);assert.equal(errors.length,0);
  assert.ok(stream.batchRequests<16,`Too many page round trips: ${stream.batchRequests}`);assert.equal(stream.pageRequests,0);assert.ok(stream.batchPeakBytes<=BATCH_RAW_LIMIT);
  assert.ok(stream.peakBytes<=stream.budgetBytes);assert.equal(stream.batchBytes,0);stream.dispose();assert.equal(allocated.size,0);
- // A CRC error in a prefetched section must not poison the valid section requesting the batch.
+ // 预读后续页的 CRC 错误不能影响当前批次中的正常区段。
  const correct=pages[3].checksum;pages[3].checksum^=1;const isolatedErrors=[];
  const isolated=new context.Stream(view,{sections,min:[0,0,0],max:[6144,16,16],quads:384,compressed:true,indexBytes:0},()=>{},
   {budgetBytes:32*1048576,onError:e=>isolatedErrors.push(e),readPage:p=>transfer.readPage(17,scene.id,p),readPages:ps=>transfer.readPages(17,scene.id,ps)});
  isolated.plan({orbit:true,lodLevel:0},[],true);await isolated.settled();assert.equal(isolated.residents.size,383);assert.ok(isolatedErrors.length>0);
  assert.ok([...isolated.failed].every(key=>key.startsWith('3:')));isolated.dispose();pages[3].checksum=correct;assert.equal(allocated.size,0);
- // Closing a capability during an in-flight batch invalidates all packets before publication.
+ // 传输关闭后，在途批次的全部结果都必须失效。
  const original=transfer.read.bind(transfer);let release;const gate=new Promise(r=>release=r);
  transfer.read=async(...args)=>{await gate;return original(...args);};const pending=transfer.readPages(17,scene.id,pages.slice(0,2));
  await assert.rejects(transfer.readPage(17,scene.id,pages[0]),/队列/);const closing=transfer.close();release();await assert.rejects(pending);await closing;

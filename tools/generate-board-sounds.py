@@ -1,8 +1,6 @@
-"""Bundle original Minecraft placement samples using Blocks/SoundType/SoundEvents.
+"""根据原版方块和声音注册表收集二维放置音效；从本机提取资源或内容寻址缓存读取，无需联网下载。"""
 
-Reads the installed game's extracted assets or content-addressed asset cache;
-copies only samples used by the board. No network downloads are necessary.
-"""
+
 import argparse
 import json
 import re
@@ -35,7 +33,7 @@ def asset(name):
 sound_json=asset('sounds.json')
 if not sound_json: raise SystemExit('Original Minecraft sounds.json not found')
 events=json.loads(sound_json.read_text(encoding='utf8'))
-# The richest local index can contain newer events than the extracted asset folder.
+# 本地资源索引可能含有比已提取目录更新的音效事件。
 for index in reversed(indices):
     entry=index.get('minecraft/sounds.json')
     if entry:
@@ -88,7 +86,7 @@ def sound_type(name,trail=()):
     if 'glass' in name or name.endswith('_ice') or name=='ice': return 'GLASS'
     if name.endswith('candle') or name.endswith('candle_cake'): return 'CANDLE'
     if name.endswith('leaves'): return 'GRASS'
-    # Generic helpers used by the vanilla registry supply these sound types.
+    # 原版方块注册的公共辅助方法提供这些声音类型。
     if 'flowerPotProperties(' in body: return 'STONE'
     if 'candleProperties(' in body: return 'CANDLE'
     if 'logProperties(' in body: return re.search(r'SoundType\.(\w+)',body)[1] if re.search(r'SoundType\.(\w+)',body) else 'WOOD'
@@ -128,5 +126,5 @@ for index,name in enumerate(['ice','packed_ice','blue_ice'],1):
     if source is None: raise SystemExit(f'Missing custom audio: {args.custom}/{index}.mp3')
     target=OUT/'board-audio'/f'{index}.mp3';target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target)
     manifest[name]={'event':'custom:'+str(index),'type':'custom','volume':1,'pitch':1,'samples':[{'file':f'board-audio/{index}.mp3','volume':1,'pitch':1,'weight':1}]}
-(OUT/'board-sounds.js').write_text('/* Generated from original Minecraft assets. */\nwindow.BoardSounds = '+json.dumps(manifest,ensure_ascii=False,separators=(',',':'))+';\n',encoding='utf8')
+(OUT/'board-sounds.js').write_text('/* 从原版 Minecraft 资源生成的放置音效映射。 */\nwindow.BoardSounds = '+json.dumps(manifest,ensure_ascii=False,separators=(',',':'))+';\n',encoding='utf8')
 print(f'{len(manifest)} blocks, {len(copied)} original audio samples, 3 custom MP3 files')

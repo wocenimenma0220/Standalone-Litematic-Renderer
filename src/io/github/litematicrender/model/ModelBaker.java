@@ -10,12 +10,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Model baker: resolves blockstates -> models -> quads.
- * Mirrors ModelBakery/ModelDiscovery/FaceBakery/SimpleModelWrapper (data parts).
- */
+/** 模型烘焙：按原版 ModelBakery、ModelDiscovery 和 FaceBakery 的数据规则，将方块状态解析为面片。 */
 public final class ModelBaker {
-    /** baked model: quads by cull face + AO flag + particle sprite */
+    /** 按剔除方向组织面片，同时保存环境光遮蔽开关和粒子贴图。 */
     public static final class BakedModel {
         public final List<Quad> all = new ArrayList<>();
         public final List<Quad>[] byFace = new List[6];
@@ -41,13 +38,10 @@ public final class ModelBaker {
         }
     }
 
-    /** A variant entry in blockstates: model + x/y rotation + uvlock */
+
     public record Variant(String modelId, int xRot, int yRot, int zRot, boolean uvlock) {}
 
-    /**
-     * A blockstate can resolve to several models at once (multipart).
-     * Mirrors vanilla MultiPartBlockStateModel / MultiVariant: the resolved model is a LIST of variants.
-     */
+    /** 同一状态可以通过 multipart 同时匹配多个模型，解析结果因此保留完整变体列表。 */
     public record VariantList(List<Variant> variants) {
         public static VariantList of(Variant v) { return new VariantList(List.of(v)); }
     }
@@ -61,7 +55,7 @@ public final class ModelBaker {
     }
     private final Map<String, ModelDefinition> definitions = new ConcurrentHashMap<>();
     private final Map<String, BakedModel> bakedCache = new ConcurrentHashMap<>();
-    /** blockId -> BlockInfo (from BlockRegistry) */
+
     private final io.github.litematicrender.world.BlockRegistry registry;
 
     public ModelBaker(ResourceManager resources, io.github.litematicrender.world.BlockRegistry registry) {
@@ -69,7 +63,7 @@ public final class ModelBaker {
         this.registry = registry;
     }
 
-    /** Share immutable baked values, but keep parent-resolution cycle detection worker-local. */
+    /** 工作线程共享不可变烘焙结果，模型继承环检测保留在线程内部。 */
     public ModelBaker fork() {
         var worker=new ModelBaker(resources,registry);
         worker.definitions.putAll(definitions);worker.resolvedCache.putAll(resolvedCache);
@@ -78,7 +72,7 @@ public final class ModelBaker {
     }
 
     // ------------------------------------------------------------------
-    // Model definition loading + parent chain
+
 
     public ModelDefinition definition(String modelId) {
         return this.definitions.computeIfAbsent(modelId, this::loadDefinition);
@@ -103,15 +97,13 @@ public final class ModelBaker {
         }
     }
 
-    /**
-     * Resolves the top-of-chain data following parent links.
-     */
+
     private static final class Resolved {
         List<ModelDefinition.Element> elements;
-        Map<String, String> textures;       // merged with child priority
+        Map<String, String> textures;       // 沿父模型链合并定义，子模型声明优先。
         boolean ambientOcclusion = true;
         String particle;
-        /** Slots whose reference asked for force_translucent. */
+
         java.util.Set<String> forceTranslucentSlots = java.util.Set.of();
     }
 
@@ -120,7 +112,7 @@ public final class ModelBaker {
     private Resolved resolveChain(String modelId) {
         Resolved r = this.resolvedCache.get(modelId);
         if (r != null) return r;
-        // cycle guard
+
         if (this.resolving.contains(modelId)) return null;
         this.resolving.add(modelId);
         try {
@@ -138,42 +130,39 @@ public final class ModelBaker {
         ModelDefinition def = this.definition(modelId);
         if (def == null) return null;
         if ("builtin/generated".equals(def.parent) || "builtin/entity".equals(def.parent)) {
-            // special: item generated models are handled separately
+
         }
         Resolved parentResolved = def.parent != null && !def.parent.startsWith("builtin/") ? this.resolveChain(def.parent) : null;
         Resolved result = new Resolved();
-        // textures: child overrides parent (child wins)
+        // 子模型贴图覆盖父模型中的同名槽位。
         Map<String, String> textures = new LinkedHashMap<>();
         if (parentResolved != null) textures.putAll(parentResolved.textures);
         textures.putAll(def.textures);
         result.textures = textures;
-        // force_translucent slots follow the same inheritance as the textures themselves.
+        // 强制半透明标记采用与贴图相同的继承规则。
         java.util.Set<String> forceTranslucent = new java.util.LinkedHashSet<>();
         if (parentResolved != null) forceTranslucent.addAll(parentResolved.forceTranslucentSlots);
         forceTranslucent.addAll(def.forceTranslucentSlots);
         result.forceTranslucentSlots = forceTranslucent;
-        // elements: nearest parent with elements (child's own elements win; child with elements ignores deeper parents' elements)
+        // 使用最近一层声明的元素列表；子模型声明元素后不再继承更深层元素。
         if (def.elements != null) {
             result.elements = def.elements;
         } else if (parentResolved != null) {
             result.elements = parentResolved.elements;
         }
-        // ambient occlusion: first defined wins
+
         if (def.ambientOcclusion != null) {
             result.ambientOcclusion = def.ambientOcclusion;
         } else if (parentResolved != null) {
             result.ambientOcclusion = parentResolved.ambientOcclusion;
         }
-        // particle: resolve texture slot at the end
+
         String particle = textures.get("particle");
         result.particle = particle != null ? this.resolveTextureReference(particle, textures) : null;
         return result;
     }
 
-    /**
-     * Walks the same "#ref" chain the sprite lookup does, and reports whether the slot it lands on
-     * declared {@code force_translucent}.
-     */
+    /** 沿贴图引用链检查最终槽位是否声明 force_translucent。 */
     private static boolean resolvesToForceTranslucent(String value, Map<String, String> textures,
                                                       java.util.Set<String> forceSlots) {
         if (forceSlots == null || forceSlots.isEmpty() || value == null) return false;
@@ -188,7 +177,7 @@ public final class ModelBaker {
         return false;
     }
 
-    /** Resolves "#ref" chains to a concrete sprite id ("ns:path"). */
+
     public String resolveTextureReference(String value, Map<String, String> textures) {
         int depth = 0;
         while (value != null && value.startsWith("#") && depth++ < 16) {
@@ -198,19 +187,14 @@ public final class ModelBaker {
     }
 
     // ------------------------------------------------------------------
-    // Blockstate variant selection
 
-    /** Blockstate → variant model for a concrete state. */
+
     public Variant selectVariant(String blockId, io.github.litematicrender.world.BlockState state) {
         List<Variant> all = this.selectVariants(blockId, state);
         return all.isEmpty() ? null : all.get(0);
     }
 
-    /**
-     * Blockstate → ALL models applying to a concrete state.
-     * Variants: exactly one entry matches (or a weighted list). Multipart: every part whose
-     * "when" condition holds contributes a model — vanilla MultiPartBlockStateModel.
-     */
+    /** 变体模型选择匹配项，multipart 则累积所有满足条件的部分。 */
     public List<Variant> selectVariants(String blockId, io.github.litematicrender.world.BlockState state) {
         var info = this.registry.get(blockId);
         if (info == null) return List.of();
@@ -228,9 +212,8 @@ public final class ModelBaker {
     }
 
     // ------------------------------------------------------------------
-    // Multipart (vanilla MultiPartBlockStateModel)
 
-    /** Collects every multipart part whose condition passes. */
+
     private List<Variant> selectFromMultipart(List<Object> multipart, io.github.litematicrender.world.BlockState state) {
         List<Variant> out = new ArrayList<>();
         for (Object mpObj : multipart) {
@@ -244,7 +227,7 @@ public final class ModelBaker {
         return out;
     }
 
-    /** "apply" is either one variant object or a list of them. */
+
     private static void addApplied(List<Variant> out, Object apply) {
         if (apply instanceof List<?> list) {
             for (Object o : list) {
@@ -257,13 +240,7 @@ public final class ModelBaker {
         }
     }
 
-    /**
-     * Multipart condition semantics (vanilla MultiPartModelHelper):
-     *   { "north": "true|up", "AND": [ {...}, ... ] }
-     * A key maps to a value, a "|"-separated list of alternatives, or a boolean.
-     * Missing properties in the state simply don't match.
-     * "AND"/"OR" nest (OR is implicit between top-level keys).
-     */
+    /** 多部分条件支持属性候选值和嵌套 AND/OR；缺失的属性视为不匹配。 */
     static boolean conditionMatches(Map<String, Object> when, io.github.litematicrender.world.BlockState state) {
         for (Map.Entry<String, Object> e : when.entrySet()) {
             String key = e.getKey();
@@ -289,10 +266,10 @@ public final class ModelBaker {
                 if (!any) return false;
                 continue;
             }
-            // plain property: value may be "a|b|c"
+
             String actual = state.getValue(key);
             if (actual == null) return false;
-            // MiniJson may hand back a Boolean for `"waterlogged": true`
+
             String expected = e.getValue() instanceof Boolean b ? b.toString() : MiniJson.asString(e.getValue(), null);
             if (expected == null) return false;
             boolean ok = false;
@@ -305,7 +282,7 @@ public final class ModelBaker {
     }
 
     private Variant selectFromVariants(Map<String, Object> variants, io.github.litematicrender.world.BlockState state) {
-        // 1) exact key match
+
         String exact = state.propertyString();
         if (!exact.isEmpty()) {
             Object direct = variants.get(exact.substring(1, exact.length() - 1));
@@ -313,7 +290,7 @@ public final class ModelBaker {
                 return variantOf(direct);
             }
         }
-        // 2) partial match: all keys whose conditions are satisfied (vanilla picks best match)
+
         String bestKey = null;
         int bestScore = -1;
         for (String key : variants.keySet()) {
@@ -331,7 +308,7 @@ public final class ModelBaker {
         return variantOf(variants.get(bestKey));
     }
 
-    /** Number of matching properties, or -1 if any mismatch. */
+
     private static int matchScore(String key, io.github.litematicrender.world.BlockState state) {
         int score = 0;
         for (String part : key.split(",")) {
@@ -347,7 +324,7 @@ public final class ModelBaker {
     }
 
     private static Variant variantOf(Object obj) {
-        // value can be a single variant object or a list (weighted)
+
         Map<String, Object> m = null;
         if (obj instanceof Map) {
             m = MiniJson.asObject(obj);
@@ -365,9 +342,9 @@ public final class ModelBaker {
     }
 
     // ------------------------------------------------------------------
-    // Baking
 
-    /** Bakes a model at a specific rotation. Keyed by modelId+rotation. */
+
+    /** 按模型标识和旋转参数缓存烘焙结果。 */
     public BakedModel bake(String modelId, int xRot, int yRot, int zRot, boolean uvlock) {
         String key = modelId + "#" + xRot + "," + yRot + "," + zRot + (uvlock ? "u" : "");
         return this.bakedCache.computeIfAbsent(key, k -> this.bakeInner(modelId, xRot, yRot, zRot, uvlock));
@@ -399,7 +376,7 @@ public final class ModelBaker {
                              ModelDefinition.Element el, Transform t, boolean uvlock) {
         float[] from = el.from();
         float[] to = el.to();
-        // degenerate: zero-thickness axis only draws two faces
+        // 零厚度元素只绘制两个相对面。
         boolean drawX = from[0] != to[0];
         boolean drawY = from[1] != to[1];
         boolean drawZ = from[2] != to[2];
@@ -409,7 +386,7 @@ public final class ModelBaker {
             ModelDefinition.Face face = e.getValue();
             int dir = faceIndex(faceName);
             if (dir < 0) continue;
-            // vanilla: skip faces perpendicular to a flat element (thickness 0 on that axis)
+            // 按原版规则跳过与零厚度平面垂直的面。
             boolean shouldDraw = switch (dir) {
                 case Quad.DOWN, Quad.UP -> drawX && drawZ;
                 case Quad.NORTH, Quad.SOUTH -> drawX && drawY;
@@ -429,12 +406,12 @@ public final class ModelBaker {
             float[] uv = face.uv();
             if (uv == null) uv = defaultFaceUV(from, to, dir);
 
-            // rotation of the cullface by the model transform
+
             String cullface = face.cullface();
             int cullDir = cullface != null ? t.rotateFace(faceIndex(cullface)) : -1;
 
-            // Did the texture reference this face points at ask for force_translucent? The flag
-            // lives on the texture slot, and the face may reach it through "#ref" indirection.
+            // 沿贴图槽位引用解析强制半透明属性。
+
             boolean forceTranslucent = resolvesToForceTranslucent(texRef, textures, forceTranslucentSlots);
             Quad q = bakeQuad(from, to, uv, dir, spriteId, face.tintindex(), el, t, uvlock,
                 face.rotationDegrees(), forceTranslucent);
@@ -446,27 +423,11 @@ public final class ModelBaker {
         }
     }
 
-    /**
-     * Bakes a single quad (port of {@code FaceBakery.bakeQuad}).
-     *
-     * <p>Vertex positions follow {@code FaceInfo}; UVs follow {@code CuboidFace.getU/getV}:
-     *
-     * <pre>
-     *   rawU = uvs.getVertexU(rotation.rotateVertexIndex(i))
-     *   rawV = uvs.getVertexV(rotation.rotateVertexIndex(i))
-     *   getVertexU(i) = (i == 0 || i == 1) ? minU : maxU
-     *   getVertexV(i) = (i == 0 || i == 3) ? minV : maxV
-     *   rotateVertexIndex(i) = (i + shift) % 4,  shift = faceRotation / 90
-     * </pre>
-     *
-     * <p>The min/max form matters: a model may write {@code "uv": [0, 16, 16, 0]} (observer's top
-     * face does), which is a legitimate flipped range, not a mistake. Treating the four numbers as
-     * an ordered corner list instead of named min/max turns such a face upside-down.
-     */
+    /** 按原版 FaceBakery 烘焙单个面：顶点顺序来自 FaceInfo，UV 索引按面内旋转偏移。 */
     private Quad bakeQuad(float[] from, float[] to, float[] uvIn, int face, String spriteId, int tintIndex,
                           ModelDefinition.Element el, Transform t, boolean uvlock, int faceRotationDeg,
                           boolean forceTranslucent) {
-        // FaceInfo vertex selection: per face pick min/max coords
+
         int[][] faceVerts = FACE_VERTICES[face];
         float[] px = new float[4], py = new float[4], pz = new float[4];
         for (int i = 0; i < 4; i++) {
@@ -474,18 +435,18 @@ public final class ModelBaker {
             py[i] = faceVerts[i][1] == 0 ? from[1] : to[1];
             pz[i] = faceVerts[i][2] == 0 ? from[2] : to[2];
             px[i] /= 16f; py[i] /= 16f; pz[i] /= 16f;
-            // element rotation about origin
+
             if (el != null && el.rotation() != null) {
                 double[] r = rotateVertex(px[i], py[i], pz[i], el.rotation());
                 px[i] = (float) r[0]; py[i] = (float) r[1]; pz[i] = (float) r[2];
             }
-            // model rotation about block center (0.5,0.5,0.5)
+
             double[] r = t.transformPoint(px[i] - 0.5, py[i] - 0.5, pz[i] - 0.5);
             px[i] = (float) (r[0] + 0.5); py[i] = (float) (r[1] + 0.5); pz[i] = (float) (r[2] + 0.5);
         }
 
         int effectiveFace = t.rotateFace(face);
-        // UVs in 0..1 sprite space, exactly as CuboidFace.getU/getV produces them.
+        // UV 位于单张贴图的 0～1 范围，保持 CuboidFace 的原始取值顺序。
         float[] pu = new float[4], pv = new float[4];
         for (int i = 0; i < 4; i++) {
             int idx = (i + (faceRotationDeg / 90)) % 4;
@@ -494,7 +455,7 @@ public final class ModelBaker {
             pu[i] = rawU / 16f;
             pv[i] = rawV / 16f;
         }
-        // uvlock rotates the UVs with the model state, not the geometry.
+        // 锁定纹理时，UV 随方块状态修正，避免纹理跟着几何一起转动。
         if (uvlock && (xRotOf(t) != 0 || yRotOf(t) != 0)) {
             float[][] rot = uvLockCorners(pu, pv, face, effectiveFace, t);
             pu = rot[0];
@@ -508,7 +469,7 @@ public final class ModelBaker {
         }
 
         Quad q = new Quad(px, py, pz, pu, pv, effectiveFace, spriteId, tintIndex, shadeOverride, el != null ? el.lightEmission() : 0, forceTranslucent);
-        // fix winding if the transform flipped it: reverse vertex order keeping uv attached
+        // 变换翻转绕序时反转顶点，并保持各顶点与 UV 的对应关系。
         if (!isCounterClockwise(q, effectiveFace)) {
             float[] rpx = {px[3], px[2], px[1], px[0]};
             float[] rpy = {py[3], py[2], py[1], py[0]};
@@ -520,19 +481,14 @@ public final class ModelBaker {
         return q;
     }
 
-    /**
-     * Applies the uvlock transform: the face's own rotation by the inverse of the model state's
-     * face transformation, so the texture stays axis-aligned in world space instead of rotating
-     * with the block. Corners rotate about the UV centre (0.5, 0.5), as vanilla does with
-     * {@code cornerToCenter} / {@code centerToCorner}.
-     */
+    /** UV 锁定使用面变换的逆旋转，绕贴图中心旋转，使纹理在世界坐标中保持对齐。 */
     private static float[][] uvLockCorners(float[] u, float[] v, int face, int effectiveFace, Transform t) {
-        // Which quarter-turns map the original face onto the rotated one.
+
         int turnsX = ((t.xRot % 360) + 360) % 360 / 90;
         int turnsY = ((t.yRot % 360) + 360) % 360 / 90;
-        int steps = (turnsY * 3 + turnsX) % 4;      // inverse rotation, in 90-degree steps
+        int steps = (turnsY * 3 + turnsX) % 4;
         if (turnsX != 0 && turnsY != 0) {
-            // Combined X+Y rotation does not decompose into a single quarter turn; leave as-is.
+            // 组合 X/Y 旋转不能简化为一次面内四分之一旋转，此处保留原结果。
             return new float[][]{u, v};
         }
         float[] nu = new float[4], nv = new float[4];
@@ -559,7 +515,7 @@ public final class ModelBaker {
 
 
     private static boolean isCounterClockwise(Quad q, int face) {
-        // compute normal from first three verts and compare with face normal
+
         float ax = q.x1 - q.x0, ay = q.y1 - q.y0, az = q.z1 - q.z0;
         float bx = q.x2 - q.x0, by = q.y2 - q.y0, bz = q.z2 - q.z0;
         float nx = ay * bz - az * by;
@@ -570,27 +526,11 @@ public final class ModelBaker {
     }
 
     // ------------------------------------------------------------------
-    // Rotations
 
-    /**
-     * Rotation transform for a blockstate's x/y/z values, built by lookup instead of trigonometry.
-     *
-     * <p>The sign convention here is easy to get backwards and expensive to debug — every oriented
-     * block (observer, dropper, piston, comparator, wall torch, climbing redstone dust) inherits
-     * it — so this follows the game's own table, {@code OctahedralGroup}'s {@code BLOCK_ROT_*}
-     * constants, rather than a from-scratch rotation formula.
-     *
-     * <p>A vanilla rotation is an axis permutation plus optional sign flips, and the axis order is
-     * <strong>x, then y, then z</strong> (each applied to the result of the previous one), because
-     * {@code OctahedralGroup.compose} reads that way in the Cayley table the game builds from it.
-     *
-     * <p>Sourced from {@code OctahedralGroup}: {@code BLOCK_ROT_Y_90 = ROT_90_Y_NEG}, which maps
-     * +X to +Z; {@code BLOCK_ROT_Y_270 = ROT_90_Y_POS}, which maps +X to -Z. A rotation matrix
-     * built the other way round swaps those two, which turns every east-facing block into a
-     * west-facing one.
-     */
+
+    /** 方块旋转遵循原版 OctahedralGroup 的 BLOCK_ROT 常量，避免朝向变换意外成为镜像。 */
     public static final class Transform {
-        public final int xRot, yRot, zRot; // degrees
+        public final int xRot, yRot, zRot;
         private final double[][] mat = new double[3][3];
 
         public static Transform of(int x, int y, int z) {
@@ -601,12 +541,10 @@ public final class ModelBaker {
             this.xRot = x;
             this.yRot = y;
             this.zRot = z;
-            // Column i is where basis vector i lands, in world space. Vanilla composes the variant
-            // angles as Z∘Y∘X (Quadrant.fromXYZAngles: y.rotationY.compose(x.rotationX)), meaning X
-            // acts on the model FIRST. Building the product in that order — X, then Y, then Z — is
-            // what the sequence below does; composing in the reverse order still gets every
-            // single-axis variant right while silently mirroring every combined one, which is how
-            // bottom stairs stayed correct while top stairs and sideways barrels flipped.
+
+
+            // 模型依次执行 X、Y、Z 旋转；逆序组合会使多轴变体发生镜像。
+
             double[][] m = identity();
             m = composeX(m, norm(x));
             m = composeY(m, norm(y));
@@ -624,13 +562,13 @@ public final class ModelBaker {
             return new double[][]{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
         }
 
-        /** Left-multiplies m by the vanilla y-rotation of the given 0/90/180/270 value. */
+        /** 左乘原版 Y 轴的 0/90/180/270 度旋转矩阵。 */
         private static double[][] composeY(double[][] m, int deg) {
-            // BLOCK_ROT_Y_90 = ROT_90_Y_NEG = P321 with invertX (OctahedralGroup line 36):
-            // scaling(-1,1,1) · P321 = [[0,0,-1],[0,1,0],[1,0,0]] — a proper rotation (det +1) that
-            // sends east→south and south→west. y=270 is ROT_90_Y_POS (invertZ): east→north.
-            // Getting a row/column scale wrong here turns the rotation into a reflection, which is
-            // exactly the "one side reversed" symptom on stairs, torches and levers.
+
+
+            // Y=90 度使东转向南、南转向西；Y=270 度相反。
+
+
             return switch (deg) {
                 case 90 -> mul(new double[][]{{0, 0, -1}, {0, 1, 0}, {1, 0, 0}}, m);
                 case 180 -> mul(new double[][]{{-1, 0, 0}, {0, 1, 0}, {0, 0, -1}}, m);
@@ -639,9 +577,9 @@ public final class ModelBaker {
             };
         }
 
-        /** Left-multiplies m by the vanilla x-rotation of the given 0/90/180/270 value. */
+        /** 左乘原版 X 轴的 0/90/180/270 度旋转矩阵。 */
         private static double[][] composeX(double[][] m, int deg) {
-            // BLOCK_ROT_X_90 = ROT_90_X_NEG: -Z -> -Y ... expressed as a matrix, +Y -> -Z, +Z -> +Y.
+
             return switch (deg) {
                 case 90 -> mul(new double[][]{{1, 0, 0}, {0, 0, 1}, {0, -1, 0}}, m);
                 case 180 -> mul(new double[][]{{1, 0, 0}, {0, -1, 0}, {0, 0, -1}}, m);
@@ -650,9 +588,9 @@ public final class ModelBaker {
             };
         }
 
-        /** Left-multiplies m by the vanilla z-rotation of the given 0/90/180/270 value. */
+        /** 左乘原版 Z 轴的 0/90/180/270 度旋转矩阵。 */
         private static double[][] composeZ(double[][] m, int deg) {
-            // BLOCK_ROT_Z_90 = ROT_90_Z_NEG: +X -> +Y, +Y -> -X.
+
             return switch (deg) {
                 case 90 -> mul(new double[][]{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}}, m);
                 case 180 -> mul(new double[][]{{-1, 0, 0}, {0, -1, 0}, {0, 0, 1}}, m);
@@ -680,7 +618,7 @@ public final class ModelBaker {
                 this.mat[2][0] * x + this.mat[2][1] * y + this.mat[2][2] * z};
         }
 
-        /** Rotates a face index by this transform. */
+
         public int rotateFace(int face) {
             if (face < 0) return face;
             double[] n = FACE_NORMALS[face];
@@ -708,11 +646,9 @@ public final class ModelBaker {
                 ny = cx * s + cy * c;
             }
         }
-        // Rescale, as vanilla's CuboidRotation.computeRescale does. A rotated element shrinks by up
-        // to 1/sqrt(2) at 45 degrees, which is exactly why two ascending rails failed to meet at a
-        // slope joint: the rail plane no longer reached the neighbouring block. For each world axis
-        // the axis unit vector is run through the same rotation and the reciprocal of its largest
-        // component becomes that axis's scale, restoring the element's full reach.
+        // 采用原版 CuboidRotation 的轴向缩放补偿，恢复旋转后元素的完整延伸范围，避免坡道接缝。
+
+
         if (rot.rescale()) {
             nx *= axisRescale(rot.axis(), c, s, 0);
             ny *= axisRescale(rot.axis(), c, s, 1);
@@ -721,15 +657,10 @@ public final class ModelBaker {
         return new double[]{nx + rot.origin()[0] / 16f, ny + rot.origin()[1] / 16f, nz + rot.origin()[2] / 16f};
     }
 
-    /**
-     * One entry of vanilla {@code CuboidRotation.computeRescale}: how long the given world axis
-     * becomes under this rotation, normalised so the longest reach returns to 1.
-     *
-     * @param axisComponent 0 = x, 1 = y, 2 = z — the axis being scaled
-     */
+    /** 单轴缩放按旋转矩阵对应分量的最大绝对值取倒数。 */
     private static double axisRescale(String rotAxis, double c, double s, int axisComponent) {
-        // The rotation's own matrix, per axis, mirroring the switch in rotateVertex(). Reading the
-        // transformed axis's component along `axisComponent` gives the shrink factor for it.
+
+
         double vx = 0, vy = 0, vz = 0;
         switch (rotAxis) {
             case "x" -> {
@@ -751,16 +682,16 @@ public final class ModelBaker {
     }
 
     // ------------------------------------------------------------------
-    // Tables
 
-    /** Per-face vertex selection: [vertex][axis] -> 0 = from, 1 = to (mirrors FaceInfo.java). */
+
+    /** 各面顶点的端点选择表：0 表示起点，1 表示终点；顺序与原版 FaceInfo 相同。 */
     private static final int[][][] FACE_VERTICES = {
-        /*DOWN*/  {{0,0,1},{0,0,0},{1,0,0},{1,0,1}},
+           {{0,0,1},{0,0,0},{1,0,0},{1,0,1}},
         /*UP*/    {{0,1,0},{0,1,1},{1,1,1},{1,1,0}},
-        /*NORTH*/ {{1,1,0},{1,0,0},{0,0,0},{0,1,0}},
-        /*SOUTH*/ {{0,1,1},{0,0,1},{1,0,1},{1,1,1}},
-        /*WEST*/  {{0,1,0},{0,0,0},{0,0,1},{0,1,1}},
-        /*EAST*/  {{1,1,1},{1,0,1},{1,0,0},{1,1,0}},
+          {{1,1,0},{1,0,0},{0,0,0},{0,1,0}},
+          {{0,1,1},{0,0,1},{1,0,1},{1,1,1}},
+           {{0,1,0},{0,0,0},{0,0,1},{0,1,1}},
+           {{1,1,1},{1,0,1},{1,0,0},{1,1,0}},
     };
 
     private static final double[][] FACE_NORMALS = {
@@ -804,7 +735,7 @@ public final class ModelBaker {
         return best;
     }
 
-    /** Vanilla {@code FaceBakery.defaultFaceUV}, in 0..16 texture space. */
+    /** 原版默认面 UV，使用 0～16 的纹理坐标。 */
     public static float[] defaultFaceUV(float[] from, float[] to, int face) {
         return switch (face) {
             case Quad.DOWN  -> new float[]{from[0], 16 - to[2], to[0], 16 - from[2]};

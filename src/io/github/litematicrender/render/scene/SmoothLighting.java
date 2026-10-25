@@ -3,7 +3,7 @@ package io.github.litematicrender.render.scene;
 import io.github.litematicrender.model.Quad;
 import io.github.litematicrender.world.*;
 
-/** Cached face-local corner light shared by adjacent blocks, interpolated for inset geometry. */
+/** 相邻方块共享面角光照缓存，内凹几何按位置插值。 */
 public final class SmoothLighting {
     @FunctionalInterface public interface Blocks { BlockState at(int x,int y,int z); }
     private static final int[][] NORMAL={{0,-1,0},{0,1,0},{0,0,-1},{0,0,1},{-1,0,0},{1,0,0}};

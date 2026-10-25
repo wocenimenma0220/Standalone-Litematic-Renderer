@@ -1,6 +1,6 @@
 'use strict';
 
-/** Random-access LMESH5-7 reader and a budgeted geometry working set. No full-scene vertex arrays. */
+/** LMESH5～7 随机读取与有预算的几何工作集，不分配全场景顶点数组。 */
 class LodStream {
   static async open(view,read,size,options={}) {
     const bytes=async(offset,length)=>{
@@ -99,7 +99,7 @@ class LodStream {
       if(section?.fullReady)throw Error('渐进区块重复发布');
       if(!section){if(this.manifest.sections.length>=200000)throw Error('渐进区块数量超限');section={id:this.manifest.sections.length,position:position.slice(),min:min.slice(),max:max.slice(),levels};this.manifest.sections.push(section);this.positions.set(key,section);this.tree=this.insertTree(this.tree,section);}
       else {
-        // Already uploaded proxies keep their descriptors and buffers until a detail upload succeeds.
+        // 完整细节上传成功前，继续保留已显示的简化模型。
         if(section.levels[3].length)levels[3]=section.levels[3];section.levels=levels;
         section.min=section.min.map((v,i)=>Math.min(v,min[i]));section.max=section.max.map((v,i)=>Math.max(v,max[i]));
       }
@@ -125,7 +125,7 @@ class LodStream {
   }
   async setBudgetBytes(bytes) {
     this.checkBudget(bytes);
-    // Drain an obsolete upload before applying the smaller limit: it can still own GL buffers.
+    // 调低预算前先排空旧上传，旧任务可能仍持有 GPU 缓冲。
     const change=(this.budgetUpdate||Promise.resolve()).then(async()=>{
       if(this.disposed||this.budgetBytes===bytes)return;
       this.resizing=true;this.queue=[];this.queueAt=0;this.stopPreload();
@@ -138,7 +138,7 @@ class LodStream {
         for(const victim of victims)if(this.residentBytes>this.capacity&&this.fallbacks.has(victim.id))this.downgrade(victim.id,false);
         for(const [id,fallback] of this.fallbacks)if(this.residentBytes>this.capacity){this.drop(fallback);this.fallbacks.delete(id);}
         for(const victim of victims)if(this.residentBytes>this.capacity)this.remove(victim.id);
-        // Peak statistics refer to the current configured budget, starting after the resize.
+
         this.peakBytes=this.residentBytes+this.scratchBytes+8192*12;
         this.failed.clear();this.planKey=null;this.lastPlan=-Infinity;
       } finally {this.resizing=false;}
@@ -230,7 +230,7 @@ class LodStream {
     const job=this.preloadJob;if(!job||job.status!=='running')return null;
     while(job.at<job.sections.length*4){const section=job.sections[Math.floor(job.at/4)],level=job.at++%4;if(this.available(section.id,level)){if(this.prepared(section.id))job.prepared.add(section.id);continue;}
       const task={section,level,cost:section.costs[level],preloadId:job.id};
-      // Background preparation never evicts a visible section or cycles through an oversized world.
+      // 后台准备不淘汰可见区段，也不在超预算世界中反复循环加载。
       if(this.residentBytes+task.cost>this.capacity){job.at--;job.status='limited';return null;}return task;
     }
     job.status=job.prepared.size===job.sections.length?'complete':'limited';return null;
@@ -312,7 +312,7 @@ class LodStream {
     }
     this.batchRequests++;let packets;
     try{packets=await this.readPages(pages);}catch(error){
-      // A damaged future page must not mark the current, valid section as failed.
+      // 后续页损坏不能将当前正常区段标记为失败。
       this.pageRequests++;packet=await this.readPage(descriptor);this.accountPacket(packet);return packet;
     }
     if(!Array.isArray(packets)||packets.length!==pages.length)throw Error('模型页批次不完整');

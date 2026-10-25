@@ -1,0 +1,541 @@
+{
+  "version": 3,
+  "view": "side",
+  "cells": [
+    [
+      "-1,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "0,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "1,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "2,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "3,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "4,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "5,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "6,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "7,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "8,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "9,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "10,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "11,1",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "-1,0",
+      {
+        "id": "obsidian",
+        "states": {}
+      }
+    ],
+    [
+      "0,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "0"
+        }
+      }
+    ],
+    [
+      "1,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "1"
+        }
+      }
+    ],
+    [
+      "2,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "2"
+        }
+      }
+    ],
+    [
+      "3,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "3"
+        }
+      }
+    ],
+    [
+      "4,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "4"
+        }
+      }
+    ],
+    [
+      "5,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "5"
+        }
+      }
+    ],
+    [
+      "6,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "6"
+        }
+      }
+    ],
+    [
+      "7,0",
+      {
+        "id": "water",
+        "states": {
+          "level": "7"
+        }
+      }
+    ]
+  ],
+  "timing": {
+    "version": 1,
+    "plane": "side",
+    "cells": [
+      [
+        "-1,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "0,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "1,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "2,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "3,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "4,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "5,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "6,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "7,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "8,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "9,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "10,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "11,-1,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "-1,0,0",
+        {
+          "id": "obsidian",
+          "states": {}
+        }
+      ],
+      [
+        "0,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "0"
+          }
+        }
+      ],
+      [
+        "1,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "1"
+          }
+        }
+      ],
+      [
+        "2,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "2"
+          }
+        }
+      ],
+      [
+        "3,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "3"
+          }
+        }
+      ],
+      [
+        "4,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "4"
+          }
+        }
+      ],
+      [
+        "5,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "5"
+          }
+        }
+      ],
+      [
+        "6,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "6"
+          }
+        }
+      ],
+      [
+        "7,0,0",
+        {
+          "id": "water",
+          "states": {
+            "level": "7"
+          }
+        }
+      ]
+    ],
+    "time": 0,
+    "phase": "AT",
+    "tasks": [],
+    "scheduled": [],
+    "selected": [],
+    "events": [],
+    "tickers": [],
+    "trace": [
+      {
+        "id": 1,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "实体生成",
+        "pos": [
+          1,
+          0,
+          0
+        ],
+        "entity": 1,
+        "type": "primed_tnt"
+      },
+      {
+        "id": 2,
+        "parent": null,
+        "gt": 0,
+        "phase": "AT",
+        "kind": "实体生成",
+        "pos": [
+          5,
+          0,
+          0
+        ],
+        "entity": 2,
+        "type": "primed_tnt"
+      }
+    ],
+    "serial": 2,
+    "order": 0,
+    "parent": null,
+    "halted": false,
+    "steps": 0,
+    "revision": 2,
+    "components": {
+      "version": 1,
+      "containers": [],
+      "outputs": [],
+      "contacts": [],
+      "entityToken": 0
+    },
+    "analog": {
+      "version": 1,
+      "sources": [],
+      "enderSlots": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    "devices": {
+      "version": 1,
+      "toggles": [],
+      "outputs": [],
+      "random": "25214904170"
+    },
+    "pistons": {
+      "version": 1,
+      "moving": []
+    },
+    "entities": {
+      "version": 1,
+      "nextId": 3,
+      "items": [
+        [
+          1,
+          {
+            "id": 1,
+            "type": "primed_tnt",
+            "pos": [
+              1.5,
+              0,
+              0.5
+            ],
+            "previous": [
+              1.5,
+              0,
+              0.5
+            ],
+            "velocity": [
+              0,
+              0,
+              0
+            ],
+            "width": 0.9800000190734863,
+            "height": 0.9800000190734863,
+            "facing": "east",
+            "age": 0,
+            "enabled": true,
+            "fuel": 0,
+            "fuse": 80,
+            "onGround": false,
+            "passengers": [],
+            "eyeHeight": 0.15000000596046448,
+            "explosionPower": 4
+          }
+        ],
+        [
+          2,
+          {
+            "id": 2,
+            "type": "primed_tnt",
+            "pos": [
+              5.5,
+              0,
+              0.5
+            ],
+            "previous": [
+              5.5,
+              0,
+              0.5
+            ],
+            "velocity": [
+              0,
+              0,
+              0
+            ],
+            "width": 0.9800000190734863,
+            "height": 0.9800000190734863,
+            "facing": "east",
+            "age": 0,
+            "enabled": true,
+            "fuel": 0,
+            "fuse": 160,
+            "onGround": false,
+            "passengers": [],
+            "eyeHeight": 0.15000000596046448,
+            "explosionPower": 4
+          }
+        ]
+      ]
+    },
+    "fluids": {
+      "version": 1,
+      "ticks": [],
+      "selected": [],
+      "order": 0,
+      "collected": -1,
+      "initialized": false,
+      "rules": {
+        "tntExplodes": true,
+        "waterSourceConversion": true,
+        "tntExplosionDropDecay": false
+      }
+    },
+    "explosions": {
+      "version": 1,
+      "nextId": 1,
+      "jobs": [],
+      "effects": []
+    }
+  },
+  "zoom": 56,
+  "pan": {
+    "x": 220,
+    "y": 280
+  }
+}

@@ -5,19 +5,26 @@ import io.github.litematicrender.nbt.io.NbtFileUtils;
 import java.nio.file.*;
 import java.util.*;
 
-/** Copy-on-write NBT edits preserve unknown states, entities and untouched region data. */
+/** NBT 采用写时复制，保留未知状态、实体和未修改区域数据。 */
 public final class ProjectionEdits {
     private NbtCompound root;
     private final LinkedHashSet<io.github.litematicrender.world.Vec3i> touched=new LinkedHashSet<>();
     public NbtCompound data(){return root;}
     public List<io.github.litematicrender.world.Vec3i> previewCells(){var cells=new LinkedHashSet<io.github.litematicrender.world.Vec3i>();for(var p:touched)for(int x=-1;x<=1;x++)for(int y=-1;y<=1;y++)for(int z=-1;z<=1;z++)cells.add(new io.github.litematicrender.world.Vec3i(p.x()+x,p.y()+y,p.z()+z));return List.copyOf(cells);}
-    public void squash(Checkpoint before,boolean changed){if(!changed)return;undo.clear();undo.addAll(before.undo());undo.push(before.root());if(undo.size()>40)undo.removeLast();redo.clear();}
+    public void clearPreview(){touched.clear();}
+    // 每条历史记录同时保存受影响坐标，重建清空预览后，撤销仍能正确补画联动位置。
+    public void squash(Checkpoint before,boolean changed){
+        if(!changed)return;var positions=new LinkedHashSet<io.github.litematicrender.world.Vec3i>();
+        for(var frame:undo){positions.addAll(frame.positions());if(frame.root()==before.root())break;}
+        undo.clear();undo.addAll(before.undo());undo.push(new Frame(before.root(),Set.copyOf(positions)));if(undo.size()>40)undo.removeLast();redo.clear();
+    }
 
-    private final ArrayDeque<NbtCompound> undo=new ArrayDeque<>(),redo=new ArrayDeque<>();
+    public record Frame(NbtCompound root,Set<io.github.litematicrender.world.Vec3i> positions){}
+    private final ArrayDeque<Frame> undo=new ArrayDeque<>(),redo=new ArrayDeque<>();
     public final Path source;
-    public record Checkpoint(NbtCompound root,ArrayDeque<NbtCompound> undo,ArrayDeque<NbtCompound> redo){}
-    public Checkpoint checkpoint(){return new Checkpoint(root,new ArrayDeque<>(undo),new ArrayDeque<>(redo));}
-    public void restore(Checkpoint saved){root=saved.root();undo.clear();undo.addAll(saved.undo());redo.clear();redo.addAll(saved.redo());}
+    public record Checkpoint(NbtCompound root,ArrayDeque<Frame> undo,ArrayDeque<Frame> redo,Set<io.github.litematicrender.world.Vec3i> touched){}
+    public Checkpoint checkpoint(){return new Checkpoint(root,new ArrayDeque<>(undo),new ArrayDeque<>(redo),Set.copyOf(touched));}
+    public void restore(Checkpoint saved){root=saved.root();undo.clear();undo.addAll(saved.undo());redo.clear();redo.addAll(saved.redo());touched.clear();touched.addAll(saved.touched());}
     public ProjectionEdits(Path source)throws Exception{this.source=source;root=NbtFileUtils.readSchematic(source);}
     private static NbtCompound copy(NbtCompound value){return (NbtCompound)value.copy();}
     private static NbtList listCopy(NbtList list){var out=new NbtList();for(int i=0;i<list.size();i++)out.add(list.get(i));return out;}
@@ -48,7 +55,7 @@ public final class ProjectionEdits {
         PackedLongArray words=old;
         if(oldBits!=newBits){long length=(volume*newBits+63)/64;if(length>Integer.MAX_VALUE)throw new IllegalArgumentException("区域过大，无法扩展方块调色板");long[] repacked=new long[(int)length];for(long i=0;i<volume;i++){long v=LitematicaSchematic.getAt(old,oldBits,i),offset=i*newBits;int w=(int)(offset>>>6),b=(int)(offset&63);repacked[w]|=v<<b;if(b+newBits>64)repacked[w+1]|=v>>>(64-b);}words=PackedLongArray.wrap(repacked);}
         var changes=new HashMap<Integer,Long>();setWords(changes,words,newBits,index,id);region.put("BlockStates",new NbtPackedLongArray(words.withWords(changes))).put("BlockStatePalette",palette);
-        // State-only debug changes retain container contents. Replacement / deletion removes stale data.
+        // 同类型状态修改保留容器内容，替换或删除则清理旧数据。
         if(!previousState.blockId().equals(raw.blockId()))for(String key:List.of("TileEntities","PendingBlockTicks","PendingFluidTicks")){
             var list=input.getList(key).orElse(null);if(list==null)continue;var filtered=new NbtList();for(int i=0;i<list.size();i++){var item=list.get(i);if(item instanceof NbtCompound c&&c.getIntOrDefault("x",Integer.MIN_VALUE)==at[0]&&c.getIntOrDefault("y",Integer.MIN_VALUE)==at[1]&&c.getIntOrDefault("z",Integer.MIN_VALUE)==at[2])continue;filtered.add(item);}region.put(key,filtered);
         }
@@ -71,10 +78,10 @@ public final class ProjectionEdits {
         next.put("Regions",regions);var metadata=copy(root.getCompoundOrDefault("Metadata",new NbtCompound()));metadata.putInt("TotalBlocks",(int)Math.max(0,metadata.getIntOrDefault("TotalBlocks",0)+delta)).putString("Author","LiteKinda").putLong("TimeModified",System.currentTimeMillis()).putInt("RegionCount",regions.size());
         int[] lo={Integer.MAX_VALUE,Integer.MAX_VALUE,Integer.MAX_VALUE},hi={Integer.MIN_VALUE,Integer.MIN_VALUE,Integer.MIN_VALUE};long volume=0;
         for(String key:regions.getKeys()){var r=regions.getCompound(key).orElse(null);if(r==null)continue;var p=SubRegion.readBlockPos(r,"Position");var s=SubRegion.readBlockPos(r,"Size");int[] a={p.x(),p.y(),p.z()},b={p.x()+s.x()-Integer.signum(s.x()),p.y()+s.y()-Integer.signum(s.y()),p.z()+s.z()-Integer.signum(s.z())};for(int j=0;j<3;j++){lo[j]=Math.min(lo[j],Math.min(a[j],b[j]));hi[j]=Math.max(hi[j],Math.max(a[j],b[j]));}volume+=(long)Math.abs(s.x())*Math.abs(s.y())*Math.abs(s.z());}
-        metadata.put("EnclosingSize",pos(hi[0]-lo[0]+1,hi[1]-lo[1]+1,hi[2]-lo[2]+1)).putInt("TotalVolume",(int)Math.min(Integer.MAX_VALUE,volume));next.put("Metadata",metadata);undo.push(root);if(undo.size()>40)undo.removeLast();redo.clear();root=next;touched.add(new io.github.litematicrender.world.Vec3i(xyz[0],xyz[1],xyz[2]));return true;
+        metadata.put("EnclosingSize",pos(hi[0]-lo[0]+1,hi[1]-lo[1]+1,hi[2]-lo[2]+1)).putInt("TotalVolume",(int)Math.min(Integer.MAX_VALUE,volume));next.put("Metadata",metadata);var position=new io.github.litematicrender.world.Vec3i(xyz[0],xyz[1],xyz[2]);undo.push(new Frame(root,Set.of(position)));if(undo.size()>40)undo.removeLast();redo.clear();root=next;touched.add(position);return true;
     }
-    public boolean undo(){if(undo.isEmpty())return false;redo.push(root);root=undo.pop();return true;}
-    public boolean redo(){if(redo.isEmpty())return false;undo.push(root);root=redo.pop();return true;}
+    public boolean undo(){if(undo.isEmpty())return false;var frame=undo.pop();redo.push(new Frame(root,frame.positions()));root=frame.root();touched.addAll(frame.positions());return true;}
+    public boolean redo(){if(redo.isEmpty())return false;var frame=redo.pop();undo.push(new Frame(root,frame.positions()));root=frame.root();touched.addAll(frame.positions());return true;}
     public Map<String,Object> status(){return Map.of("undo",undo.size(),"redo",redo.size(),"source",source.toAbsolutePath().toString());}
     public void write(Path target)throws Exception{
         var output=copy(root);var metadata=copy(root.getCompoundOrDefault("Metadata",new NbtCompound()));metadata.putString("Author","LiteKinda").putLong("TimeModified",System.currentTimeMillis());output.put("Metadata",metadata);

@@ -5,7 +5,7 @@ import io.github.litematicrender.nbt.io.NbtSizeTracker;
 import java.io.DataInput;
 import java.io.IOException;
 
-/** Numeric + string scalar tags. */
+/** 数字与字符串标量标签。 */
 public final class NbtScalars {
     private NbtScalars() {}
 

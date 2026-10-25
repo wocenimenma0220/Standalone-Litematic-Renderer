@@ -2,7 +2,7 @@ package io.github.litematicrender.nbt.io;
 
 import java.io.IOException;
 
-/** Port of malilib SizeTracker: guards NBT parse memory use. */
+/** 从 malilib SizeTracker 移植，用于限制 NBT 解析内存。 */
 public final class NbtSizeTracker {
     public static final long DEFAULT_MAX_BYTES = 1024L * 1024L * 1024L;      // 1 GB
     public static final long FILE_MAX_BYTES    =  512L * 1024L * 1024L;      // 512 MB
@@ -45,7 +45,7 @@ public final class NbtSizeTracker {
         return this.currentBytes;
     }
 
-    /** Diagnostics and boundary tests; this is retained heap, not logical decompressed bytes. */
+    /** 此处统计实际保留的堆数据，不是逻辑解压字节数。 */
     public long retainedBytes() { return this.retainedBytes; }
     public long retainedLimit() { return this.retainedLimit; }
 }

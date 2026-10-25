@@ -1,4 +1,4 @@
-"""Inspect NBT array lengths without allocating their payloads."""
+"""只读取 NBT 数组长度，不分配实际数组载荷。"""
 import gzip
 import json
 import struct

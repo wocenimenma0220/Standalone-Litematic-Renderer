@@ -24,7 +24,7 @@ app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish
     const hit=await window.engine.pickBlock({origin:[2.05,3,0],direction:[0,-2,2.05],maximum:10});
     if(!hit.hit||hit.position.join(',')!=='2,0,2')throw Error('Skull support face could not be picked: '+JSON.stringify(hit));`);
   }
-  // The real CPU preview must display the same newly tilted minecart scene.
+
   await run(`els.previewBackend.value='cpu';els.previewBackend.dispatchEvent(new Event('change'));
    const end=Date.now()+30000;while(state.rendering||cpuPreviewRunning||cpuPreviewPending){if(Date.now()>end)throw Error('CPU preview timeout');await new Promise(r=>setTimeout(r,20));}
    if(!state.cpuPreviewReady)throw Error('CPU minecart preview failed');`);

@@ -2,7 +2,7 @@ import io.github.litematicrender.serve.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Cold preparation stages and warm cache reuse, without conflating file-ready with a UI frame. */
+
 public final class LargeOpenBenchmark {
     static void save(Path out, Map<String,Object> report) throws Exception {
         var method=JsonRpcServer.class.getDeclaredMethod("toJson",Object.class);method.setAccessible(true);

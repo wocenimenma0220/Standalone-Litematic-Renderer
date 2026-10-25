@@ -1,5 +1,5 @@
 'use strict';
-/* Small source-specific controls; shares the existing container/editor styles. */
+/** 复用容器与编辑器样式的信号源专用控件。 */
 (function(root){
   const direction={north:'北',south:'南',east:'东',west:'西',up:'上',down:'下'};
   root.BoardSourceControls=function(host,context,pos){host.replaceChildren();const world=context.world(),fields=world.sourceFields(pos);if(!fields.length){host.hidden=true;return;}host.hidden=false;const data=world.sourceSettingsAt?.(pos)||world.sourceAt(pos),inputs=new Map();

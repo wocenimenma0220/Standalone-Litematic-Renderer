@@ -1,6 +1,5 @@
 'use strict';
-/* Planar interactions for signal sources and vanilla dispenser item families.
- * Commands are interpreted only against the local board; never OS commands. */
+/** 信号源和发射器交互只作用于本地二维画布；画布命令绝不能作为系统命令执行。 */
 (function(root){
  const B=typeof module!=='undefined'?require('./board-entities.js'):root.BoardTiming,I=typeof module!=='undefined'?require('./board-item-data.js'):root.BoardItemData;
  const {TimingWorld,DIR,OPP}=B,P=TimingWorld.prototype,clone=x=>JSON.parse(JSON.stringify(x)),at=(p,d,n=1)=>p.map((v,i)=>v+DIR[d][i]*n),key=p=>p.join(',');
@@ -50,5 +49,6 @@
  P.refreshEntityContacts=function(){this.ensureEntities();for(const [k,s]of this.cells)if(B.isPlate(s.id)){const p=k.split(',').map(Number),box=[p[0]+.125,p[1],p[2]+.125,p[0]+.875,p[1]+.25,p[2]+.875],stone=['stone_pressure_plate','polished_blackstone_pressure_plate'].includes(s.id),found=[...this.entities.values()].filter(v=>B.intersects(B.aabb(v),box)&&(!stone||['piglin','piglin_baby','snow_golem','iron_golem'].includes(v.type))),previous=this.contacts.get(k);if((found.length||previous?.automatic)&&(previous?.count||0)!==found.length){this.setContact(p,found.length,stone?'living':'item');this.contacts.get(k).automatic=true;}}};
  const tickOrdinary=P.tickOrdinaryEntity;
  P.tickOrdinaryEntity=function(id){tickOrdinary.call(this,id);const e=this.entities.get(id);if(e?.type==='projectile'&&['arrow','tipped_arrow','spectral_arrow'].includes(e.projectile))for(const [k,s]of this.cells)if(B.isButton(s.id)&&!['stone_button','polished_blackstone_button'].includes(s.id)&&s.states.powered!=='true'){const p=k.split(',').map(Number);if(this.arrowPressingButton(p,s))this.pressButton(p);}};
- if(typeof module!=='undefined')module.exports=B;
+ if(typeof module!=='undefined'){require('./board-fluids.js')(B);require('./board-explosions.js')(B);require('./board-tnt.js')(B);module.exports=B;}
+ else{root.BoardFluids(B);root.BoardExplosions(B);root.BoardTnt(B);}
 })(typeof window!=='undefined'?window:globalThis);

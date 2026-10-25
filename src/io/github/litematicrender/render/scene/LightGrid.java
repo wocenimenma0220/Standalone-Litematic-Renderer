@@ -1,6 +1,6 @@
 package io.github.litematicrender.render.scene;
 
-/** Flat dense address space backed by lazy uniform/nibble pages; no full byte channels. */
+/** 密集地址空间使用延迟分配的均匀页和半字节页，不分配完整字节通道。 */
 final class LightGrid {
     final int length;
     private final LightPage[] pages;

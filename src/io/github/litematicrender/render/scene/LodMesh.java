@@ -3,7 +3,7 @@ package io.github.litematicrender.render.scene;
 import java.util.*;
 import io.github.litematicrender.render.scene.SceneMesh.*;
 
-/** Distant surface proxies; entities and generated text/skin sprites retain full geometry. */
+/** 远处使用简化表面，实体、文字和皮肤保留完整几何。 */
 public final class LodMesh {
     private LodMesh() {}
     private static final int[][] NORMAL={{0,-1,0},{0,1,0},{0,0,-1},{0,0,1},{-1,0,0},{1,0,0}};
@@ -40,7 +40,7 @@ public final class LodMesh {
         if(step>=4)simplifyBlending(full,result,section,step);
         return result;
     }
-    /** Retain a representative surface plane, so a shallow water tile does not become a cube. */
+    /** 保留代表性表面高度，避免浅水面变成整格立方体。 */
     private static void simplifyBlending(SceneMesh full,SceneMesh result,SectionVisibility.Position section,int step) {
         int n=16/step;MeshQuad[][] voxels=new MeshQuad[n*n*n][];
         for(var layer:List.of(full.portal,full.fluid,full.translucent))for(var q:layer) {

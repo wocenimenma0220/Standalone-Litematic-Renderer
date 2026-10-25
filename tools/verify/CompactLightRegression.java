@@ -31,8 +31,8 @@ public class CompactLightRegression {
                     int expected=dense.cellLight(x,y,z);if(compact.cellLight(x,y,z)!=expected||sparse.cellLight(x,y,z)!=expected||streamed.cellLight(x,y,z)!=expected)throw new AssertionError("Light mismatch at "+x+","+y+","+z+" real="+real);
                 }
             }
-            // Tall columns exercise absorption above/below roofs, separated absorbers and the
-            // complete 15-cell falloff. Distant roofs also sample analytically lit empty gaps.
+
+
             int tx=97,ty=129,tz=35;var tall=new BlockState[tx*ty*tz];Arrays.fill(tall,BlockState.air());
             var stone=registry.getOrMissing("minecraft:stone").defaultState;
             var water=registry.getOrMissing("minecraft:water").defaultState;

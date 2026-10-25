@@ -9,7 +9,7 @@ import java.net.*;
 import java.util.*;
 import java.util.concurrent.atomic.*;
 
-/** Actual 1.0.17.2 light classes versus new packed grids; counters do not modify either engine. */
+
 public final class PublishedLightingRegression {
     static long heap(){return java.lang.management.ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getUsed();}
     static double median(List<Double> values){values.sort(Double::compare);return values.get(values.size()/2);}

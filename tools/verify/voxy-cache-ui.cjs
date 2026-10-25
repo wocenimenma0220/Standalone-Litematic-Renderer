@@ -31,7 +31,7 @@ app.once('browser-window-created',(_event,win)=>{win.webContents.setBackgroundTh
    check(full.peakBytes<=full.budgetBytes&&full.transferPeakBytes<=full.transferLimitBytes,'budget exceeded');check(state.view.gl.getError()===0,'WebGL error');
    const coldMillis=performance.now()-first;first=performance.now();await buildView();await state.view.stream.settled();drawView();const warmMillis=performance.now()-first;
    check(!state.overview&&state.viewReady,'warm preview not ready');check(els.log.textContent.includes('已复用磁盘场景缓存'),'warm hit missing');
-   // Cancel an actual cold task, then open a different input. The old id cannot be adopted.
+   // 取消真实冷启动任务后打开另一输入，旧任务标识不得被复用。
    const old=await window.engine.beginPreview({force:true,realLighting:true,lightingEnabled:true});await wait(30);await window.engine.cancelPreview();let stale=false;try{await window.engine.previewResult(old.id,false);}catch(e){stale=true;}check(stale,'cancelled result adopted');
    await loadFile(${JSON.stringify(path.join(__dirname,'feature-output/water-trapdoors.litematic'))});await state.view.stream.settled();drawView();check(state.viewReady&&!state.scenePreparing,'replacement scene not ready');
    check(!els.materials.disabled&&!els.export.disabled,'controls not restored');

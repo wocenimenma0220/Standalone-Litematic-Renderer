@@ -6,7 +6,7 @@ import io.github.litematicrender.util.MiniJson;
 import java.nio.file.*;
 import java.util.*;
 
-/** Explicit editor blocks; signed coordinates and full states survive export. */
+/** 导出显式编辑方块，保留带符号坐标和完整状态。 */
 public final class BoardSchematic {
     private BoardSchematic() {}
     private static NbtCompound pos(int x,int y,int z){return new NbtCompound().putInt("x",x).putInt("y",y).putInt("z",z);}

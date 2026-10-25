@@ -1,25 +1,20 @@
 package io.github.litematicrender.model;
 
-/**
- * Baked quad — mirrors net.minecraft.client.resources.model.geometry.BakedQuad (data part).
- */
+/** 烘焙后的面片数据，对应原版 BakedQuad 的数据部分。 */
 public final class Quad {
     public final float x0, y0, z0;
     public final float x1, y1, z1;
     public final float x2, y2, z2;
     public final float x3, y3, z3;
-    /** atlas-normalized UVs (0..1 within the sprite) */
+    /** 单张贴图内部归一化的 UV 坐标，范围为 0～1。 */
     public final float u0, v0, u1, v1, u2, v2, u3, v3;
-    /** 0=down,1=up,2=north(-z),3=south(+z),4=west(-x),5=east(+x); -1 = uncullable/flat */
+    /** 方向索引依次为下、上、北、南、西、东；-1 表示不进行面剔除。 */
     public final int face;
-    public final String spriteId;      // "minecraft:block/stone"
-    public final int tintIndex;        // -1 = untinted
-    public final int shadeFaceOverride;  // -1 = none, else face index
+    public final String spriteId;
+    public final int tintIndex;        // -1 表示不染色。
+    public final int shadeFaceOverride;
     public final int lightEmission;
-    /**
-     * The model's texture reference asked for {@code "force_translucent": true}, so this face must
-     * be drawn in the translucent pass regardless of the sprite's own alpha (redstone dust).
-     */
+    /** 贴图槽位要求强制半透明时，此面始终进入混合通道，典型用途为红石粉。 */
     public final boolean forceTranslucent;
 
     public static final int DOWN = 0, UP = 1, NORTH = 2, SOUTH = 3, WEST = 4, EAST = 5, NO_FACE = -1;
@@ -50,7 +45,7 @@ public final class Quad {
         this.forceTranslucent = forceTranslucent;
     }
 
-    /** normal by face (unit axis vectors, consistent with quad winding) */
+
     public float nx() { return this.face == WEST ? -1 : this.face == EAST ? 1 : 0; }
     public float ny() { return this.face == DOWN ? -1 : this.face == UP ? 1 : 0; }
     public float nz() { return this.face == NORTH ? -1 : this.face == SOUTH ? 1 : 0; }

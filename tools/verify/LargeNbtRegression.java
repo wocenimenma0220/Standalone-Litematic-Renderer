@@ -39,7 +39,7 @@ public final class LargeNbtRegression {
         bytes.reset();try(var writer=new DataOutputStream(bytes)){writer.writeInt(incompressibleWords.length);for(long word:incompressibleWords)writer.writeLong(word);}
         var incompressible=PackedLongArray.read(new DataInputStream(new ByteArrayInputStream(bytes.toByteArray())),new NbtSizeTracker(NbtSizeTracker.SCHEMATIC_MAX_BYTES,true));
         check(incompressible.retainedBytes()>incompressibleWords.length*7L,"low-compression pages were not charged at retained size");
-        // More than the decoded-page budget: sequential runs, revisits and independent threads.
+
         long[] evictionWords=new long[PackedLongArray.PAGE_WORDS*130+3];for(int i=0;i<evictionWords.length;i++)evictionWords[i]=random.nextLong();
         bytes.reset();try(var writer=new DataOutputStream(bytes)){writer.writeInt(evictionWords.length);for(long word:evictionWords)writer.writeLong(word);}
         var evicting=PackedLongArray.read(new DataInputStream(new ByteArrayInputStream(bytes.toByteArray())),new NbtSizeTracker(NbtSizeTracker.SCHEMATIC_MAX_BYTES,true));

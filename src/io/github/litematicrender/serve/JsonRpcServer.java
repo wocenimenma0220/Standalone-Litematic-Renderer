@@ -14,17 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * Line-based JSON-RPC over stdin/stdout, used by the Electron shell to drive the render engine.
- *
- * <p>Protocol: one JSON object per line. A request is
- * <code>{"id":N,"method":"...","params":{...}}</code>; the reply is
- * <code>{"id":N,"ok":true,"result":{...}}</code> or <code>{"id":N,"ok":false,"error":"..."}</code>.
- * Unsolicited progress/log lines have no <code>id</code>.
- *
- * <p>stdout carries protocol traffic only; anything a renderer prints must go to stderr, or it
- * would corrupt the stream.
- */
+/** 逐行 JSON-RPC：请求携带 id、method 和 params，回复保留相同 id，进度事件不占用请求编号。 */
 public final class JsonRpcServer {
     private final RenderEngine engine;
     private final BufferedReader in;
@@ -40,24 +30,20 @@ public final class JsonRpcServer {
     public static void main(String[] args) throws Exception {
         Path home = Path.of(System.getProperty("litematicrender.home", ".")).toAbsolutePath();
         RenderEngine engine = new RenderEngine(home);
-        // The protocol is written straight to file descriptor 1 with an explicit UTF-8 encoder.
-        //
-        // Since Java 18 System.out encodes with stdout.encoding, which defaults to the platform
-        // charset (GBK on a zh-CN Windows) and is NOT changed by -Dfile.encoding. Going through
-        // System.out therefore mangled every non-ASCII string in a reply — a Chinese resource-pack
-        // filename arrived as replacement characters. Encoding here makes the wire format
-        // independent of the launcher's flags and the host locale.
+        // 直接向标准输出文件描述符写 UTF-8，避免系统默认编码损坏中文文件名。
+
+
         PrintStream protocol = new PrintStream(
             new java.io.BufferedOutputStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), 8192),
             false, StandardCharsets.UTF_8);
-        // Keep protocol stdout clean: everything else goes to stderr.
+        // 标准输出仅用于协议，其他日志写入标准错误流。
         System.setOut(System.err);
         JsonRpcServer server = new JsonRpcServer(engine,
             new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8)), protocol);
         server.run();
     }
 
-    /** Reads requests until EOF or a {@code shutdown} call. */
+
     public void run() {
         emit(Map.of("event", "ready", "pid", ProcessHandle.current().pid(),
             "home", this.engine.home().toString(), "temporaryCaches", Map.of(
@@ -77,7 +63,7 @@ public final class JsonRpcServer {
         }
     }
 
-    /** @return false when the server should stop. */
+
     private boolean handle(String line) {
         long id = -1;
         try {
@@ -107,7 +93,7 @@ public final class JsonRpcServer {
             case "loadResources": {
                 String root = MiniJson.asString(p.get("root"), null);
                 Path path = root == null ? this.engine.defaultPackRoot() : Path.of(root);
-                // "imports" is the user's pack list, highest priority last.
+
                 java.util.List<String> imports = new java.util.ArrayList<>();
                 java.util.List<Object> arr = MiniJson.asArray(p.get("imports"));
                 if (arr != null) {
@@ -125,7 +111,7 @@ public final class JsonRpcServer {
 
             case "editPick": {var selection=MiniJson.asObject(p.get("selection"));return this.engine.editPick(vector(p,"origin"),vector(p,"direction"),MiniJson.asDouble(p.get("maximum"),4096),selection==null?null:vector(selection,"min"),selection==null?null:vector(selection,"max"));}
             case "editStates": return this.engine.editStates(MiniJson.asArray(p.get("positions")));
-            case "commitEdits": return this.engine.commitEdits();
+            case "commitEdits": return this.engine.commitEdits(MiniJson.asBool(p.get("rebasePreview"),false));
             case "editPatch": {var selection=MiniJson.asObject(p.get("selection"));return this.engine.editPatch(Path.of(require(p,"directory")),selection==null?null:vector(selection,"min"),selection==null?null:vector(selection,"max"));}
             case "inspectPosition": {var position=MiniJson.asArray(p.get("position"));if(position==null||position.size()!=3)throw new IllegalArgumentException("无效坐标");return this.engine.inspectPosition(position.stream().mapToInt(v->((Number)v).intValue()).toArray());}
             case "editBlock": return this.engine.editBlock(p);
@@ -149,8 +135,8 @@ public final class JsonRpcServer {
 
             case "renderPreview": {
                 if(MiniJson.asBool(p.get("force"),false))this.engine.invalidateScene();
-                // Renders to a temp PNG and returns the bytes inline so the UI can show it
-                // without another file round-trip.
+
+
                 RenderSettings s = settingsFrom(p);
                 s.previewZoom = (float)Math.max(.05,Math.min(20,MiniJson.asDouble(p.get("previewZoom"),1)));
                 Path tmp = java.nio.file.Files.createTempFile("litematic-preview", ".png");
@@ -187,7 +173,10 @@ public final class JsonRpcServer {
                 Path atlasOut = Path.of(require(p, "atlas"));
                 Path meshOut = Path.of(require(p, "mesh"));
                 if(MiniJson.asBool(p.get("streaming"),false))return this.engine.exportStreamScene(atlasOut,meshOut,MiniJson.asBool(p.get("force"),false),MiniJson.asBool(p.get("realLighting"),false),MiniJson.asBool(p.get("lightingEnabled"),true));
-                return this.engine.exportScene(atlasOut, meshOut, MiniJson.asBool(p.get("force"),false), MiniJson.asBool(p.get("realLighting"),false),MiniJson.asBool(p.get("lightingEnabled"),true));
+                String progressId=MiniJson.asString(p.get("progressId"),"");
+                return this.engine.exportScene(atlasOut, meshOut, MiniJson.asBool(p.get("force"),false), MiniJson.asBool(p.get("realLighting"),false),MiniJson.asBool(p.get("lightingEnabled"),true),stage->{
+                    if(!progressId.isEmpty())emit(Map.of("event","previewProgress","progressId",progressId,"stage",stage));
+                });
             }
 
             case "cancel":
@@ -268,14 +257,14 @@ public final class JsonRpcServer {
         emit(Map.of("event", "log", "message", message));
     }
 
-    /** Writes one JSON line and flushes; synchronized so concurrent writers can't interleave. */
+    /** 同步写入一整行 JSON 并刷新，防止并发回复交错。 */
     private synchronized void emit(Map<String, Object> msg) {
         this.out.println(toJson(msg));
         this.out.flush();
     }
 
     // ------------------------------------------------------------------
-    // Minimal JSON writer (MiniJson only parses).
+
 
     @SuppressWarnings("unchecked")
     static String toJson(Object o) {
@@ -343,7 +332,7 @@ public final class JsonRpcServer {
         sb.append('"');
     }
 
-    /** Renders a PNG to a data URL; helper for callers that embed images. */
+
     public static String dataUrl(Image image) throws java.io.IOException {
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
         javax.imageio.ImageIO.write(image.toBuffered(), "png", bos);

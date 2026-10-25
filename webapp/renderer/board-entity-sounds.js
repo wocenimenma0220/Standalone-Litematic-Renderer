@@ -1,0 +1,3 @@
+'use strict';
+// 从原版 26.3 资源缓存导出的实体音效。
+(function(root){const data={"tnt_primed":{"event":"entity.tnt.primed","volume":0.8,"pitch":1,"samples":[{"file":"board-audio/sounds/random/fuse.ogg","volume":1,"pitch":1,"weight":1}]},"explosion":{"event":"entity.generic.explode","volume":0.8,"pitch":1,"samples":[{"file":"board-audio/sounds/random/explode1.ogg","volume":1,"pitch":1,"weight":1},{"file":"board-audio/sounds/random/explode2.ogg","volume":1,"pitch":1,"weight":1},{"file":"board-audio/sounds/random/explode3.ogg","volume":1,"pitch":1,"weight":1},{"file":"board-audio/sounds/random/explode4.ogg","volume":1,"pitch":1,"weight":1}]}};if(typeof module!=='undefined')module.exports=data;else root.BoardEntitySounds=data;})(typeof window!=='undefined'?window:globalThis);

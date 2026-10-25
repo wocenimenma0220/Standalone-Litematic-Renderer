@@ -4,7 +4,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import io.github.litematicrender.render.scene.SceneMesh.MeshQuad;
 
-/** A static plane tree; intersecting polygons are split before camera-dependent traversal. */
+/** 静态 BSP 平面树先分割相交面，再按相机位置遍历。 */
 public final class TranslucentBsp {
     private static final double EPS=1e-5;
     public static final class Node {
@@ -22,7 +22,7 @@ public final class TranslucentBsp {
         Vertex mix(Vertex other,double t){return new Vertex(x+(other.x-x)*t,y+(other.y-y)*t,z+(other.z-z)*t,u+(other.u-u)*t,v+(other.v-v)*t,ao+(other.ao-ao)*t,r+(other.r-r)*t,g+(other.g-g)*t,b+(other.b-b)*t);}
     }
     private TranslucentBsp(int size){limit=(int)Math.min(750000,Math.max(10000,(long)size*3));}
-    /** A single quad and its old subdivided grid have the same interpolation. */
+    /** 单面与其原细分网格具有相同插值结果时可合并。 */
     static boolean affine(MeshQuad face) {
         double[] p=plane(face);
         return affineColor(face)&&p!=null&&Math.abs(p[0]*face.x3+p[1]*face.y3+p[2]*face.z3-p[3])<EPS
@@ -128,7 +128,7 @@ public final class TranslucentBsp {
         return new MeshQuad(x,y,z,u[0],v[0],u[1],v[1],u[2],v[2],u[3],v[3],source.spriteId,source.rgb,source.image,source.tintR,source.tintG,source.tintB,source.shade,source.ao==null?null:ao,source.layer,source.doubleSided).colors(colors)
             .owner(source.blockX,source.blockY,source.blockZ,source.regionName).entityOwner(source.entityIndex,source.regionName);
     }
-    /** Orthographic to-eye vector or perspective eye position. */
+
     public void visit(double[] eye,boolean orthographic,Consumer<MeshQuad> consumer) {if(!nodes.isEmpty())visit(0,eye,orthographic,consumer);}
     private void visit(int index,double[] eye,boolean ortho,Consumer<MeshQuad> consumer) {
         Node node=nodes.get(index);double[] p=node.plane;double side=p[0]*eye[0]+p[1]*eye[1]+p[2]*eye[2]-(ortho?0:p[3]);

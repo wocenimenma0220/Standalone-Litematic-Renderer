@@ -21,7 +21,7 @@ class UiSettings {
   async read() {
     if (!this.state) {
       let stored = {};
-      try { stored = JSON.parse(await fs.readFile(this.file, 'utf8')) || {}; } catch { /* first launch */ }
+      try { stored = JSON.parse(await fs.readFile(this.file, 'utf8')) || {}; } catch {   }
       this.state = {
         hideWelcome: stored.hideWelcome === true,
         consoleHidden: stored.consoleHidden === true,
@@ -63,7 +63,7 @@ class UiSettings {
     let dataUrl = null;
     try {
       if ((await fs.stat(this.imageFile)).size <= BACKGROUND_LIMIT) dataUrl = this.decode(await fs.readFile(this.imageFile)).dataUrl;
-    } catch { /* no imported background */ }
+    } catch {   }
     return {
       showWelcome: !stored.hideWelcome,
       consoleHidden: stored.consoleHidden,

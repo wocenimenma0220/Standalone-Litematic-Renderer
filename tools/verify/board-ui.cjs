@@ -1,4 +1,4 @@
-const {chromium}=require('C:/Users/roy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('./browser-runtime.cjs');
 const path=require('node:path'),assert=require('node:assert/strict');
 (async()=>{
   const browser=await chromium.launch({headless:true,channel:'msedge',args:['--allow-file-access-from-files']});

@@ -18,15 +18,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * .litematic file reader.
- * Mirrors fi.dy.masa.litematica.schematic.LitematicaSchematic.readFromData /
- * readSubRegionsFromData + LitematicaBlockStateContainer.
- */
+/** 投影读取器，参考 litematica 的区域解析和位压缩方块容器。 */
 public final class LitematicaSchematic {
     public static final int MAX_SUPPORTED_VERSION = 7;
 
-    // ---------- metadata ----------
+
     public static final class Metadata {
         public String name = "?";
         public String author = "?";
@@ -65,12 +61,12 @@ public final class LitematicaSchematic {
         }
     }
 
-    // ---------- container ----------
+
     public static final class BlockContainer {
         public final int sizeX, sizeY, sizeZ;
         public final int bits;
         public final PackedLongArray storage;
-        /** resolved palette; index 0 is conventionally air */
+        /** 已解析的调色板，索引 0 通常表示空气。 */
         public final BlockState[] palette;
 
         BlockContainer(int sizeX, int sizeY, int sizeZ, int bits, PackedLongArray storage, BlockState[] palette) {
@@ -86,7 +82,7 @@ public final class LitematicaSchematic {
             return (long) sizeX * sizeY * sizeZ;
         }
 
-        /** index = (y * sizeLayer) + z * sizeX + x (litematica LitematicaBlockStateContainer.getIndex) */
+
         private static long index(int sizeX, int sizeZ, int x, int y, int z) {
             return (long) y * sizeZ * sizeX + (long) z * sizeX + x;
         }
@@ -101,7 +97,7 @@ public final class LitematicaSchematic {
             return s == null ? BlockState.air() : s;
         }
 
-        /** Non-air cell visitor with word-level zero skipping (quickcraft's fast scan). */
+        /** 以压缩字为单位跳过全零区域，遍历非空气方块。 */
         public interface NonAirConsumer {
             void accept(int x, int y, int z, BlockState state);
         }
@@ -146,7 +142,7 @@ public final class LitematicaSchematic {
         }
     }
 
-    /** LitematicaBitArray.getAt equivalent. */
+
     public static int getAt(long[] longArray, int bitsPerEntry, long index) {
         return getAt(PackedLongArray.wrap(longArray),bitsPerEntry,index);
     }
@@ -167,13 +163,13 @@ public final class LitematicaSchematic {
         }
     }
 
-    // ---------- region data ----------
+
     public static final class Region {
         public final String name;
-        public final Vec3i position;   // region origin relative to schematic origin
-        public final Vec3i size;       // can be negative in raw form
+        public final Vec3i position;
+        public final Vec3i size;
         public BlockContainer blocks;
-        public final Map<Long, NbtCompound> blockEntities;  // key = packed local (x,y,z)
+        public final Map<Long, NbtCompound> blockEntities;
         public List<UnresolvedBlockState> storedPalette = List.of();
         public List<SchematicEntity> entities = List.of();
         public Map<String,String> storedProperties(int x,int y,int z) {
@@ -195,11 +191,11 @@ public final class LitematicaSchematic {
         public Vec3i absSize() {
             return new Vec3i(Math.abs(this.size.x()), Math.abs(this.size.y()), Math.abs(this.size.z()));
         }
-        /** Block storage starts at the minimum corner; saved entity Pos is relative to the first corner. */
+        /** 方块存储从最小角开始，实体 Pos 则相对最初保存的区域角点。 */
         public Vec3i blockOrigin(){return new Vec3i(position.x()+Math.min(0,size.x()+1),position.y()+Math.min(0,size.y()+1),position.z()+Math.min(0,size.z()+1));}
     }
 
-    // ---------- the schematic ----------
+
     private Metadata metadata = new Metadata();
     private final LinkedHashMap<String, Region> regions = new LinkedHashMap<>();
     public int version;
@@ -213,7 +209,7 @@ public final class LitematicaSchematic {
         return schem;
     }
 
-    /** Reuse immutable packed pages for live edits without a disk round-trip. */
+    /** 实时编辑复用不可变压缩页，避免磁盘写入后再读取。 */
     public static LitematicaSchematic fromData(NbtCompound root){
         try{var schematic=new LitematicaSchematic();schematic.readFromData(root);return schematic;}catch(IOException error){throw new IllegalArgumentException("编辑数据无效",error);}
     }
@@ -238,7 +234,7 @@ public final class LitematicaSchematic {
             Vec3i size = SubRegion.readBlockPos(regionTag, "Size");
             if (size.x() == 0 && size.y() == 0 && size.z() == 0) continue;
 
-            // raw palette entries
+
             List<UnresolvedBlockState> rawPalette = readRawPalette(regionTag);
             var statesTag = regionTag.get("BlockStates").orElse(null);
             PackedLongArray storage=statesTag instanceof NbtPackedLongArray packed?packed.value
@@ -254,7 +250,7 @@ public final class LitematicaSchematic {
         }
     }
 
-    /** Raw (unresolved) container data, resolved once a BlockRegistry is available. */
+
     private final LinkedHashMap<String, RawContainer> rawContainers = new LinkedHashMap<>();
 
     private record RawContainer(int sizeX, int sizeY, int sizeZ, int bits, PackedLongArray storage, List<UnresolvedBlockState> rawPalette) {}
@@ -264,7 +260,7 @@ public final class LitematicaSchematic {
 
     public Vec3i totalSize() { return this.metadata.enclosingSize; }
 
-    /** Resolves raw palettes against the registry; call once before rendering. */
+    /** 注册表准备完成后统一解析原始调色板。 */
     public void materialize(BlockRegistry registry) {
         for (Map.Entry<String, RawContainer> e : this.rawContainers.entrySet()) {
             Region region = this.regions.get(e.getKey());
@@ -288,14 +284,7 @@ public final class LitematicaSchematic {
         return state;
     }
 
-    /**
-     * Reads a region's block entities.
-     *
-     * <p>The {@code x/y/z} in a litematic's {@code TileEntities} are already relative to the
-     * region origin (verified against real files: the block at the stored coordinate is the one
-     * owning the entity), so they are used as-is. Subtracting the region position here would
-     * shift every block entity by the region offset.
-     */
+    /** TileEntities 的 x/y/z 已相对区域原点，不能再次扣除原点。 */
     private static Map<Long, NbtCompound> readBlockEntities(NbtCompound regionTag, Vec3i regionPos) {
         Map<Long, NbtCompound> tes = new LinkedHashMap<>();
         NbtList teList = regionTag.getList("TileEntities").orElse(null);
@@ -322,11 +311,7 @@ public final class LitematicaSchematic {
         return palette;
     }
 
-    /**
-     * BlockState from palette entry NBT:
-     * classic: { Name: "minecraft:stone", Properties: { facing: "north" } }
-     * 1.20.5+: { blockstate: "minecraft:stone[facing=north]" } (string form)
-     */
+    /** 支持传统 Name/Properties 标签和新版 blockstate 字符串。 */
     public static UnresolvedBlockState readBlockState(NbtCompound tag) {
         String inline = tag.getStringOrDefault("blockstate", null);
         if (inline != null) {

@@ -11,7 +11,7 @@ import java.util.*;
 import java.io.*;
 import javax.imageio.ImageIO;
 
-/** Read-only state/inventory inspection of the schematic snapshot. */
+/** 只读检查投影状态与库存。 */
 public final class BlockInspector {
     private final LitematicaSchematic schematic;
     private final ResourceManager resources;
@@ -147,7 +147,7 @@ public final class BlockInspector {
         String icon=icons.computeIfAbsent(id,this::icon);if(!icon.isEmpty())row.put("icon",icon);
         result.add(row);
     }
-    /** Quantity and container slot are not item identity; all other typed NBT is compared exactly. */
+    /** 数量和容器槽位不决定物品身份，其余带类型 NBT 必须精确匹配。 */
     static String stackKey(NbtCompound item) {
         try {
             var bytes=new ByteArrayOutputStream();var output=new DataOutputStream(bytes);
@@ -213,7 +213,7 @@ public final class BlockInspector {
         if(value instanceof NbtScalars.NbtShort n)return n.value;
         if(value instanceof NbtScalars.NbtInt n)return n.value;return fallback;
     }
-    /** Item details keep every saved component; the surrounding block summary remains bounded. */
+    /** 物品详情保留全部组件，外围方块摘要仍限制长度。 */
     private static Object completeItem(NbtElement value){
         if(value instanceof NbtCompound compound){var map=new LinkedHashMap<String,Object>();for(String key:compound.getKeys())map.put(key,completeItem(compound.get(key).orElse(null)));return map;}
         if(value instanceof NbtList list){var result=new ArrayList<Object>();for(int i=0;i<list.size();i++)result.add(completeItem(list.get(i)));return result;}

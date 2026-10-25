@@ -5,13 +5,13 @@ import io.github.litematicrender.render.*;
 import io.github.litematicrender.world.BlockState;
 import java.util.*;
 
-/** Bake coincident wire layers into one surface, before camera-dependent sorting. */
+/** 在相机排序前将重合红石粉纹理层合成为一个表面。 */
 final class RedstoneSurfaces {
     private record Key(int face,int plane,int shade,int emission) {}
     private record Source(Quad q,SpriteContents sprite,float[][] points,int tint) {}
     private RedstoneSurfaces() {}
     static List<Quad> compose(List<Quad> input,BlockState state,SpriteAtlas atlas,Map<String,Image> generated) {
-        // Animated custom wires keep their original sprites so GIF ticks remain live.
+        // 动态自定义红石粉保留原贴图，让 GIF 动画继续推进。
         if(input.stream().anyMatch(q->atlas.getOrMissingEntry(q.spriteId).contents.isAnimated()))return input;
         var groups=new LinkedHashMap<Key,List<Quad>>();var result=new ArrayList<Quad>();
         for(var q:input) {

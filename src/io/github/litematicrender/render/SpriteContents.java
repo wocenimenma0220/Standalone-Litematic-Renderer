@@ -2,23 +2,20 @@ package io.github.litematicrender.render;
 
 import java.util.List;
 
-/**
- * A sprite loaded from a resource: single frame or vertical animation sheet.
- * Mirrors net.minecraft.client.renderer.texture.SpriteContents (data part only).
- */
+/** 资源贴图及其动画帧数据，对应原版 SpriteContents 的数据部分。 */
 public final class SpriteContents {
-    public final String name;            // e.g. "minecraft:block/stone"
-    public final int frameWidth;         // per-frame width
-    public final int frameHeight;        // per-frame height
-    public final Image sheet;            // full sheet (possibly multiple frames stacked vertically)
-    public final int frameCount;         // 1 if not animated
-    public final int frameTime;          // ticks per frame (from mcmeta "frametime")
-    public final List<Integer> frames;   // frame indices in play order (from mcmeta "frames", or 0..n-1)
-    public final boolean interpolate;    // mcmeta "interpolate"
-    /** Transparency classification (vanilla Transparency semantics) */
-    public final boolean hasTransparent;   // any pixel with alpha == 0
-    public final boolean hasTranslucent;   // any pixel with alpha != 0/255
-    /** Which source frame is currently blitted into the atlas, so rebakes can skip work. */
+    public final String name;
+    public final int frameWidth;
+    public final int frameHeight;
+    public final Image sheet;
+    public final int frameCount;
+    public final int frameTime;
+    public final List<Integer> frames;   // 动画播放的源帧索引顺序，可含重复索引。
+    public final boolean interpolate;
+    /** 按原版语义记录透明度分类。 */
+    public final boolean hasTransparent;
+    public final boolean hasTranslucent;
+    /** 记录当前已复制到图集的源帧，避免重复更新。 */
     int lastBakedFrame = -1;
 
     public SpriteContents(String name, int frameWidth, int frameHeight, Image sheet,
@@ -31,7 +28,7 @@ public final class SpriteContents {
         this.frameTime = frameTime;
         this.frames = frames;
         this.interpolate = interpolate;
-        // scan frame 0 for transparency classification (vanilla scans all frames via computeTransparency; frame 0 suffices in practice)
+
         boolean transparent = false, translucent = false;
         scan:
         for (int y = 0; y < sheet.height; y++) {
@@ -50,20 +47,7 @@ public final class SpriteContents {
         return this.frameCount > 1;
     }
 
-    /**
-     * Vanilla {@code SpriteContents.computeTransparency(minU, minV, maxU, maxV)}: classifies only
-     * the region of the sheet a face's UV rectangle actually samples.
-     *
-     * <p>The distinction is not academic. {@code force_translucent} is a per-<em>material</em> flag,
-     * so {@code redstone_dust_overlay} — whose own pixels are hard-edged — is baked translucent when
-     * a face reaches it through a translucent slot. But a face whose UV covers only an opaque part
-     * of a mostly transparent sheet comes back {@code NONE} — solid — and that is how a texture that
-     * is transparent <em>somewhere</em> still ends up in the SOLID layer. Classifying the whole
-     * sprite instead sends those faces to CUTOUT, where they neither write depth the way the game's
-     * solid geometry does nor blend, and where the terrain shader's alpha cutoff can erase them.
-     *
-     * @param minU,minV,maxU,maxV sprite-relative UV bounds in 0..1 (either corner order)
-     */
+    /** 按面片 UV 所覆盖的区域检查透明和半透明像素，保留强制半透明的独立语义。 */
     public Transparency transparencyIn(float minU, float minV, float maxU, float maxV) {
         int x0 = (int) Math.floor(Math.max(0f, Math.min(minU, maxU)) * this.frameWidth);
         int y0 = (int) Math.floor(Math.max(0f, Math.min(minV, maxV)) * this.frameHeight);
@@ -75,8 +59,8 @@ public final class SpriteContents {
         y1 = Math.max(y0 + 1, Math.min(this.frameHeight, y1));
 
         boolean transparent = false, translucent = false;
-        // Vanilla scans the animation frames in play order; the whole sheet is the honest superset
-        // here and costs nothing extra, since a still sprite's sheet is exactly its one frame.
+
+
         for (int y = 0; y < this.sheet.height; y++) {
             if (y % this.frameHeight < y0 || y % this.frameHeight >= y1) continue;
             for (int x = 0; x < this.sheet.width; x++) {
@@ -91,13 +75,7 @@ public final class SpriteContents {
         return translucent ? Transparency.TRANSLUCENT : Transparency.NONE;
     }
 
-    /**
-     * Which source frame is shown at a given game tick.
-     *
-     * <p>Vanilla advances one step in the {@code frames} list every {@code frametime} ticks, wrapping
-     * at the end; a {@code frames} list may repeat indices (lava uses a ping-pong sequence), so the
-     * list position — not the value — is what the tick selects.
-     */
+    /** 按 frames 列表和 frametime 选择当前游戏刻的源帧，支持重复帧和循环。 */
     public int frameAtTick(int tick) {
         if (!isAnimated() || this.frames.isEmpty()) return 0;
         int step = Math.max(0, tick) / Math.max(1, this.frameTime);
@@ -105,7 +83,7 @@ public final class SpriteContents {
         return this.frames.get(idx);
     }
 
-    /** Pixels of frame i as an Image view offset (not a copy). */
+    /** 返回指定帧在原图中的视图，不复制像素。 */
     public int framePixel(int frame, int x, int y) {
         int fy = this.frameY(frame) * this.frameHeight;
         int fx = this.frameX(frame) * this.frameWidth;
@@ -122,7 +100,7 @@ public final class SpriteContents {
         return index / rowSize;
     }
 
-    /** Frame pixels of the currently-displayed frame as a standalone image (for atlas baking we bake frame 0). */
+
     public Image frameImage(int frame) {
         Image out = new Image(this.frameWidth, this.frameHeight);
         for (int y = 0; y < this.frameHeight; y++) {

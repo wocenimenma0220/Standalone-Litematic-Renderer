@@ -1,5 +1,5 @@
 'use strict';
-const {chromium}=require('C:/Users/roy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('./browser-runtime.cjs');
 const path=require('node:path'),fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{const browser=await chromium.launch({headless:true,channel:'msedge',args:['--allow-file-access-from-files']});try{
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],out=path.resolve(__dirname,'board-devices-output');fs.mkdirSync(out,{recursive:true});page.on('pageerror',e=>{if(/board[^/]*\.js/.test(e.stack||''))errors.push(e.message);});

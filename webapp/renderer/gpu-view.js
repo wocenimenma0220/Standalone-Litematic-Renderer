@@ -1,29 +1,16 @@
 'use strict';
 
-/**
- * WebGL viewer for an exported scene.
- *
- * <p>The CPU rasteriser re-transformed and re-shaded every vertex on each camera change, which is
- * why dragging was never smooth. Here the geometry is uploaded once and a drag only writes a new
- * matrix. That is the same split Minecraft uses — its `renderpearl` layer abstracts a `GpuDevice`
- * over a Vulkan or OpenGL backend, and quickcraft's preview draws from resident `VertexBuffer`s —
- * and WebGL is the browser's OpenGL, so it is the closest equivalent available without native
- * bindings.
- *
- * <p>The mesh layout is defined by `MeshExporter`. Two details matter and both caused a total
- * failure the first time: the signature is padded to 8 bytes, and every number is **big-endian**
- * because Java's DataOutputStream writes it that way.
- */
+/** WebGL 预览在上传后复用 GPU 几何，相机变化只更新矩阵。网格格式由 Java MeshExporter 定义，读取时注意大端字节序。 */
 
 const SIGNATURE = 'LMESH4';
 const SIGNATURE_LENGTH = 8;
 const FLOATS_PER_VERTEX = 9;
-/** Unique corners; triangle indices share the 0-2 diagonal, matching the CPU renderer. */
+/** 三角形共享四个角点的 0～2 对角线，与 CPU 光栅化保持一致。 */
 const VERTICES_PER_QUAD = 4;
 const INDICES_PER_QUAD = 6;
 const QUAD_TRIANGLES = [0,1,2,0,2,3];
 const INDEX16_QUADS = 16384;
-/** SceneMesh.Layer ordinals, in draw order. */
+
 const LAYER_NAMES = ['SOLID', 'CUTOUT', 'PORTAL', 'FLUID', 'TRANSLUCENT'];
 
 const VERTEX_SHADER = `
@@ -93,13 +80,12 @@ bool edited(vec3 cell){
 }
 void main() {
   vec3 focusPosition=vWorld;
-  /*focusSurfaceBias*/
+  /*选区表面偏移*/
   if(uEditCount>0.0&&edited(floor(focusPosition)))discard;
   bool inside=all(greaterThanEqual(focusPosition,uFocusMin-vec3(0.0001)))&&all(lessThanEqual(focusPosition,uFocusMax+vec3(0.0001)));
   if(uFocusPass>0.5&&((uFocusPass<1.5&&!inside)||(uFocusPass>1.5&&inside)))discard;
   vec4 tex = uColorOnly > 0.5 ? vec4(1.0) : texture2D(uAtlas, vUv);
-  // Cutout layers discard fully transparent texels so they neither blend nor write depth. This is
-  // what lets a glass pane's empty middle show what is behind it.
+  // 裁剪层丢弃全透明像素，既不混合也不写深度，保留玻璃板等模型中的透明孔洞。
   if (uAlphaCutoff > 0.0 && tex.a < uAlphaCutoff) discard;
   if (tex.a <= 0.0) discard;
   vec3 rgb = tex.rgb * vColor;
@@ -126,7 +112,7 @@ class GpuView {
       alpha: true,
       antialias: true,
       depth: true,
-      // Source-over produces premultiplied RGB; the browser compositor must use the same convention.
+      // 源覆盖混合产生预乘 RGB，浏览器合成器必须使用相同约定。
       premultipliedAlpha: true,
       preserveDrawingBuffer: false,
     });
@@ -136,7 +122,7 @@ class GpuView {
     this.compactGpu=!!this.instancing&&gl.getParameter(gl.MAX_VERTEX_ATTRIBS)>=9;
     const vertexSource=this.compactGpu?VERTEX_SHADER:'attribute vec3 aPos;attribute vec2 aUv;attribute vec3 aColor;uniform mat4 uViewProj;varying vec2 vUv;varying vec3 vColor;varying vec3 vWorld;void main(){vUv=aUv;vColor=aColor;vWorld=aPos;gl_Position=uViewProj*vec4(aPos,1.0);}';
     const derivatives=gl.getExtension('OES_standard_derivatives');
-    const fragmentSource=(derivatives?'#extension GL_OES_standard_derivatives : enable\n':'')+FRAGMENT_SHADER.replace('/*focusSurfaceBias*/',derivatives?'if(uFocusPass>0.5||uSearchDim>0.5||uEditCount>0.0){vec3 normal=cross(dFdx(vWorld),dFdy(vWorld));focusPosition-=normal/max(length(normal),0.000001)*0.001;}':'');
+    const fragmentSource=(derivatives?'#extension GL_OES_standard_derivatives : enable\n':'')+FRAGMENT_SHADER.replace('/*选区表面偏移*/',derivatives?'if(uFocusPass>0.5||uSearchDim>0.5||uEditCount>0.0){vec3 normal=cross(dFdx(vWorld),dFdy(vWorld));focusPosition-=normal/max(length(normal),0.000001)*0.001;}':'');
     this.program = this._program(vertexSource, fragmentSource);
     this.attr = {
       pos: gl.getAttribLocation(this.program, 'aPos'),
@@ -162,7 +148,7 @@ class GpuView {
     this.center = [0, 0, 0];
     this.radius = 1;
     this.quadCount = 0;
-    /** Last uploaded view-projection matrix, for diagnostics. */
+
     this.lastMatrix = null;
     this.lastMode = '';
     this.revision = 0;
@@ -194,13 +180,7 @@ class GpuView {
     finally{for(const shader of compiled)gl.deleteShader(shader);}
   }
 
-  /**
-   * Parses the mesh and uploads one buffer per layer.
-   *
-   * <p>Validation is explicit because a mis-read header cannot be detected later: the draw call
-   * would simply render nothing, and a silent failure here previously sent the viewer down a
-   * fallback path that hid the canvas.
-   */
+  /** 上传前验证网格头和长度，解析错误必须明确报错，不能静默绘制空白。 */
   uploadMesh(buffer) {
     const gl = this.gl;
     if (buffer.byteLength < SIGNATURE_LENGTH + 8) {
@@ -223,9 +203,9 @@ class GpuView {
     let uploaded = 0;
     const layers = [];
     this.uintIndices = !!gl.getExtension('OES_element_index_uint');
-    // Bounds are accumulated across every layer. Initialising them from the first vertex inside
-    // the loop instead would restart them per layer, leaving the box describing only the last one —
-    // a wrong radius then frames the camera on a corner of the build.
+    // 包围盒必须累积所有材质层，不能在每层重新初始化。
+
+
     let seen = false;
     const lo = [0, 0, 0];
     const hi = [0, 0, 0];
@@ -238,16 +218,16 @@ class GpuView {
         throw new Error(`layer ${i} truncated: need ${floats * 4} bytes, `
           + `have ${buffer.byteLength - off}`);
       }
-      // Big-endian floats must be swapped into host order before the GPU sees them.
+      // 上传 GPU 前将大端浮点数转换为主机字节序。
       let data = new Float32Array(floats);
       for (let q=0;q<quads;q++) for(let corner=0;corner<4;corner++) for(let value=0;value<9;value++) {
         const sourceCorner=fileVerticesPerQuad===6 && corner===3 ? 5 : corner;
         data[q*36+corner*9+value]=view.getFloat32(off+(q*fileVerticesPerQuad*9+sourceCorner*9+value)*4,false);
       }
       off += fileFloats * 4;
-      // Light, AO and biome tint are static. Bake their product once on upload; tint is
-      // constant across each exported face, so interpolation matches the old shader.
-      // Keep the wire stride for compatibility with all three existing mesh formats.
+      // 光照、AO 与染色在上传时相乘，保持线性插值结果不变。
+
+
       for (let v = 0; v < floats; v += FLOATS_PER_VERTEX) {
         const shade = data[v + 5];
         data[v + 6] *= shade;
@@ -287,7 +267,7 @@ class GpuView {
       }
       if(ordinal<2 || ordinal===5)layers[layers.length-1].data=null;
     }
-    // All blending materials share one depth order, including glass, water and portals.
+    // 所有混合材质共用一个深度顺序，包含玻璃、水和传送门。
     let bspTree=null;
     if(sig==='LMESH3'||sig==='LMESH4') {
       if(off+4>buffer.byteLength)throw new Error('missing BSP metadata');
@@ -312,7 +292,7 @@ class GpuView {
       this.buffers.push(vbo);
       const centroids = new Float64Array(blendQuads * 3);
       const step = VERTICES_PER_QUAD * FLOATS_PER_VERTEX;
-      // Average the four unique corners.
+
       for (let q = 0; q < blendQuads; q++) {
         for (let axis = 0; axis < 3; axis++) {
           const b = q * step + axis;
@@ -358,7 +338,7 @@ class GpuView {
     return { layers: layerCount, quads: uploaded, totalVertices, min: lo, max: hi, center: this.center, radius: this.radius };
   }
 
-  /** Read large scenes in bounded batches; never retain the entire wire-format file. */
+  /** 大场景使用有界批次读取，不保留完整传输格式文件。 */
   async uploadMeshStream(read, byteLength, progress = () => {}, isCurrent = () => true) {
     const gl=this.gl, batchQuads=32768;
     let generation=this.uploadGeneration;
@@ -467,7 +447,7 @@ class GpuView {
     } catch(error) {if(current())this.disposeBuffers();throw error;}
   }
 
-  /** World-space look direction, opposite the third ROW of the view rotation. */
+  /** 观察方向为旋转矩阵第三行的反方向。 */
   _viewDir() {
     if (this.cameraEye && this.cameraTarget) {
       const f = [
@@ -482,7 +462,7 @@ class GpuView {
     const pitch = (this.cameraSlantDeg || 0) * Math.PI / 180;
     const cy = Math.cos(yaw), sy = Math.sin(yaw);
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
-    // r = RotX(pitch) * RotY(yaw), rows as in Camera.update() on the Java side.
+
     const r = [
       [cy, 0, sy],
       [sp * sy, cp, -sp * cy],
@@ -590,8 +570,8 @@ class GpuView {
         for(let i=0;i<chunks.length;i++)if(layer.chunkVisible[i])for(const face of chunks[i].faces)layer.faceVisible[face]=1;
         let at=0;for(let face=0;face<layer.quads;face++)if(layer.faceVisible[face])layer.visibleIds[at++]=face;
       } else {
-        // Camera motion often leaves the same chunks visible. Reuse the draw ranges
-        // until visibility actually changes, instead of allocating them every frame.
+        // 可见区段不变时复用绘制范围，避免每帧重新分配。
+
         layer.drawRanges = [];
         for (let i = 0; i < chunks.length; i++) if (layer.chunkVisible[i]) {
           const chunk = chunks[i], last = layer.drawRanges[layer.drawRanges.length - 1];
@@ -610,8 +590,8 @@ class GpuView {
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-    // NEAREST keeps pixel art crisp and stops neighbouring atlas tiles bleeding into each other,
-    // which is exactly what a linear filter would do at tile edges.
+    // 最近邻过滤保留像素边缘，防止相邻图集贴图串色。
+
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -643,7 +623,7 @@ class GpuView {
     if(this.searchTexture)this.gl.deleteTexture(this.searchTexture);
     if(this.focusBuffer)this.gl.deleteBuffer(this.focusBuffer);if(this.focusProgram)this.gl.deleteProgram(this.focusProgram);
   }
-  /** Perspective screen ray, using the exact matrix that drew the preview. */
+  /** 使用实际绘制矩阵构造透视拾取射线。 */
   async uploadLodStream(read,byteLength,options={}) {
     this.disposeBuffers();const generation=this.uploadGeneration;
     const stream=await LodStream.open(this,read,byteLength,options);
@@ -680,25 +660,12 @@ class GpuView {
     return {origin,direction:normalize(middle.map((value,i)=>value-origin[i])),maximum:this.radius*8+64};
   }
 
-  /**
-   * Draws a frame, updating transparent indices when the camera direction changes.
-   *
-   * @param cam.eye       camera position in world space
-   * @param cam.target    look-at point
-   * @param cam.up        up vector
-   * @param cam.fovDeg    vertical field of view; 0 selects an orthographic projection
-   * @param cam.orthoHeight half-height of the orthographic view volume
-   */
+
   draw(cam) {
     const gl = this.gl;
-    // Size from the viewport's own layout box, and never let the canvas influence it.
-    //
-    // Reading the parent's getBoundingClientRect() looked equivalent but was not: the canvas is
-    // absolutely positioned inside that parent, so once its style width became the device-pixel
-    // size the parent's rect grew to match and the next frame measured the child instead of the
-    // viewport. The canvas then rendered at twice the visible size and only its top-left corner
-    // showed — the model appeared shoved into the bottom-right although the projection was exact.
-    // clientWidth/clientHeight are layout sizes and ignore an overflowing child.
+    // 按视口自己的布局尺寸取大小，不能让画布的像素尺寸反过来撑大父容器。
+
+
     const dpr = window.devicePixelRatio || 1;
     const box = this.canvas.parentElement || this.canvas;
     const cssW = Math.max(1, Math.round(box.clientWidth || box.getBoundingClientRect().width));
@@ -711,8 +678,8 @@ class GpuView {
       this.canvas.width = w;
       this.canvas.height = h;
     }
-    // The element's CSS size stays the layout size while the buffer above is the device-pixel size;
-    // keeping the two in step is what makes one render texel land on one device pixel.
+    // CSS 尺寸使用布局单位，绘图缓冲使用设备像素，两者按设备比例对应。
+
     if (this.canvas.style.width !== cssW + 'px') this.canvas.style.width = cssW + 'px';
     if (this.canvas.style.height !== cssH + 'px') this.canvas.style.height = cssH + 'px';
     this.diag = {
@@ -735,21 +702,17 @@ class GpuView {
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
 
-    // Use full-size projection dimensions so changing quality cannot move the camera
-    // or the picking ray. Only the raster buffer becomes smaller during interaction.
+    // 质量变化只调整光栅缓冲，不改变投影尺寸、相机或拾取射线。
+
     const aspect = displayW / displayH;
-    // Orbit mode follows quickcraft's preview exactly: the projection is a FIXED +-1 box (widened
-    // by aspect), and all scaling happens in the model-view matrix. Its PreviewDimensions
-    // .scaleFactor() shrinks the model's bounding-box diagonal to fill that box:
-    //     scale = previewSize * 2 * padding / (diagonal * screenHeight)
-    // Doing it the other way round — sizing the orthographic box to the model — double-counts the
-    // fit and leaves the build off screen.
+    // 环绕视图采用固定正交盒，模型视图矩阵负责缩放，避免重复适配。
+
+
     let viewProj;
     if (cam.orbit) {
-      // Same fit the CPU renderer uses (SchematicRenderer.fitCameraToMesh), which DiagCamera
-      // verifies: rotate the bounding box, measure the real view-space span, then scale by
-      // min(w/spanX, h/spanY) so neither axis overflows. A bounding-sphere radius over-estimates
-      // for flat builds and under-estimates for long ones; the measured span is always right.
+      // 与 CPU 相同，旋转真实包围盒后按宽高跨度适配，避免球半径对扁平和长条建筑估计失真。
+
+
       const fit = this.fitOrtho(cam.rotationDeg, cam.slantDeg, displayW, displayH, cam.zoom);
       this.fitScale = fit.scale;
       this.spanX = fit.spanX;
@@ -757,27 +720,23 @@ class GpuView {
       this.offsetX = fit.offsetX;
       this.offsetY = fit.offsetY;
 
-      // Build the matrix from the CPU renderer's screen mapping, which is simply
-      //     screenX = width/2 + (viewX * zoom) + offsetX
-      //     screenY = height/2 - (viewY * zoom) + offsetY
-      // (see Rasterizer.drawQuad). Converting that to clip space — NDC is +-1 with y up, and the
-      // rasteriser's y already grows downward — gives the three row scales below, with the offsets
-      // expressed in NDC. Deriving it here rather than re-deriving a "fit" keeps the two renderers
-      // in agreement by construction.
+      // 从 CPU 的屏幕映射推导裁剪矩阵，保持两条渲染路径的中心和缩放一致。
+
+
       const yaw = cam.rotationDeg * Math.PI / 180;
       const pitch = cam.slantDeg * Math.PI / 180;
       const cy = Math.cos(yaw), sy = Math.sin(yaw);
       const cp = Math.cos(pitch), sp = Math.sin(pitch);
-      // RotX(pitch) * RotY(yaw), matching Camera.update() on the Java side.
+
       const r = [
         [cy, 0, sy],
         [sp * sy, cp, -sp * cy],
         [-cp * sy, sp, cp * cy],
       ];
-      // Pixels per world unit converted to NDC per world unit.
+
       const scaleX = 2 * fit.scale / displayW;
       const scaleY = 2 * fit.scale / displayH;
-      // Keep z in a sane range: scale it down so the model cannot fall outside the depth volume.
+      // 缩放深度范围，防止模型超出裁剪体。
       const scaleZ = -2 / (this.radius * 8 + 64);
       const c = this.center;
       const m = new Float32Array(16);
@@ -786,8 +745,8 @@ class GpuView {
         m[col * 4 + 1] = r[1][col] * scaleY;
         m[col * 4 + 2] = r[2][col] * scaleZ;
       }
-      // Translation: move the rotated model centre to the origin, then apply the fit's centring
-      // offsets. The y offset keeps the rasteriser's downward sense.
+
+
       const rx = r[0][0] * c[0] + r[0][1] * c[1] + r[0][2] * c[2];
       const ry = r[1][0] * c[0] + r[1][1] * c[1] + r[1][2] * c[2];
       const rz = r[2][0] * c[0] + r[2][1] * c[1] + r[2][2] * c[2];
@@ -812,7 +771,7 @@ class GpuView {
     gl.uniformMatrix4fv(this.uni.viewProj, false, viewProj);
     this.lastMatrix = viewProj;
     this.lastMode = cam.orbit ? 'orbit' : 'fly';
-    // Remembered for _viewDir(), which orders the translucent buckets by true view depth.
+
     this.cameraRotationDeg = cam.rotationDeg || 0;
     this.cameraSlantDeg = cam.slantDeg || 0;
     this.cameraEye = cam.orbit ? null : cam.eye;
@@ -853,7 +812,7 @@ class GpuView {
       this.drawStats.totalChunks+=layer.chunks?.length||0;
       this.drawStats.visibleChunks+=layer.chunkVisible?.reduce((sum,value)=>sum+(value===1),0)||0;
       if(layer.visibleCount===0)continue;
-      // PORTAL(2), FLUID(3) and TRANSLUCENT(4) blend; the rest are opaque.
+      // 传送门、流体和半透明层使用混合，其余层按不透明方式处理。
       const mask=layer.ordinal===5;
       const blending = layer.ordinal >= 2&&!mask;
       if(focusPass===2&&mask)continue;
@@ -861,17 +820,15 @@ class GpuView {
       gl.colorMask(!mask,!mask,!mask,!mask);
       gl.uniform1f(this.uni.alphaCutoff, layer.ordinal === 1 ? 0.1 : 0.0);
 
-      // Culling stays ON for every layer. The exporter emits each face once, with the winding the
-      // baker produced, so a face turned away from the camera is genuinely one we should not draw.
-      // Disabling culling for blending layers made water draw its front and back surface into the
-      // same pixels, and since blending layers do not write depth those two half-transparent
-      // passes cancelled out — water became almost invisible.
+      // 所有层保持背面剔除；关闭混合层剔除会使水面正反两面重复混合而变淡。
+
+
       gl.enable(gl.CULL_FACE);
       gl.cullFace(gl.BACK);
 
-      // Opaque layers write depth so later geometry is hidden correctly. Blending layers only read
-      // depth: they must not occlude each other, because a single sorted order cannot be correct
-      // for every viewpoint without an order-independent pass.
+      // 不透明层写深度，混合层只读深度，避免互相遮挡。
+
+
       gl.depthMask(!blending&&focusPass!==2);
 
       const bindVertices = (vbo,base=0) => {
@@ -898,7 +855,7 @@ class GpuView {
         }
       } else {
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,layer.indexBuffer);
-        // Merge adjacent visible chunks; cap 16-bit ranges at the local vertex-address boundary.
+        // 合并相邻可见区段，16 位索引范围不能越过局部顶点地址边界。
         for(const range of layer.drawRanges) {
           let start=range.start,remaining=range.count;
           while(remaining) {
@@ -969,24 +926,13 @@ class GpuView {
     gl.disable(gl.DEPTH_TEST);gl.enable(gl.BLEND);gl.depthMask(false);gl.drawArrays(gl.LINES,0,cached?this.searchWireCount:vertices.length/3);gl.depthMask(true);gl.enable(gl.DEPTH_TEST);gl.useProgram(this.program);
   }
 
-  /**
-   * Measures the build in view space and returns the scale that fits it.
-   *
-   * <p>Ported from {@code SchematicRenderer.fitCameraToMesh}, which the CPU renderer uses and
-   * {@code DiagCamera} verifies. The eight corners of the axis-aligned box are rotated, the real
-   * view-space extents are measured, and the smaller of the two axis fits wins — so a wide, flat
-   * schematic is limited by width and a tall one by height, instead of both being approximated by a
-   * single bounding-sphere radius.
-   *
-   * @returns {{scale:number, spanX:number, spanY:number, offsetX:number, offsetY:number}}
-   *          scale is in pixels per world unit; offsets are in NDC.
-   */
+  /** 按模型在视图空间中的真实跨度计算取景比例，与 CPU 路径保持一致。 */
   fitOrtho(rotationDeg, slantDeg, width, height, zoom) {
     const yaw = rotationDeg * Math.PI / 180;
     const pitch = slantDeg * Math.PI / 180;
     const cy = Math.cos(yaw), sy = Math.sin(yaw);
     const cp = Math.cos(pitch), sp = Math.sin(pitch);
-    // RotX(pitch) * RotY(yaw), matching Camera.update() on the Java side.
+
     const r = [
       [cy, 0, sy],
       [sp * sy, cp, -sp * cy],
@@ -1009,7 +955,7 @@ class GpuView {
     }
     const spanX = Math.max(1e-3, maxX - minX);
     const spanY = Math.max(1e-3, maxY - minY);
-    // 0.92 leaves the same margin the CPU renderer uses.
+
     const scale = Math.min(width / spanX, height / spanY) * 0.92 * Math.max(0.05, zoom);
     const offsetX = -((minX + maxX) / 2) * scale / (width / 2);
     const offsetY = -((minY + maxY) / 2) * scale / (height / 2);
@@ -1017,7 +963,7 @@ class GpuView {
   }
 }
 
-/** Conservative bounds of real vertices, including models extending outside their owning cell. */
+/** 包围盒使用真实顶点，包含超出所属格的模型几何。 */
 function partitionGeometry(data,reorder) {
   const groups=new Map(),count=data.length/36;
   for(let q=0;q<count;q++) {
@@ -1049,7 +995,7 @@ function partitionGeometry(data,reorder) {
   return {data:result,chunks};
 }
 
-/** Grid includes an exterior air shell so paths around the build remain possible. */
+/** 连通网格包含外侧空气壳，保留绕建筑外部通行的路径。 */
 function makeSectionGraph(sections,lo,hi,layers) {
   if(!sections.length)return null;
   const min=lo.map(value=>Math.floor(value/16)-1),max=hi.map(value=>Math.floor(value/16)+1);
@@ -1058,7 +1004,7 @@ function makeSectionGraph(sections,lo,hi,layers) {
     max[axis]=Math.max(max[axis],section.position[axis]+1);
   }
   const size=min.map((value,i)=>max[i]-value+1),[nx,ny,nz]=size,count=nx*ny*nz;
-  // Widely separated regions use the existing frustum path instead of expanding empty space.
+  // 区域相距过远时沿用视锥裁剪，不为空白跨度扩张连通图。
   if(!Number.isSafeInteger(count)||count>65536)return null;
   const index=(x,y,z)=>((y-min[1])*nz+z-min[2])*nx+x-min[0];
   const cells=new Array(count).fill(null),bounds=new Array(count);
@@ -1076,7 +1022,7 @@ function makeSectionGraph(sections,lo,hi,layers) {
 }
 
 const SECTION_STEPS=[[0,-1,0],[0,1,0],[0,0,-1],[0,0,1],[-1,0,0],[1,0,0]];
-/** Faces reachable from the eye's actual air component; eye inside solid disables rejection. */
+/** 按眼睛所在空气连通分量判断可达面；眼睛位于实心方块时不剔除。 */
 function eyeExits(graph,section,eye) {
   if(!section)return 63;
   const cell=(Math.floor(eye[0])&15)|((Math.floor(eye[2])&15)<<4)|((Math.floor(eye[1])&15)<<8);
@@ -1109,8 +1055,8 @@ function visibleSections(graph,eye,frustum) {
   reachable.fill(0);entries.fill(0);inFrustum.fill(2);
   let head=0,tail=1;queue[0]=start*8+6;reachable[start]=1;
   while(head<tail) {
-    // A very open, huge graph can cost more than it saves. Keep the complete
-    // frustum result for this scene rather than spending unbounded time per frame.
+    // 开放的大型连通图可能得不偿失，达到预算后保留完整视锥结果。
+
     if(head>8192){graph.disabled=true;return null;}
     const item=queue[head++],id=item>>>3,entry=item&7;
     const exits=entry===6?faces:cells[id]?cells[id].exits[entry]:63;
@@ -1128,7 +1074,7 @@ function visibleSections(graph,eye,frustum) {
   return reachable;
 }
 
-/** Horizontal chunk radius; height is unrestricted and orbit previews retain the whole model. */
+/** 视距仅限制水平区段半径，不限制高度；环绕视图保留完整模型。 */
 function inRenderDistance(section,cam) {
   if(!cam||cam.orbit||!cam.eye||!section.position)return true;
   const distance=Number.isInteger(cam.viewDistance)?Math.max(1,Math.min(128,cam.viewDistance)):6;
@@ -1148,7 +1094,7 @@ function frustumPlanes(matrix) {
 }
 
 function boxInFrustum(box,planes) {
-  // Test row 3 +/- rows 0,1,2. A box is rejected only when every corner is outside one plane.
+  // 对六个视锥平面进行保守测试，仅在包围盒所有角点均在某平面外时排除。
   for(let plane=0;plane<24;plane+=4) {
     let maximum=planes[plane+3];
     for(let component=0;component<3;component++) {
@@ -1161,7 +1107,7 @@ function boxInFrustum(box,planes) {
 }
 
 const DEPTH_LITTLE_ENDIAN=new Uint8Array(new Uint32Array([1]).buffer)[0]===1;
-/** Stable radix order of exact 64-bit depths; preserves the previous depth/id comparator. */
+/** 按精确 64 位深度稳定基数排序，保持既有深度与标识比较语义。 */
 function sortDepthOrder(layer) {
   const length=layer.visibleCount??layer.quads;
   const capacity=layer.quads;
@@ -1174,8 +1120,8 @@ function sortDepthOrder(layer) {
   let order=layer.order,scratch=layer.radix.scratch;
   for(let i=0;i<length;i++) {
     const id=layer.visibleIds?layer.visibleIds[i]:i;
-    order[i]=id; // Equal depths retain original face order, including after camera reversals.
-    if(layer.depths[id]===0)layer.depths[id]=0; // +0 and -0 compare equal.
+    order[i]=id; // 相同深度保持原面顺序，包含相机反向后的情况；正零与负零相等。
+    if(layer.depths[id]===0)layer.depths[id]=0;
     const lower=words[id*2+lo],upper=words[id*2+hi];
     const negative=layer.depths[id]<0;
     low[id]=negative?lower:~lower;

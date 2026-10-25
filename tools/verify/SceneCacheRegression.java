@@ -9,7 +9,7 @@ import java.nio.file.attribute.FileTime;
 import java.io.*;
 import java.util.*;
 
-/** Exercises real restart, same-metadata edits, corrupt bundles and normal export/picking. */
+
 public final class SceneCacheRegression {
     static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
     static String hash(Path path)throws Exception{return HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)));}

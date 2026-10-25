@@ -1,7 +1,6 @@
-"""Build the offline 2D palette from the bundled vanilla models and client sources.
+"""使用本地原版模型和客户端源码生成离线二维目录，需要 Python 与 Pillow，结果随 Electron 界面分发。"""
 
-Run with Python + Pillow. Generated files are shipped with the Electron UI.
-"""
+
 from functools import lru_cache
 import json
 import math
@@ -72,8 +71,8 @@ def source_for(name):
                 break
     return result
 
-# Recover properties omitted by model JSON (waterlogging, trigger flags, power, etc.)
-# from the actual StateDefinition and its inherited property declarations.
+# 从实际 StateDefinition 及继承的属性声明补齐模型 JSON 未使用的含水、触发和供电等状态。
+
 PROPERTY_SOURCE = (JAVA / 'state/properties/BlockStateProperties.java').read_text(encoding='utf8')
 FIELD = re.compile(r'(?:BooleanProperty|IntegerProperty|EnumProperty<[^>]+>)\s+(\w+)\s*=\s*(.*?);', re.S)
 SHARED_FIELDS = dict(FIELD.findall(PROPERTY_SOURCE))
@@ -192,8 +191,8 @@ sprite_images = []
 sprite_cache = {}
 @lru_cache(None)
 def banner_texture(color):
-    # Vanilla's block/banner model only declares oak-plank particles. Its visible
-    # cloth is an entity texture with a dye layer, not that fallback block face.
+    # 旗帜的可见布料来自实体纹理和染色层，不能使用模型中的橡木粒子贴图。
+
     base = resolve('entity/banner/banner_base', {})
     overlay = resolve('entity/banner/base', {})
     if base is None or overlay is None:
@@ -232,7 +231,7 @@ def render(variant, view='side', offset=(0,0,0)):
     banner = re.fullmatch(r'block/board_(.+)_banner', variant.get('model', ''))
     if banner and banner[1] in DYE_COLORS and view=='icon':
         index = len(sprite_images)
-        # The palette always shows a broad face; placed/state views use geometry.
+        # 工具栏图标优先展示宽面，放置和状态预览则保持真实几何视角。
         sprite_images.append(render_banner(banner[1]))
         sprite_cache[key] = index
         return index
@@ -250,7 +249,7 @@ def render(variant, view='side', offset=(0,0,0)):
         if rotation and 'axis' not in rotation:
             for axis in ['x','y','z']:
                 if rotation.get(axis):
-                    # Recent models may store multiple element rotation axes.
+                    # 新模型可能同时使用多个旋转轴。
                     p=rotate_element(p,{**rotation,'axis':axis,'angle':rotation[axis]})
             rotation=None
         if rotation:
@@ -265,10 +264,10 @@ def render(variant, view='side', offset=(0,0,0)):
     for element_index,element in enumerate(data.get('elements', [])):
         element_areas[element_index]={'north':0,'up':0,'east':0}
         a,b,c = element['from']; d,e,f = element['to']
-        # FaceInfo/CuboidFace UV corners are vanilla vertices 0,3,2,1:
-        # (minU,minV), (maxU,minV), (maxU,maxV), (minU,maxV).
-        # Vertical faces must start on their own UV-left edge, rather than
-        # screen-left; otherwise directional textures are mirrored.
+        # 按原版 FaceInfo/CuboidFace 的顶点顺序 0、3、2、1 映射 UV。
+
+        # 竖直面从自身 UV 左边缘开始，不能直接按屏幕左侧决定，否则方向纹理会镜像。
+
         vertices = {'north':[(d,e,c),(a,e,c),(a,b,c),(d,b,c)], 'south':[(a,e,f),(d,e,f),(d,b,f),(a,b,f)], 'west':[(a,e,c),(a,e,f),(a,b,f),(a,b,c)], 'east':[(d,e,f),(d,e,c),(d,b,c),(d,b,f)], 'up':[(a,e,c),(d,e,c),(d,e,f),(a,e,f)], 'down':[(a,b,f),(d,b,f),(d,b,c),(a,b,c)]}
         for direction,face in element.get('faces', {}).items():
             points = [transform(p,element.get('rotation')) for p in vertices[direction]]
@@ -278,8 +277,8 @@ def render(variant, view='side', offset=(0,0,0)):
             for axis,index in [('north',2),('up',1),('east',0)]:
                 areas[axis]+=abs(normal[index])
                 element_areas[element_index][axis]+=abs(normal[index])
-    # Only palette icons choose the most readable face. State/placed previews
-    # keep the board's actual viewing axis, including thin edge-on surfaces.
+    # 只有工具栏图标选择最易辨认的面，实际状态和放置预览保留画布观察轴。
+
     best=max(areas,key=areas.get)
     if view=='icon' and areas[projection_axis]<areas[best]*.9: projection_axis=best
     for points,face,element_index in quads:
@@ -304,8 +303,8 @@ def render(variant, view='side', offset=(0,0,0)):
             ux,uy=xs[1]-xs[0],ys[1]-ys[0];vx,vy=xs[3]-xs[0],ys[3]-ys[0];det=ux*vy-uy*vx
             if abs(det)<.01:
                 if view!='icon' and element_areas[element_index][projection_axis]<.01:
-                    # A zero-thickness rail/pane is still visible as a pixel-wide
-                    # edge. Do not replace its valid geometry with a full texture.
+                    # 零厚度铁轨和玻璃板侧视仍显示一像素边缘，不能替换为整张贴图。
+
                     points2=list(zip(xs,ys))
                     start,end=max(((a,b) for i,a in enumerate(points2) for b in points2[i+1:]),key=lambda p:math.dist(*p))
                     length=math.dist(start,end)
@@ -353,8 +352,8 @@ def render(variant, view='side', offset=(0,0,0)):
     return index
 
 def generate_piston_parts():
-    # Keep non-inventory parts out of the palette. Render the rod's overlap into
-    # the base as well: a vanilla long head extends four pixels into that cell.
+    # 活塞连接杆要绘制伸入底座的四像素部分，非背包部件不进入选材目录。
+
     sprite_cache.clear()
     sprite_images.clear()
     data=json.loads(resource('blockstates/piston_head.json').read_text())
@@ -367,7 +366,7 @@ def generate_piston_parts():
     atlas=Image.new('RGBA',(64*32,math.ceil(len(sprite_images)/64)*32))
     for index,image in enumerate(sprite_images):atlas.paste(image,(index%64*32,index//64*32))
     atlas.save(OUT/'board-piston-parts.png')
-    (OUT/'board-piston-parts.js').write_text('/* Generated by tools/generate-board-catalog.py --piston-parts. */\nwindow.BoardPistonParts = '+json.dumps({'visuals':visuals},separators=(',',':'))+';\n',encoding='utf8')
+    (OUT/'board-piston-parts.js').write_text('/* 由方块目录生成工具的 --piston-parts 模式生成。 */\nwindow.BoardPistonParts = '+json.dumps({'visuals':visuals},separators=(',',':'))+';\n',encoding='utf8')
     print(f'{len(visuals)} piston head states, {len(sprite_images)} sprites')
 
 if '--piston-parts' in sys.argv:
@@ -432,7 +431,7 @@ for path in sorted((ASSETS / 'blockstates').glob('*.json')):
         candidates = list(variants.values()) or [p['apply'] for p in data.get('multipart',[])]
         if candidates: visuals = [{'when':{},'sprite':render(candidates[0]),'top':render(candidates[0],'top'),'icon':render(candidates[0],'icon')}]
     if not visuals or not sprite_images[visuals[0]['icon']].getbbox():
-        # Flat item sprites cover signs/plants; custom entity-only models use a visible fallback.
+        # 告示牌和植物采用平面物品图标，实体专用模型使用可辨认的回退。
         fallback = resolve('item/'+item_alias,{}) or resolve('block/'+name,{})
         if name == 'redstone_wire': fallback = resolve('block/redstone_dust_dot',{})
         if fallback is None:
@@ -446,7 +445,7 @@ for path in sorted((ASSETS / 'blockstates').glob('*.json')):
     if not cats:
         cats = ['natural_blocks' if re.search(r'ore|leaves|sapling|flower|grass|mushroom|coral|vine|roots|bush', name) else 'building_blocks']
     if name in ['water','lava','nether_portal','fire']: cats = ['special']
-    # Water can replace these non-solid vanilla blocks; waterlogged blocks keep their geometry.
+    # 水可替换这些非实心元件；含水方块仍保留自身几何。
     replaceable = bool(re.search(r'flower|sapling|torch|redstone_wire|rail|carpet|button|pressure_plate|short_grass|tall_grass|fern|dead_bush|tripwire|repeater|comparator|lever',name))
     properties={k:sorted(v,key=lambda x:(not x.isdigit(),int(x) if x.isdigit() else x)) for k,v in props.items()}
     preferred=['false','north','y','bottom','lower','straight','single','head','wall','none','inactive','0','1']
@@ -457,7 +456,7 @@ for path in sorted((ASSETS / 'blockstates').glob('*.json')):
     display_name = {'redstone_wall_torch':'墙上红石火把','water_cauldron':'装水的炼药锅','lava_cauldron':'装岩浆的炼药锅','powder_snow_cauldron':'装细雪的炼药锅'}.get(name,lang.get('block.minecraft.'+name,name))
     catalog.append({'id':name,'name':display_name, 'categories':list(dict.fromkeys(cats)), 'properties':properties,'defaults':defaults,'facing':facing,'axis':'axis' in props and 'facing' not in props,'waterlogged':wet,'activation':activation,'replaceable':replaceable,'visuals':visuals,'multipart':multipart})
 
-# Fluid / portal sprites have no model geometry.
+# 流体和传送门贴图没有普通模型几何。
 for block in catalog:
     if block['id'] in ['water','lava','nether_portal']:
         texname = {'water':'water_still','lava':'lava_still','nether_portal':'nether_portal'}[block['id']]
@@ -470,6 +469,6 @@ columns = 64
 atlas = Image.new('RGBA',(columns*32,math.ceil(len(sprite_images)/columns)*32))
 for index,image in enumerate(sprite_images): atlas.paste(image,(index%columns*32,index//columns*32))
 atlas.save(OUT / 'board-atlas.png')
-(OUT / 'board-catalog.js').write_text('/* Generated by tools/generate-board-catalog.py. */\nwindow.BoardCatalogInfo = {pack:"xkredstone_display",views:["side","top"]};\nwindow.BoardCatalog = '+json.dumps(catalog,ensure_ascii=False,separators=(',',':'))+';\n',encoding='utf8')
+(OUT / 'board-catalog.js').write_text('/* 由 tools/generate-board-catalog.py 生成的方块目录。 */\nwindow.BoardCatalogInfo = {pack:"xkredstone_display",views:["side","top"]};\nwindow.BoardCatalog = '+json.dumps(catalog,ensure_ascii=False,separators=(',',':'))+';\n',encoding='utf8')
 print(f'{len(catalog)} blocks, {len(sprite_images)} sprites')
 generate_piston_parts()

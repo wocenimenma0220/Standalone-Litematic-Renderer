@@ -2,7 +2,7 @@ const {app,BrowserWindow,dialog}=require('electron'),fs=require('node:fs'),path=
 const repo=path.resolve(__dirname,'../..'),root=process.argv[2]||repo;process.argv=process.argv.slice(0,2);
 const fixtures=path.join(__dirname,'lod-output'),out=path.join(fixtures,root===repo?'ui-source':'ui-package');fs.mkdirSync(out,{recursive:true});
 app.setPath('userData',path.join(out,'electron'));
-// Exercise Chromium's real animation frames without placing a window on the user's screen.
+
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 BrowserWindow.prototype.show=function(){this.setPosition(-20000,-20000,false);this.showInactive();};
@@ -37,8 +37,8 @@ app.once('browser-window-created',(_event,win)=>{
    progress('pixel comparison');
    const comparison=await run(`const parent=document.createElement('div');parent.style.cssText='position:absolute;left:-10000px;width:640px;height:384px';document.body.appendChild(parent);
     const canvas=document.createElement('canvas');parent.appendChild(canvas);const old=new GpuView(canvas);
-    // Compare the same resource stack, including fresh-install versus user-removed built-ins.
-    // The tiny LOD fixture is already fully resident before replacing its backing export file.
+    // 使用相同资源栈比较，并覆盖初装与移除内置包两种状态。
+    // 替换导出文件前，小型 LOD 夹具已完整驻留。
     const legacy=await window.engine.exportScene({realLighting:true,streaming:false});
     old.uploadMesh(legacy.meshArrayBuffer);
     const image=await createImageBitmap(base64ToBlob(legacy.atlasDataUrl),{premultiplyAlpha:'none',colorSpaceConversion:'none'});old.uploadAtlas(image);image.close();

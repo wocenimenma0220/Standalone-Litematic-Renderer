@@ -8,10 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
-/**
- * Stacked resource manager: vanilla first, then imported packs in user order.
- * Later packs override earlier ones (like MultiPackResourceManager).
- */
+
 public final class ResourceManager implements AutoCloseable {
     private final List<ResourcePack> packs = new ArrayList<>();
     private final Path vanillaRoot;
@@ -26,22 +23,19 @@ public final class ResourceManager implements AutoCloseable {
         return this.packs.getFirst();
     }
 
-    /** Imported packs (everything after vanilla), in priority order (later = higher priority). */
+    /** 资源包按优先级叠加，高优先级资源覆盖低优先级资源。 */
     public List<ResourcePack> importedPacks() {
         return List.copyOf(this.packs.subList(1, this.packs.size()));
     }
 
-    /** Adds a pack at the highest priority, failing loudly if it cannot be read. */
+
     public ResourcePack importPack(Path path) throws IOException {
         ResourcePack pack = openPack(path);
         this.packs.add(pack);
         return pack;
     }
 
-    /**
-     * Same as {@link #importPack} but skips unreadable packs with a warning instead of throwing.
-     * Used for built-ins, where one bad zip should not stop the app from starting.
-     */
+    /** 内置包加载失败时返回原因，不阻止其他资源加载。 */
     public void importPackUnchecked(Path path) {
         try {
             this.importPack(path);
@@ -84,7 +78,7 @@ public final class ResourceManager implements AutoCloseable {
         return List.copyOf(this.packs);
     }
 
-    /** Highest-priority-first lookup. */
+    /** 单资源查询按最高优先级开始。 */
     public Optional<byte[]> getResource(String namespace, String path) {
         for (int i = this.packs.size() - 1; i >= 0; i--) {
             byte[] data = this.packs.get(i).read(namespace, path);
@@ -97,7 +91,7 @@ public final class ResourceManager implements AutoCloseable {
         return this.getResource("minecraft", path);
     }
 
-    /** All resource stacks for a path across all packs, highest priority first (for override logic). */
+    /** 返回同一路径的完整资源栈，最高优先级排在前面。 */
     public List<byte[]> getResourceStack(String namespace, String path) {
         List<byte[]> result = new ArrayList<>();
         for (int i = this.packs.size() - 1; i >= 0; i--) {
@@ -114,9 +108,9 @@ public final class ResourceManager implements AutoCloseable {
         return false;
     }
 
-    /** Union listing across packs (namespace, relPath under dir). Later packs' entries listed first. */
+    /** 合并资源目录并去重，后加载的资源包优先。 */
     public List<String[]> listResources(String dir, String suffix) {
-        // collect with dedupe, later packs win on duplicates
+
         var seen = new java.util.LinkedHashSet<String>();
         List<String[]> result = new ArrayList<>();
         for (int i = this.packs.size() - 1; i >= 0; i--) {

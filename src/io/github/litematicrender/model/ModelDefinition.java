@@ -7,21 +7,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Parsed model json (CuboidModel equivalent). Handles parent chaining externally.
- */
+/** 已解析的模型定义；父模型链由 ModelBaker 在外部处理。 */
 public final class ModelDefinition {
     public record ElementRotation(float[] origin, String axis, float angle, boolean rescale) {}
 
     public record Face(Map<String, Object> raw) {
-        /**
-         * uv: [minU, minV, maxU, maxV] in 0..16 texture space, or null for auto.
-         *
-         * <p>Vanilla stores these as <em>named</em> min/max, so a model may legitimately write the
-         * pair in either order — {@code observer.json} has {@code "up": {"uv": [0, 16, 16, 0]}}.
-         * The values are used as given: {@code getVertexU} returns minU or maxU depending on the
-         * vertex, so no normalisation happens here (normalising would silently flip such a face).
-         */
+        /** UV 的最小值和最大值保留原始顺序，允许反向区间；排序会翻转侦测器等模型的纹理。 */
         public float[] uv() {
             Object u = raw.get("uv");
             if (u instanceof List<?> list && list.size() == 4) {
@@ -32,13 +23,13 @@ public final class ModelDefinition {
             return null;
         }
 
-        /** Face UV rotation in degrees: 0, 90, 180 or 270 (vanilla {@code Quadrant}). */
+        /** 面内 UV 旋转角，只允许 0、90、180、270 度。 */
         public int rotationDegrees() {
             int r = MiniJson.asInt(raw.get("rotation"), 0);
             return ((r % 360) + 360) % 360;
         }
 
-        /** Rotation as a vertex-index shift: {@code (index + shift) % 4}. */
+        /** 用顶点索引的循环偏移表示旋转。 */
         public int rotationShift() {
             return rotationDegrees() / 90;
         }
@@ -61,19 +52,13 @@ public final class ModelDefinition {
     public record Element(float[] from, float[] to, Map<String, Face> faces,
                           ElementRotation rotation, String shadeDirectionOverride, int lightEmission) {}
 
-    public final String location;                    // "minecraft:block/stone"
-    public final String parent;                      // raw parent id (may be null / "builtin/generated")
-    public final Map<String, String> textures;       // slot -> "#ref" or "ns:path"
-    /**
-     * Slots whose texture reference asked for {@code "force_translucent": true}.
-     *
-     * <p>Vanilla's texture references may be objects, and that flag overrides the sprite's own
-     * transparency when the render layer is chosen. Redstone dust sets it on both its line and its
-     * overlay, which is why dust draws in the translucent pass.
-     */
+    public final String location;
+    public final String parent;
+    public final Map<String, String> textures;
+    /** 贴图引用声明的强制半透明槽位，可覆盖贴图像素本身的透明分类。 */
     public final java.util.Set<String> forceTranslucentSlots;
-    public final List<Element> elements;             // null when inherited from parent
-    public final Boolean ambientOcclusion;           // null = inherit
+    public final List<Element> elements;
+    public final Boolean ambientOcclusion;
     public final Map<String, Object> raw;
 
     private ModelDefinition(String location, String parent, Map<String, String> textures,
@@ -115,7 +100,7 @@ public final class ModelDefinition {
         return new ModelDefinition(location, parent, textures, forceTranslucent, elements, ao, json);
     }
 
-    /** True when a texture reference is the object form with {@code force_translucent: true}. */
+
     private static boolean textureRefForcesTranslucent(Object v) {
         if (v instanceof Map<?, ?> m) {
             Object f = m.get("force_translucent");
@@ -126,10 +111,7 @@ public final class ModelDefinition {
     }
 
     @SuppressWarnings("unchecked")
-    /**
-     * Texture map values: 1.21.x string form "ns:path" or "#ref",
-     * 26.x object form {sprite: "ns:path", force_translucent: bool}.
-     */
+    /** 兼容旧版字符串贴图引用和 26.x 的对象形式，后者可携带 force_translucent。 */
     private static String textureRefString(Object v) {
         if (v instanceof String s) return s;
         if (v instanceof Map<?, ?> m) {
@@ -150,7 +132,7 @@ public final class ModelDefinition {
                 if (v instanceof Map) {
                     faces.put(e.getKey(), new Face((Map<String, Object>) v));
                 } else if (v instanceof String s) {
-                    // shorthand: "texture": "#all"
+
                     Map<String, Object> m = new LinkedHashMap<>();
                     m.put("texture", s);
                     faces.put(e.getKey(), new Face(m));

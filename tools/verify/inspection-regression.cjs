@@ -29,7 +29,7 @@ app.once('browser-window-created',(_event,win)=>{
       check(first.visible&&first.label.includes('箱')&&first.items.includes('钻石')&&first.items.includes('96')&&first.block.container.items.length===2,'crosshair selection and same-NBT quantity aggregation');
       check(first.block.position.join(',')==='0,0,0'&&first.block.container.status==='saved','clicked geometry resolves correct cell');
       check(await run(`return !state.flyLookActive;`),'inspection releases mouse look');
-      // Hidden Chromium does not forward hardware hover moves; exercise the real mousemove handler.
+
       await aim(.5);p=await center();await run(`hoverPoint=[${p.x},${p.y}];const movement=new MouseEvent('mousemove',{bubbles:true,buttons:0,clientX:${p.x}+22,clientY:${p.y}+8});Object.defineProperty(movement,'movementX',{value:22});Object.defineProperty(movement,'movementY',{value:8});els.gl.dispatchEvent(movement);`);
       await new Promise(r=>setTimeout(r,150));
       const looked=await run(`return {selected:!!state.inspectedBlock,yaw:state.flyYaw,active:state.flyLookActive,dragging,hoverPoint};`);

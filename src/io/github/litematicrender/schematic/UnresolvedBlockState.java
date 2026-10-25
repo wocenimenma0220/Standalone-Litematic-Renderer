@@ -2,9 +2,7 @@ package io.github.litematicrender.schematic;
 
 import java.util.Map;
 
-/**
- * A palette entry as stored in the .litematic file, before registry resolution.
- */
+/** 注册表解析前，按文件原样保存的调色板条目。 */
 public record UnresolvedBlockState(String blockId, Map<String, String> properties) {
 
     public UnresolvedBlockState {

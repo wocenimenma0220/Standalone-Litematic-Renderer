@@ -1,4 +1,4 @@
-const {chromium}=require('C:/Users/roy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('./browser-runtime.cjs');
 const path=require('node:path'),fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{
   const browser=await chromium.launch({headless:true,channel:'msedge',args:['--allow-file-access-from-files']});
@@ -24,7 +24,7 @@ const path=require('node:path'),fs=require('node:fs'),assert=require('node:asser
       let left=0,right=0;for(let y=0;y<32;y++)for(let x=0;x<32;x++)if(pixels[(y*32+x)*4+3]){if(x<16)left++;else right++;}
       return {left,right};
     });assert(thumbnail.left>100&&thumbnail.right>50,'state thumbnail fits both base and head');
-    // The ghost must already include the second cell before placing anything.
+    // 尚未放置时，悬停模型也必须包含完整的活塞头单元。
     await page.mouse.move(board.x+20,board.y+20);await settle();
     const pixels=()=>page.locator('#boardCanvas').evaluate(c=>Array.from(c.getContext('2d').getImageData(250,122,44,44).data));
     const before=await pixels();const p=point(0,0);await page.mouse.move(p.x,p.y);await settle();const after=await pixels();
@@ -38,8 +38,8 @@ const path=require('node:path'),fs=require('node:fs'),assert=require('node:asser
     await state('extended','true');await click(2,1);await page.locator('#boardEraser').click();await click(1,1);assert.equal((await packet()).cells.length,0,'erasing head clears both cells');
     await load({cells:[['1,0',{id:'stone'}]]});await choose('piston');await state('facing','east');await state('extended','true');await click(0,0);
     assert.equal((await packet()).cells.length,1);assert((await page.locator('#boardStatus').innerText()).includes('活塞头'));
-    // Compare the actual canvas pixels with complete vanilla head geometry. The
-    // overlap check catches the missing segment of rod inside the base cell.
+    // 使用实际画布像素与原版完整活塞头比较，覆盖底座内连接杆缺段。
+
     for(const view of ['side','top']){
       const cells=[];for(const [row,id]of ['piston','sticky_piston'].entries())for(const [col,facing]of ['north','south','east','west','up','down'].entries())cells.push([`${col*3},${row*4}`,base(id,facing)]);
       await load({view,zoom:48,pan:{x:180,y:100},cells});await page.locator('#boardBrush').click();await choose('stone');await page.mouse.move(20,20);await settle();
@@ -64,8 +64,8 @@ const path=require('node:path'),fs=require('node:fs'),assert=require('node:asser
             }
           }
           const reference=ctx.getImageData(0,0,32,32).data,[x,y]=key.split(',').map(Number);
-          // Sample pixel centers so fractional zoom and grid boundaries cannot
-          // affect the comparison; transparent areas retain the board background.
+
+
           for(let sy=1;sy<31;sy++)for(let sx=1;sx<31;sx++){
             const i=(sy*32+sx)*4;if(reference[i+3]!==255)continue;
             const pixel=actual.getImageData(Math.floor(data.pan.x+(x+(sx+.5)/32)*data.zoom),Math.floor(data.pan.y+(y+(sy+.5)/32)*data.zoom),1,1).data;

@@ -5,7 +5,7 @@ import io.github.litematicrender.model.Quad;
 import io.github.litematicrender.world.BlockState;
 import io.github.litematicrender.render.skin.SkinResolver;
 
-/** Player skins on the vanilla head/hat model, preserving rotation, with Steve as the fallback. */
+/** 玩家头颅保持旋转，按原版头部和帽层模型采样皮肤，缺失时使用 Steve。 */
 public final class HeadGeometry {
     private HeadGeometry() {}
     public static void emit(SceneMesh mesh, ModelBaker baker, BlockState state, int x, int y, int z, float[] light, SkinResolver.Skin skin) {

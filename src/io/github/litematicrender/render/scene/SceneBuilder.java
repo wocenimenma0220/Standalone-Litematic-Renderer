@@ -12,50 +12,21 @@ import io.github.litematicrender.world.BlockState;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Builds a SceneMesh from a materialized schematic, mirroring vanilla
- * {@code ModelBlockRenderer.tesselateBlock} + {@code BlockModelLighter} + {@code FluidRenderer}.
- *
- * <p>Shading model (matching vanilla, so the output looks like the game):
- * <ul>
- *   <li><b>Ambient occlusion</b> — per vertex, {@code (side1 + side2 + corner + center) / 4},
- *       from {@code BlockModelLighter.prepareQuadAmbientOcclusion};</li>
- *   <li><b>Cardinal light</b> — {@code CardinalLighting.DEFAULT} per face
- *       ({@code down 0.5, up 1.0, north/south 0.8, west/east 0.6}), applied to the whole quad;</li>
- *   <li><b>Fluids</b> — per-corner height field from {@code FluidRenderer.getHeight} /
- *       {@code calculateAverageHeight}, not a flat 14/16 slab.</li>
- * </ul>
- */
+/** 从投影构建场景，参考原版方块、环境光和流体渲染规则。 */
 public final class SceneBuilder implements io.github.litematicrender.render.StreamMeshExporter.Source {
     private OverviewMesh overview;
     private java.util.function.Consumer<String> preparationProgress=stage->{};
     public SceneBuilder preparationProgress(java.util.function.Consumer<String> progress){this.preparationProgress=progress;return this;}
     public SceneBuilder overview(OverviewMesh value){this.overview=value;return this;}
     @Override public SceneMesh coarseSection(SectionVisibility.Position position){return overview==null?null:overview.buildSection(position);}
-    /** CardinalLighting.DEFAULT: down 0.5 / up 1.0 / north,south 0.8 / west,east 0.6. */
+    /** 原版方向光权重：下 0.5、上 1.0、南北 0.8、东西 0.6。 */
     public static final float[] CARDINAL = {0.5f, 1.0f, 0.8f, 0.8f, 0.6f, 0.6f};
 
     private static final int[][] FACE_DELTAS = {
         {0,-1,0},{0,1,0},{0,0,-1},{0,0,1},{-1,0,0},{1,0,0}
     };
 
-    /**
-     * The lightmap RGB factor for a face: the light of the cell the face looks into, passed through
-     * the game's brightness curve and composed exactly as {@code core/lightmap.fsh} does.
-     *
-     * <p>Vanilla {@code Lightmap.getBrightness}: {@code v = level/15}, {@code curved = v/(4-3v)},
-     * then lerped from the dimension's ambient light (0.0 for the overworld) toward 1. The curve is
-     * what makes a torch-lit room feel warm and a cave mouth read as twilight; a straight
-     * level/15 ramp puts far too much light in the low levels — level 4 is 0.235 under the curve
-     * against 0.267 linear, and the difference compounds over AO.
-     *
-     * <p>Daylight enters through the sky channel: the light volume seeds 15 on every exposed column
-     * and the curve maps that to 1.0, which is the overworld at noon. A shaded read of the sky
-     * factor (0.8) is what the game uses indoors under a roof — the volume reproduces that for free,
-     * since a covered cell's sky level drops as the spread runs.
-     *
-     * @param out receives the r, g, b factors
-     */
+
     private void faceLightColor(int x, int y, int z, int face, float[] out) {
         cachedLightColor(x,y,z,face,out);
     }
@@ -87,7 +58,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
 
     public SceneBuilder realLighting(boolean enabled) { this.realLighting=enabled; return this; }
 
-    // world access over all regions (query across region borders)
+
     private final List<LitematicaSchematic.Region> regions = new ArrayList<>();
     private final List<int[]> regionOffsets = new ArrayList<>();
     private final java.util.Map<BlockState,List<Quad>> redstoneSurfaces=new java.util.HashMap<>();
@@ -107,7 +78,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         this.regionIndex=null;
     }
 
-    /** World-space block lookup: outside = air (vanilla "air outside the schematic" semantics). */
+    /** 跨所有区域查询世界方块，投影外按空气处理。 */
     private BlockState[] sectionBlocks;
     private boolean sectionBlocksReady;
     private int sectionBlockX,sectionBlockY,sectionBlockZ;
@@ -131,7 +102,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         }
         return BlockState.air();
     }
-    /** A bounded halo avoids repeatedly decoding packed pages for AO, fluids and neighbour faces. */
+    /** 有界邻域缓存减少 AO、流体和邻面剔除时的重复解压。 */
     private void cacheSectionBlocks(SectionVisibility.Position key) {
         sectionBlocksReady=false;
         long x=(long)key.x()*16-1,y=(long)key.y()*16-1,z=(long)key.z()*16-1;
@@ -143,18 +114,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
 
     // ------------------------------------------------------------------
-    // Face culling
 
-    /**
-     * Vanilla {@code Block.shouldRenderFace}:
-     * <ol>
-     *   <li>the neighbour occludes the whole face → hidden;</li>
-     *   <li>the block and its neighbour merge into one surface ({@code skipRendering}) → hidden;</li>
-     *   <li>otherwise visible.</li>
-     * </ol>
-     * {@code skipRendering} is what stops a wall of identical glass/leaves/ice from showing every
-     * internal face; vanilla implements it per block class, so the blocks that need it are listed.
-     */
+
+    /** 邻居完整遮挡，或两个方块应合并表面时，剔除共享面。 */
     private boolean shouldRenderFace(BlockState state, int face, int x, int y, int z) {
         int[] d = FACE_DELTAS[face];
         BlockState neighbor = this.blockAt(x + d[0], y + d[1], z + d[2]);
@@ -164,14 +126,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return true;
     }
 
-    /**
-     * Blocks whose identical neighbours merge visually, mirroring vanilla's
-     * {@code HalfTransparentBlock.skipRendering} ({@code neighborState.is(this)}): glass, stained
-     * glass, ice, slime and honey. Without this a glass wall renders every internal face, which
-     * reads as a dense grey block instead of a clear pane.
-     *
-     * <p>Fancy leaves keep their internal cutout faces.
-     */
+    /** 同类玻璃、冰、黏液和蜂蜜按原版规则合并相邻表面。 */
     private static final java.util.Set<String> MERGING = java.util.Set.of(
         "minecraft:glass", "minecraft:tinted_glass", "minecraft:ice", "minecraft:frosted_ice",
         "minecraft:slime_block", "minecraft:honey_block",
@@ -186,7 +141,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     );
 
     // ------------------------------------------------------------------
-    // Scene assembly
+
 
     private boolean prepared,streaming,registeringSprites;
     public SceneBuilder skinSnapshot(io.github.litematicrender.render.skin.SkinResolver snapshot){if(prepared)throw new IllegalStateException("Scene already prepared");this.skins=snapshot;return this;}
@@ -196,9 +151,10 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     private void prepare() {
         if(prepared)return;
         this.generatedSprites.clear();this.redstoneSurfaces.clear();this.lightCacheReady=false;this.aoState=null;
-        this.prepareSkins();
-        // Light first: every emitted quad samples the volume, so it must exist before the pass runs.
-        this.buildRegionIndex();preparationProgress.accept("lighting");this.computeLight();
+        preparationProgress.accept("skins");this.prepareSkins();
+        // 光照必须先于面片生成完成，因为每个面都需要采样光照。
+        preparationProgress.accept("indexing");this.buildRegionIndex();
+        if(lightingEnabled)preparationProgress.accept("lighting");this.computeLight();
         if(this.light!=null)this.smoothLighting=new SmoothLighting(this.light,this.lightOrigin,this::blockAt,this.shapes);
         for(int ri=0;ri<regions.size();ri++) {
             var region=regions.get(ri);var off=regionOffsets.get(ri);var origin=region.blockOrigin();
@@ -233,7 +189,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         if(light!=null)worker.smoothLighting=new SmoothLighting(light,lightOrigin,worker::blockAt,worker.shapes);
         worker.streaming=true;worker.prepared=true;return worker;
     }
-    /** Occupied ownership sections, without materializing any face arrays. */
+    /** 只枚举占用区段，不物化面片数组。 */
     private java.util.List<SectionVisibility.Position> occupiedSections;
     private final java.util.Set<SectionVisibility.Position> spriteSections=new java.util.HashSet<>();
     private final java.util.Set<BlockState> redstoneStates=new java.util.HashSet<>();
@@ -253,7 +209,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         }
         occupiedSections=java.util.List.copyOf(keys);return occupiedSections;
     }
-    /** Register all generated sprite tiles before writing any atlas UVs, using bounded scratch meshes. */
+    /** 写入图集 UV 前注册所有生成贴图，临时模型受内存预算限制。 */
     public void prepareStreaming() {
         streaming=true;prepare();
         preparationProgress.accept("sprites");sections();var dynamic=new java.util.HashSet<>(spriteSections);
@@ -290,7 +246,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         for(var quad:source){var key=new SectionVisibility.Position(Math.floorDiv(quad.blockX,16),Math.floorDiv(quad.blockY,16),Math.floorDiv(quad.blockZ,16));var mesh=targets.get(key);if(mesh==null)throw new IllegalStateException("几何所有权超出 32 格构建批次："+key);switch(quad.layer){case SOLID->mesh.solid.add(quad);case CUTOUT->mesh.cutout.add(quad);case PORTAL->mesh.portal.add(quad);case FLUID->mesh.fluid.add(quad);case TRANSLUCENT->mesh.translucent.add(quad);case WATER_MASK->mesh.waterMask.add(quad);}}
     }
     private java.util.Map<LitematicaSchematic.Region,List<int[]>> editingCells;
-    /** Bake a sparse set of changed cells and their halo; no section discovery or global light pass. */
+    /** 只烘焙改动格及其邻域，不枚举全部区段，也不计算全局光照。 */
     public SceneMesh buildEditing(List<io.github.litematicrender.world.Vec3i> cells,SceneBuilder base,double[] minimum,double[] maximum){
         this.editingCells=new java.util.LinkedHashMap<>();
         for(var p:cells)for(int i=regions.size()-1;i>=0;i--){var r=regions.get(i);var off=regionOffsets.get(i);int x=p.x()-off[0],y=p.y()-off[1],z=p.z()-off[2];if(x<0||y<0||z<0||x>=r.blocks.sizeX||y>=r.blocks.sizeY||z>=r.blocks.sizeZ)continue;editingCells.computeIfAbsent(r,key->new ArrayList<>()).add(new int[]{x,y,z});break;}
@@ -300,10 +256,10 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         if(light!=null)this.smoothLighting=new SmoothLighting(light,lightOrigin,this::blockAt,shapes);
         this.prepared=true;return assemble();
     }
-    public SceneMesh build() {prepare();range=null;return assemble();}
+    public SceneMesh build() {prepare();range=null;preparationProgress.accept("geometry");return assemble();}
     private int[] selectionMin,selectionMax;
     private boolean selectionContains(int x,int y,int z){return x>=selectionMin[0]&&y>=selectionMin[1]&&z>=selectionMin[2]&&x<selectionMax[0]&&y<selectionMax[1]&&z<selectionMax[2];}
-    /** Rebuild only selected cells; neighbours beyond every selection boundary are air. */
+    /** 选区外的邻居按空气处理，为切口重新构建真实表面。 */
     public SceneMesh buildSelection(double[] minimum,double[] maximum){
         if(minimum==null||maximum==null||minimum.length!=3||maximum.length!=3)throw new IllegalArgumentException("无效的选择范围");
         int[] min=new int[3],max=new int[3];for(int i=0;i<3;i++){
@@ -342,8 +298,8 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
                 if(this.shapes.occludes(state))mesh.visibility.setSolid(x,y,z);
                 emitOwned(mesh,x,y,z,() -> this.emitBlock(mesh, state, x, y, z));
             });
-            // Blocks whose appearance comes from a renderer rather than a model contribute nothing
-            // above, so heads and sign text are emitted separately.
+
+
             this.emitBlockEntities(mesh, region, off, entityGeometry);
             if(editingCells!=null)continue;
             java.util.List<Integer> indices=null;if(range!=null){indices=new java.util.ArrayList<>();for(var entry:entitySections.get(ri).entrySet()){var p=entry.getKey();if(p.x()>=range.x()&&p.y()>=range.y()&&p.z()>=range.z()&&p.x()*16<range.x()*16+rangeSize&&p.y()*16<range.y()*16+rangeSize&&p.z()*16<range.z()*16+rangeSize)indices.addAll(entry.getValue());}}
@@ -374,18 +330,18 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             }
         }
         if(registeringSprites)return mesh;
-        if(!streaming)this.atlas.replaceGeneratedSprites(this.generatedSprites);
+        if(!streaming){preparationProgress.accept("atlas");this.atlas.replaceGeneratedSprites(this.generatedSprites);}
         mesh.skinReport = this.skins.summary();
         mesh.entityReport=java.util.Map.of("saved",savedEntities,"rendered",renderedEntities,"invisible",invisibleEntities,"unsupported",unsupportedEntities,"duplicates",duplicateEntities);
-        if(finishGeometry)finish(mesh);
+        if(finishGeometry){if(!streaming)preparationProgress.accept("optimizing");finish(mesh);}
         return mesh;
     }
     private static void finish(SceneMesh mesh) { finish(mesh,true); }
     private static void finish(SceneMesh mesh,boolean compileVisibility) {
         mesh.quadCount = mesh.solid.size() + mesh.cutout.size() + mesh.portal.size()
             + mesh.fluid.size() + mesh.translucent.size()+mesh.waterMask.size();
-        // BSP resolves crossings itself. Only retain the old subdivision where bilinear
-        // shading, UVs or a bent face require it to preserve the 1.0.8 appearance.
+        // BSP 负责相交分割，仅在双线性光照、UV 或弯曲面需要时保留旧式细分。
+
         prepareBlended(mesh.portal, mesh.portalSorted);
         prepareBlended(mesh.fluid, mesh.fluidSorted);
         prepareBlended(mesh.translucent, mesh.translucentSorted);
@@ -396,14 +352,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
 
     // ------------------------------------------------------------------
-    // Light
 
-    /**
-     * Builds the light volume over the tight bounding box of all regions and stores it.
-     *
-     * <p>The volume covers only the schematic plus nothing outside — queries outside return full
-     * sky, which is what an exposed surface should read anyway.
-     */
+
+    /** 光照范围使用所有区域的紧包围盒，外部查询返回完整天空光。 */
     private void computeLight() {
         if(!lightingEnabled){this.light=null;return;}
         int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
@@ -430,8 +381,8 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             throw new IllegalArgumentException("投影坐标跨度超出支持范围，请缩小区域坐标。");
         this.lightOrigin=new int[]{minX,minY,minZ};
         boolean sparse=Boolean.getBoolean("litematicrender.light.sparse");
-        // A larger heap must not select a full-volume scan of a huge bit-packed schematic.
-        // Bound the dense streaming workload independently of the machine's available memory.
+        // 大堆不能使巨大压缩投影进入全体积扫描；密集路径同时受固定工作量限制。
+
         if(streaming&&(double)spanX*spanY*spanZ>16L*1024*1024)sparse=true;
         double regionCells=0;for(var region:this.regions)regionCells+=(double)region.blocks.sizeX*region.blocks.sizeY*region.blocks.sizeZ;
         if((double)spanX*spanY*spanZ>regionCells*4)sparse=true;
@@ -466,7 +417,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         this.light.compute();
     }
 
-    /** The light volume, or null before build()/when there is nothing to light. */
+
     private LightSampler light,sectionLight;
     private LightSampler activeLight(){return sectionLight==null?light:sectionLight;}
     private BlockState lightBlockAt(int x,int y,int z) {
@@ -498,7 +449,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
 
     // ------------------------------------------------------------------
-    // Block entities
+
 
     private io.github.litematicrender.render.FontRenderer font;
     private io.github.litematicrender.render.skin.SkinResolver skins;
@@ -580,11 +531,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
     private void ownEntity(java.util.List<SceneMesh.MeshQuad> quads,int start,int index,double x,double y,double z){for(int i=start;i<quads.size();i++)quads.get(i).owner((int)Math.floor(x),(int)Math.floor(y),(int)Math.floor(z),this.currentRegionName).entityOwner(index,this.currentRegionName);}
 
-    /**
-     * Splits each quad into an n×n grid, so back-to-front ordering still holds where two
-     * translucent surfaces cross. A single big water surface or glass wall sorted by its centroid
-     * can land on the wrong side of a smaller quad it intersects; smaller pieces cannot.
-     */
+    /** 半透明面适当细分，使穿插表面能够正确排序。 */
     public static void subdivideInto(List<SceneMesh.MeshQuad> in, List<SceneMesh.MeshQuad> out) {
         for (SceneMesh.MeshQuad q : in) subdivideQuad(q, out);    }
 
@@ -628,7 +575,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         }
     }
 
-    /** Interpolates the 4 corner AO values at a sub-quad's corners (ring order). */
+
     private static float[] aoAt(float[] ao, float u0, float v0, float u1, float v1) {
         if (ao == null) return null;
         float[][] uv = {{u0, v0}, {u1, v0}, {u1, v1}, {u0, v1}};
@@ -643,7 +590,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
 
     private static float bilerp(float a, float b, float c, float d, float u, float v) {
-        // Corners are in ring order, so blend along both axes and combine.
+
         float top = a + (b - a) * u;
         float bottom = d + (c - d) * u;
         return top + (bottom - top) * v;
@@ -653,27 +600,23 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         String id = state.blockId;
         if (BlockRegistry.isHead(id)) return;
 
-        // Fluid first, and for every block rather than only the fluid blocks.
-        //
-        // A waterlogged block — leaves, stairs, fences, coral — holds a fluid state of its own, and
-        // the game draws that fluid as part of rendering the block. Dispatching on the block id
-        // therefore misses every waterlogged block, which is why water inside leaves never appeared.
-        // quickcraft's preview asks each block for its fluid state and bails when it is empty
-        // (`renderFluidIfPresent`), which covers both cases with one rule.
+        // 先查询每个方块所含流体，含水方块同样需要绘制流体层。
+
+
         if (FLUIDS.contains(id)) {
             this.emitFluid(mesh, state, x, y, z);
             return;
         }
         if (isWaterlogged(state)) {
-            // Pass the block's own state: fluidKeyOrNull() recognises it as water, and its lack of
-            // a level property makes ownHeight() report a full source, which is what a waterlogged
-            // block holds. The block's model is still emitted below, because the game draws both.
+            // 含水方块同时绘制自身模型和完整静水，不能只绘制其中一层。
+
+
             this.emitFluid(mesh, state, x, y, z);
         }
         if (id.equals("minecraft:decorated_pot")||id.equals("minecraft:conduit")||SpecialBlockGeometry.banner(id)||BlockRegistry.isCopperGolemStatue(id)) return;
 
-        // A blockstate may resolve to several models (multipart: fences, walls, panes,
-        // redstone wire, brewing stands, ...). Emit every applicable one.
+        // multipart 方块需要输出所有匹配模型，不能只选择一个。
+
         List<ModelBaker.Variant> variants = this.baker.selectVariants(id, state);
         if (variants.isEmpty()) {
             ModelBaker.Variant dv = this.baker.selectVariant(id, this.registry.getOrMissing(id).defaultState);
@@ -727,15 +670,15 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         float[] ys = {q.y0 + y, q.y1 + y, q.y2 + y, q.y3 + y};
         float[] zs = {q.z0 + z, q.z1 + z, q.z2 + z, q.z3 + z};
 
-        // Per-vertex ambient occlusion (vanilla BlockModelLighter.prepareQuadAmbientOcclusion).
-        // Light emission disables AO in vanilla; unculled quads (crosses, rails) use flat lighting.
+
+        // 原版发光方块关闭 AO，无剔除方向的面采用平面光照。
         float[] aoV = null;
         if (lightingEnabled && ao && faceDir >= 0 && emission == 0) {
             aoV = this.ambientOcclusion(x, y, z, effectiveFace, q, xs, ys, zs, state);
         }
 
-        // Tint is chosen by the model's tintindex against the block's registered tint source
-        // (vanilla BlockColors), not by guessing from the texture name.
+        // 染色依据 tintindex 和注册的颜色来源，而非贴图名称。
+
         float tr = 1, tg = 1, tb = 1;
         if (q.tintIndex >= 0) {
             int tint = io.github.litematicrender.render.BlockTints.colorFor(state, q.spriteId, q.tintIndex);
@@ -746,11 +689,11 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             }
         }
 
-        // The lightmap term folds into the tint because both are plain per-face multipliers:
-        // vanilla's vertex colour is `tint * cardinal * AO` and the shader then computes
-        // `texture * vertexColor * lightmap`, so the two combine by multiplication in any order.
+        // 纹理依次乘以染色、方向光、AO 和光照图，静态乘数可提前合并。
+
+
         float[] light = new float[3];
-        // Inset and unculled geometry reads its own cell, not the opaque neighbour above it.
+        // 内凹或无剔除方向的几何读取自身格，不读取上方不透明邻居。
         float facePlane = switch (effectiveFace) {
             case Quad.DOWN, Quad.UP -> (q.y0 + q.y1 + q.y2 + q.y3) / 4f;
             case Quad.NORTH, Quad.SOUTH -> (q.z0 + q.z1 + q.z2 + q.z3) / 4f;
@@ -793,16 +736,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
 
     // ------------------------------------------------------------------
-    // Ambient occlusion
 
-    /**
-     * Vanilla per-vertex AO ({@code BlockModelLighter.prepareQuadAmbientOcclusion}).
-     *
-     * <p>For every corner of the face we sample the two edge neighbours and the diagonal:
-     * {@code shade = (side1 + side2 + diagonal + center) * 0.25}. Vanilla's degenerate rule is
-     * kept exactly: when <em>both</em> edge neighbours are opaque the diagonal sample is
-     * skipped and {@code side1}'s value is used instead of it.
-     */
+
+    /** 每个面角采样两侧、对角和中心的 AO；遮光条件满足时跳过对角。 */
     private float[] ambientOcclusion(int x, int y, int z, int face, Quad q,
                                      float[] xs, float[] ys, float[] zs, BlockState state) {
         if(this.realLighting)return realAmbientOcclusion(x,y,z,face,xs,ys,zs,state);
@@ -810,22 +746,22 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         int[][] axes = faceAxes(face);
         int[] u = axes[0], v = axes[1];
 
-        // Vanilla faceCubic: a flat face lying on the block's own boundary of the cube samples the
-        // neighbour cell; an inset face (slab top, farmland, snow layer) samples around its own
-        // cell, because the neighbouring cell is not what shadows it.
+        // 位于方块外边界的面采样邻格，内凹表面采样自身周围，避免台阶等模型被错误压暗。
+
+
         boolean faceCubic = isFaceCubic(q, face, state);
         int fx = faceCubic ? x + n[0] : x;
         int fy = faceCubic ? y + n[1] : y;
         int fz = faceCubic ? z + n[2] : z;
 
-        // The face's own cell contributes its shade value; vanilla uses the base cell's block.
+
         float center = faceCubic
             ? this.shades(this.blockAt(fx, fy, fz))
             : this.shades(state);
 
         float[] out = new float[4];
         for (int i = 0; i < 4; i++) {
-            // Face-local corners in the order (-u,-v) (+u,-v) (+u,+v) (-u,+v)
+
             int su = (i == 1 || i == 2) ? 1 : -1;
             int sv = (i >= 2) ? 1 : -1;
             int s1x = fx + u[0] * su, s1y = fy + u[1] * su, s1z = fz + u[2] * su;
@@ -840,7 +776,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
 
             float diagonal;
             if (!p2 && !p1) {
-                diagonal = side1;                       // vanilla: reuse side1, don't sample
+                diagonal = side1;
             } else {
                 diagonal = this.shades(this.blockAt(s1x + v[0] * sv, s1y + v[1] * sv, s1z + v[2] * sv));
             }
@@ -880,10 +816,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     private static float clamp01(float value){return Math.min(1f,Math.max(0f,value));}
     private static float blendCorners(float[] c,float u,float v){return c[0]*(1f-u)*(1f-v)+c[1]*u*(1f-v)+c[2]*u*v+c[3]*(1f-u)*v;}
 
-    /**
-     * Vanilla {@code BlockModelLighter.faceCubic}: the face is flat on the cube boundary and the
-     * block fills the cube, or it simply lies on the outer plane of the model.
-     */
+    /** 判断面是否平贴方块外边界，遵循原版 faceCubic 条件。 */
     private boolean isFaceCubic(Quad q, int face, BlockState state) {
         boolean flat = switch (face) {
             case Quad.DOWN -> allEqual(q.y0, q.y1, q.y2, q.y3);
@@ -910,10 +843,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     private static float min4(float a, float b, float c, float d) { return Math.min(Math.min(a, b), Math.min(c, d)); }
     private static float max4(float a, float b, float c, float d) { return Math.max(Math.max(a, b), Math.max(c, d)); }
 
-    /**
-     * The two in-plane axes of a face, in the winding order used by the baked quads.
-     * Index 0 is the horizontal axis, index 1 the vertical one.
-     */
+
     private static int[][] faceAxes(int face) {
         return switch (face) {
             case Quad.DOWN, Quad.UP -> new int[][]{{1, 0, 0}, {0, 0, 1}};
@@ -922,16 +852,11 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         };
     }
 
-    /**
-     * Vanilla {@code AmbientVertexRemap}: AO is computed in face-local corner space, but a baked
-     * quad may be wound either way (the model baker reverses the winding when a transform flips
-     * it), so each vertex takes the value of the corner it actually sits at. Projecting the real
-     * vertex positions onto the face axes makes this independent of winding.
-     */
+    /** AO 在面内角点空间计算，再按实际顶点位置重新映射，兼容翻转绕序。 */
     private float[] remapToVertices(float[] c, int face, float[] xs, float[] ys, float[] zs) {
         int[][] axes = faceAxes(face);
         int[] u = axes[0], v = axes[1];
-        // Quad centre in world space, used as the face-local origin.
+
         float ox = (xs[0] + xs[1] + xs[2] + xs[3]) * 0.25f;
         float oy = (ys[0] + ys[1] + ys[2] + ys[3]) * 0.25f;
         float oz = (zs[0] + zs[1] + zs[2] + zs[3]) * 0.25f;
@@ -948,33 +873,24 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
 
     private float shades(BlockState s) { return this.shapes.shadeBrightness(s); }
 
-    /** Vanilla {@code isLightPermeable}: used to skip the AO diagonal sample. */
+
     private boolean permits(BlockState s) {
         return this.shapes.lightPermeable(s);
     }
 
     // ------------------------------------------------------------------
-    // Fluids
-    //
-    // Port of net.minecraft.client.renderer.block.FluidRenderer.tesselate. Every quantity below
-    // has a line-for-line counterpart in that file; deviating from it is what made earlier
-    // versions render a flat slab with the flow texture pointing the wrong way.
+
 
     private static final java.util.Set<String> FLUIDS = java.util.Set.of(
         "minecraft:water", "minecraft:lava", "minecraft:bubble_column");
 
-    /**
-     * True when the block declares {@code waterlogged=true}, i.e. it contains a water fluid.
-     *
-     * <p>The game renders that fluid as part of the block, so a waterlogged leaf or stair shows
-     * water on its faces. Dispatching the fluid pass on the block id alone misses all of them.
-     */
+    /** 含水状态与流体方块都进入流体渲染，避免树叶或楼梯内部的水丢失。 */
     private static boolean isWaterlogged(BlockState s) {
         String v = s.getValue("waterlogged");
         return v != null && Boolean.parseBoolean(v);
     }
 
-    /** FluidRenderer.MAX_FLUID_HEIGHT: the tallest a non-falling fluid ever gets. */
+    /** 原版非下落流体的最大高度。 */
     private static final float MAX_FLUID_HEIGHT = 0.8888889f;
 
     private void emitFluid(SceneMesh mesh, BlockState state, int x, int y, int z) {
@@ -982,17 +898,14 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         String self = fluidKeyOrNull(state);
         BlockState above = this.blockAt(x, y + 1, z);
 
-        // renderUp = !isNeighborSameFluid(fluidState, fluidStateUp)
+
         boolean renderUp = !isSameFluid(x, y + 1, z, self);
-        // renderDown = shouldRenderFace(DOWN) && !isFaceOccludedByNeighbor(DOWN, MAX_FLUID_HEIGHT, below)
+
         boolean renderDown = shouldRenderFluidFace(x, y, z, Quad.DOWN, self)
             && !isFluidFaceOccludedBy(Direction.DOWN, MAX_FLUID_HEIGHT, this.blockAt(x, y - 1, z));
-        //
-        // The four horizontal faces use shouldRenderFace(), which only consults the block's OWN
-        // occlusion shape (isFaceOccludedBySelf); the neighbour is checked later, at draw time,
-        // with the fluid's real height. Rolling both tests into one here — and using "is the
-        // neighbour solid" as the test — made water vanish behind glass: glass never occludes, so
-        // the face must be emitted, and the depth buffer is what sorts the two out.
+        // 先检查自身遮挡形状，邻居遮挡需在绘制时结合真实液面高度判断。
+
+
         boolean renderNorth = shouldRenderFluidFace(x, y, z, Quad.NORTH, self);
         boolean renderSouth = shouldRenderFluidFace(x, y, z, Quad.SOUTH, self);
         boolean renderWest = shouldRenderFluidFace(x, y, z, Quad.WEST, self);
@@ -1013,17 +926,12 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         if (heightSelf >= 1f) {
             heightNorthEast = heightNorthWest = heightSouthEast = heightSouthWest = 1f;
         } else {
-            // Sodium's improvedFluidShaping (DefaultFluidRenderer): the corner heights are sampled
-            // only through faces the fluid can actually reach. Without the exposure test, a
-            // waterlogged leaf or a stair beside a drop-off still contributes its own 8/9 height to
-            // the average even though no water can flow through it, and the corner pops up in the
-            // middle of a slope — the "sudden bump" the surface showed.
-            // Sodium keeps face *visibility* and side *exposure* separate, and the distinction is
-            // easy to collapse by mistake: visibility is false for a same-fluid neighbour (there is
-            // no face to draw between two water cells), while exposure is true (the surface is
-            // continuous across them). Gating the corner samples on visibility therefore dropped
-            // every water neighbour from the average, leaving (self + 0 + 0)/3 — each cell flat at a
-            // third of its height, stepping cell by cell instead of sloping.
+            // 角点高度仅采样流体实际可到达的邻格，参考 Sodium 的 improvedFluidShaping。
+
+
+            // 面可见性与流体可达性不能混用：同种流体无共享面，但液面仍连续。
+
+
             boolean northExposed = this.isFluidSideExposed(x, y, z - 1, self, 1f);
             boolean southExposed = this.isFluidSideExposed(x, y, z + 1, self, 1f);
             boolean westExposed = this.isFluidSideExposed(x - 1, y, z, self, 1f);
@@ -1051,7 +959,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         String stillSprite = lava ? "minecraft:block/lava_still" : "minecraft:block/water_still";
         String flowSprite = lava ? "minecraft:block/lava_flow" : "minecraft:block/water_flow";
 
-        // ---- top face -------------------------------------------------------
+
         if (renderUp && !isFluidFaceOccludedBy(Direction.UP,
                 Math.min(Math.min(heightNorthWest, heightSouthWest), Math.min(heightSouthEast, heightNorthEast)),
                 above)) {
@@ -1060,12 +968,12 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             heightSouthEast -= 0.001f;
             heightNorthEast -= 0.001f;
 
-            // Vanilla rotates the still/flow texture by the flow direction so the streaks point
-            // where the water is going; a still fluid keeps the sprite axis-aligned.
+            // 流动纹理按流向旋转，静止纹理保持轴对齐。
+
             double[] flow = this.fluidFlow(x, y, z, self);
             float u00, v00, u01, v01, u10, v10, u11, v11;
             if (flow[0] == 0.0 && flow[1] == 0.0) {
-                // still sprite, full frame, corner order copied from addFace's call site
+
                 u00 = 0f; v00 = 0f;
                 u01 = 0f; v01 = 1f;
                 u10 = 1f; v10 = 1f;
@@ -1093,7 +1001,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
                 tr, tg, tb, CARDINAL[Quad.UP], topLight, true,x,y,z,Quad.UP,lava?15:0);
         }
 
-        // ---- bottom face ----------------------------------------------------
+
         if (renderDown) {
             float[] xs = {fx, fx + 1, fx + 1, fx};
             float[] ys = {fy + bottomOffs, fy + bottomOffs, fy + bottomOffs, fy + bottomOffs};
@@ -1104,10 +1012,10 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
                 stillSprite, tr, tg, tb, CARDINAL[Quad.DOWN], downLight, false,x,y,z,Quad.DOWN,lava?15:0);
         }
 
-        // ---- side faces -----------------------------------------------------
-        // Vanilla samples only the lower half of the (16x512) flow sprite, with v tracking the
-        // fluid height, so a shallow fluid shows the bottom slice of the texture rather than a
-        // squashed full frame. Side shading is `up * (axis == Z ? north : west)`.
+
+        // 侧面仅采样流动纹理的下半部分，V 随液面高度变化，不拉伸整帧。
+
+
         for (int faceDir = 0; faceDir < 6; faceDir++) {
             float hh0, hh1, x0, z0, x1, z1;
             boolean renderCondition;
@@ -1159,7 +1067,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         }
     }
 
-    /** Six explicit directions, matching {@code Direction} ordinal order used above. */
+    /** 明确列出六方向，与原版 Direction 序号一致。 */
     private static final class Direction {
         static final int DOWN = Quad.DOWN, UP = Quad.UP, NORTH = Quad.NORTH;
         static final int SOUTH = Quad.SOUTH, WEST = Quad.WEST, EAST = Quad.EAST;
@@ -1173,7 +1081,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         if(!lightingEnabled)shade=1f;
         float baseR=tr,baseG=tg,baseB=tb;
         tr *= light[0]; tg *= light[1]; tb *= light[2];
-        // Water and glass share a camera-sorted blending pass.
+        // 水和玻璃共用按相机排序的混合通道。
         SceneMesh.MeshQuad mq = new SceneMesh.MeshQuad(xs, ys, zs,
             u0, v0, u1, v1, u2, v2, u3, v3,
             sprite, 0xFFFFFFFF, null, tr, tg, tb, shade, null, SceneMesh.Layer.TRANSLUCENT, false);
@@ -1185,7 +1093,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         }
         mesh.translucent.add(mq);
         if (!addBackFace) return;
-        // Explicit reverse winding keeps exactly one side visible from either direction.
+        // 通过反向绕序保证从任一方向只看到一面。
         SceneMesh.MeshQuad back = new SceneMesh.MeshQuad(
             new float[]{xs[0], xs[3], xs[2], xs[1]},
             new float[]{ys[0], ys[3], ys[2], ys[1]},
@@ -1196,15 +1104,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         mesh.translucent.add(back);
     }
 
-    /**
-     * The lightmap RGB factor for a fluid face, following vanilla {@code FluidRenderer}: a fluid
-     * samples {@code max(light at its own cell, light at the cell above)} rather than the cell the
-     * face looks into, so a waterfall's surface is lit by its own column instead of being shadowed
-     * by the water it pours into. Same lightmap composition as every other face — vanilla routes
-     * fluid lighting through the same texture.
-     *
-     * @param out receives the r, g, b factors
-     */
+    /** 流体读取自身和上方格的光照最大值，避免瀑布错误变暗。 */
     private void fluidLightColor(int x, int y, int z, float[] out) {
         if (this.light == null) { out[0] = out[1] = out[2] = 1f; return; }
         int ox = x - this.lightOrigin[0], oy = y - this.lightOrigin[1], oz = z - this.lightOrigin[2];
@@ -1217,17 +1117,11 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return s.blockId.equals("minecraft:bubble_column") ? "minecraft:water" : s.blockId;
     }
 
-    /**
-     * The fluid a block holds, or null when it holds none.
-     *
-     * <p>Two ways a block can hold fluid: it <em>is</em> a fluid block, or it is waterlogged. The
-     * second is what makes water inside leaves, stairs and fences render at all. The returned key is
-     * the fluid's identity, which is what the neighbour comparisons in {@code FluidRenderer} use.
-     */
+    /** 方块可以自身为流体，也可以通过 waterlogged 状态包含静水。 */
     private static String fluidKeyOrNull(BlockState s) {
         if (FLUIDS.contains(s.blockId)) return fluidKey(s);
-        // A waterlogged block holds still water. It has no level property, and ownHeight() defaults
-        // such a state to a full source, which is exactly right.
+
+
         if (isWaterlogged(s)) return "minecraft:water";
         return null;
     }
@@ -1237,18 +1131,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return k != null && k.equals(self);
     }
 
-    /**
-     * Vanilla {@code FluidRenderer.getHeight}: the fluid's own height, {@code 1} when the same
-     * fluid sits directly above (a falling column is full height), {@code -1} for a solid neighbour
-     * (that side is hidden) and {@code 0} for a passable one.
-     *
-     * <p>The {@code -1} test is {@code BlockState.isSolid()} in the original, which asks only whether
-     * the collision shape fills the block — not whether its texture is opaque. Using the occlusion
-     * test here instead marked glass, leaves and other see-through full cubes as "passable" (0) when
-     * vanilla skips them (-1). A skipped corner contributes nothing to the weighted average; a zero
-     * corner drags it down, and neighbouring corners disagreeing is what tore the water surface into
-     * the large diagonal facets.
-     */
+    /** 上方为同种流体时高度为 1；实心邻居返回 -1，可透光空格返回 0。 */
     private float fluidHeight(int x, int y, int z, String self) {
         BlockState s = this.blockAt(x, y, z);
         String k = fluidKeyOrNull(s);
@@ -1259,28 +1142,11 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return this.shapes.isShapeFullBlock(s) ? -1f : 0f;
     }
 
-    /**
-     * Vanilla {@code FlowingFluid.getOwnHeight()} = {@code getAmount() / 9.0F}, where
-     * {@code WaterFluid.Source.getAmount()} is <b>8</b> and {@code WaterFluid.Flowing.getAmount()}
-     * is the {@code level} property itself (1..8). So a source is 8/9 tall and a level-8 flowing
-     * block is also 8/9; treating level 0 as a full block renders every source one pixel too high.
-     */
-    /**
-     * Vanilla {@code FlowingFluid.getOwnHeight()} = {@code getAmount() / 9.0F}, where
-     * {@code WaterFluid.Source.getAmount()} is <b>8</b> and flowing water's amount is
-     * {@code 8 - level} — the blockstate's {@code level} counts how far the water has spread, not
-     * how much of it there is.
-     *
-     * <p>The direction is easy to invert and inverting it is silent: the surface still steps, just
-     * backwards, so the shallowest block sits where the deepest belongs and the run reads as a
-     * staircase rising against the flow. {@code LiquidBlock}'s state cache is the authority — it
-     * builds index 1..7 with {@code getFlowing(8 - level)}.
-     *
-     * <p>Level 0 is a source and level 8 marks a falling column; both carry amount 8.
-     */
+
+    /** 水源高度为 8/9，流动水量为 8-level；level 表示离水源的衰减距离。 */
     private float ownHeight(BlockState s, int x, int y, int z) {
         String level = s.getValue("level");
-        if (level == null) return 8f / 9f;              // a waterlogged block: still, full
+        if (level == null) return 8f / 9f;
         try {
             int l = Integer.parseInt(level);
             int amount = (l == 0 || l >= 8) ? 8 : (8 - l);
@@ -1290,21 +1156,13 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         }
     }
 
-    /**
-     * Vanilla {@code FluidRenderer.calculateAverageHeight}, extended with Sodium's exposure filter.
-     *
-     * <p>The base rule is the game's: heights at or above 0.8 count ten times, lower ones once, and
-     * a neighbour that returns {@code -1} contributes nothing at all. The exposure flags are
-     * Sodium's {@code sampleFluidCornerSmart}: a side that no water can flow through — a
-     * waterlogged block, a wall — is dropped from the average instead of pulling the corner toward
-     * its own height. That is what keeps a slope smooth as it passes a leaf or a stair.
-     */
+    /** 高度不小于 0.8 的样本权重为十，其余权重为一；实心邻居不参与平均。 */
     private float avgHeight(String self, float hSelf, float h1, float h2,
                             int cornerX, int cornerY, int cornerZ,
                             boolean exposed1, boolean exposed2) {
         if (h1 >= 1f || h2 >= 1f) return 1f;
         float sum = 0, weight = 0;
-        // Reachability through the diagonal: only sample the corner when a path exists around it.
+        // 只有存在绕过角点的可达路径时，才采样对角格。
         boolean cornerReachable = exposed1 && exposed2;
         if ((exposed1 || exposed2) && (h1 > 0f || h2 > 0f)) {
             float hCorner = this.fluidHeight(cornerX, cornerY, cornerZ, self);
@@ -1324,53 +1182,29 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return weight == 0f ? 0f : sum / weight;
     }
 
-    /**
-     * Sodium {@code DefaultFluidRenderer.isFluidSideExposed}: is there an open path through this
-     * face of the fluid block?
-     *
-     * <p>A neighbour that cannot occlude (glass, air, a plant) leaves the face exposed. A full
-     * occlusion shape blocks it entirely. For a partial shape the fluid's own box — a slab up to
-     * {@code height} — is compared against the neighbour's shape, which is the case that decides
-     * whether water flows past a stair or a slab.
-     */
+    /** 按 Sodium 的流体侧向暴露规则判断连通性：透明形状保持开放，部分形状与液体实际高度比较。 */
     private boolean isFluidSideExposed(int nx, int ny, int nz, String self, float height) {
         if (height <= 0f) return false;
         BlockState neighbor = this.blockAt(nx, ny, nz);
         if (neighbor == null || neighbor.isAir()) return true;
-        // Same fluid: no isolation, the surface is continuous across the two cells.
+        // 同种流体之间不隔离，表面连续。
         String k = fluidKeyOrNull(neighbor);
         if (k != null && k.equals(self)) return true;
         if (!this.shapes.occludes(neighbor)) return true;
-        // A full cube blocks every side of the fluid; nothing more to compare.
+
         return !this.shapes.isShapeFullBlock(neighbor);
     }
 
-    /**
-     * Vanilla {@code FlowingFluid.getFlow}: the horizontal direction a fluid is moving.
-     *
-     * <p>Two details are easy to get wrong and both decide whether water animates at all:
-     *
-     * <ul>
-     *   <li>{@code affectsFlow} counts a neighbour that is <em>empty</em> as well as one holding the
-     *       same fluid. Skipping air — comparing only against other fluid blocks — makes the vector
-     *       come out zero at every edge and drop, and a zero vector selects the still sprite, so all
-     *       water renders as a source block.</li>
-     *   <li>A fluid with {@code FALLING} set adds a downward component when a horizontal neighbour
-     *       exposes a solid face, which is what orients the texture in a waterfall.</li>
-     * </ul>
-     *
-     * <p>The result only feeds the texture rotation, so its magnitude is irrelevant; the caller
-     * tests it against zero.
-     */
+    /** 按原版流体高差计算流向，空邻居和含同种流体的邻居均参与计算。 */
     private double[] fluidFlow(int x, int y, int z, String self) {
         double flowX = 0, flowZ = 0;
         float selfHeight = ownHeight(this.blockAt(x, y, z), x, y, z);
-        int[][] dirs = {{0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}};   // north, south, west, east
+        int[][] dirs = {{0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}};
         for (int[] d : dirs) {
             int nx = x + d[0], nz = z + d[2];
             BlockState ns = this.blockAt(nx, y, nz);
-            // affectsFlow: empty or the same fluid. A waterlogged neighbour holds water too, so it
-            // participates in the flow calculation like any other water block.
+
+
             String nk = fluidKeyOrNull(ns);
             boolean sameFluid = nk != null && nk.equals(self);
             if (!ns.isAir() && !sameFluid) continue;
@@ -1395,8 +1229,8 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             }
         }
 
-        // FALLING: a fluid pouring down is pulled toward any side that shows a solid face, because
-        // that is the side it spills from.
+        // 下落水被拉向存在实心侧面的方向，体现溢出来源。
+
         if (isFalling(this.blockAt(x, y, z))) {
             for (int[] d : dirs) {
                 int nx = x + d[0], nz = z + d[2];
@@ -1419,17 +1253,14 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return new double[]{flowX, flowZ};
     }
 
-    /** True when the fluid block carries {@code falling=true}, or has no fluid below it. */
+    /** 判断流体是否显式下落，或下方已没有相同流体。 */
     private boolean isFalling(BlockState s) {
         String f = s.getValue("falling");
         if (f != null) return Boolean.parseBoolean(f);
         return false;
     }
 
-    /**
-     * Vanilla {@code FlowingFluid.isSolidFace}: the side counts as solid when the neighbour is not
-     * the same fluid and its face shape is a full block.
-     */
+    /** 流体实心侧面要求邻居不是同种流体，且对应遮挡面填满方块。 */
     private boolean isSolidFace(int x, int y, int z, String self) {
         BlockState s = this.blockAt(x, y, z);
         String k = fluidKeyOrNull(s);
@@ -1438,29 +1269,14 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return this.shapes.occludes(s);
     }
 
-    /**
-     * Vanilla {@code FluidRenderer.shouldRenderFace}: the neighbour must be a different fluid, and
-     * the block's <em>own</em> occlusion shape must not cover this side. Deliberately does not look
-     * at the neighbour — that test happens at draw time with the fluid's real height, because the
-     * question there is "does the neighbour's shape cover a box of this height", which is what
-     * {@link #isFluidFaceOccludedBy} answers.
-     */
+    /** 面可见性只检查自身遮挡形状，邻居测试留到绘制时按液面真实高度执行。 */
     private boolean shouldRenderFluidFace(int x, int y, int z, int face, String self) {
         int[] d = FACE_DELTAS[face];
         return !isSameFluid(x + d[0], y + d[1], z + d[2], self)
             && !this.shapes.occludes(this.blockAt(x, y, z));
     }
 
-    /**
-     * Vanilla {@code FluidRenderer.isFaceOccludedByState}: the neighbour's face-occlusion shape is
-     * compared against a box the size of the fluid (0..height). Three cases:
-     * <ul>
-     *   <li>empty shape (glass, leaves, anything built with {@code noOcclusion}) — never hides;</li>
-     *   <li>full block — hides every side of the fluid, and the top only when the fluid is full;</li>
-     *   <li>partial shape — a real BooleanOp we approximate by treating any partial neighbour as
-     *       non-covering, which is right for the blocks that appear in schematics.</li>
-     * </ul>
-     */
+    /** 透明空形状不遮挡，完整形状完全遮挡，部分形状与流体高度盒比较。 */
     private boolean isFluidFaceOccludedBy(int face, float height, BlockState neighbor) {
         if (neighbor == null || neighbor.isAir()) return false;
         if (!this.shapes.occludes(neighbor)) return false;
@@ -1469,9 +1285,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
 
     // ------------------------------------------------------------------
-    // Layers
 
-    /** Classifies the face UV region; water and glass share the blending pass. */
+
+    /** 按实际 UV 区域分类材质，水和玻璃共同进入混合通道。 */
     private SceneMesh.Layer layerOf(String blockId, Quad q) {
         if (blockId.equals("minecraft:nether_portal")) return SceneMesh.Layer.PORTAL;
         if (FLUIDS.contains(blockId)) return SceneMesh.Layer.TRANSLUCENT;
@@ -1483,7 +1299,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return SceneMesh.Layer.SOLID;
     }
 
-    /** Blocks the game always draws in the translucent pass regardless of texture alpha. */
+
     private static final java.util.Set<String> TRANSLUCENT_IDS = java.util.Set.of(
         "minecraft:ice", "minecraft:frosted_ice", "minecraft:slime_block", "minecraft:honey_block"
     );

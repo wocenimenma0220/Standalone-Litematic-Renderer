@@ -1,6 +1,6 @@
 package io.github.litematicrender.render.scene;
 
-/** A channel of 4096 light values. Uniform pages have no byte payload. */
+/** 每个光照页保存 4096 个值，均匀页无需额外字节数组。 */
 final class LightPage {
     private int uniform;
     private byte[] data;

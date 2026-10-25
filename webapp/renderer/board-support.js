@@ -1,7 +1,5 @@
 'use strict';
-/* FaceAttachedHorizontalDirectionalBlock uses FULL; DiodeBlock uses RIGID;
- * BasePressurePlateBlock accepts RIGID or CENTER. These are support shapes,
- * independent of light occlusion, redstone conduction and visible model faces. */
+/** 附着元件、中继器和压力板分别使用原版 FULL/RIGID/CENTER 支撑规则；支撑、遮光、导电和可见面独立判断。 */
 (function(root){
   const data=typeof module!=='undefined'?require('./board-support-data.js'):root.BoardSupportData;
   const directions=['down','up','north','south','west','east'],types=['FULL','CENTER','RIGID'];

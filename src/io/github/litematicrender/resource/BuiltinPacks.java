@@ -6,7 +6,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
 
-/** Bundled appearance packs may be removed; renderer support resources always remain loaded. */
+
 public final class BuiltinPacks {
     private BuiltinPacks() {}
     private static final Set<String> SUPPORT=Set.of("fast-chest","block-entity-textures","minecraft-font","static-block-entities");
@@ -16,7 +16,7 @@ public final class BuiltinPacks {
         try {
             var values=MiniJson.asArray(MiniJson.parse(Files.readString(home.resolve("settings/removed-builtins.json"))));
             if(values!=null)for(Object value:values)if(value instanceof String name)removed.add(name);
-        } catch(IOException|RuntimeException ignored) { /* first launch or invalid preference */ }
+        } catch(IOException|RuntimeException ignored) {   }
         Path directory=home.resolve("assets/builtin");
         if(!Files.isDirectory(directory))return List.of();
         try(Stream<Path> files=Files.list(directory)) {

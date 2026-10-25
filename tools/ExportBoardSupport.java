@@ -13,7 +13,7 @@ import net.minecraft.world.level.block.SupportType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 
-/** Export vanilla support faces, conduction and wire-connection properties separately. */
+/** 分别导出原版支撑面、导电和红石粉连接属性。 */
 public class ExportBoardSupport {
     private static final Direction[] DIRECTIONS = {Direction.DOWN, Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST};
     private static final SupportType[] TYPES = {SupportType.FULL, SupportType.CENTER, SupportType.RIGID};
@@ -49,7 +49,7 @@ public class ExportBoardSupport {
             Map<BlockState, Integer> masks = new IdentityHashMap<>();
             for (BlockState state : states) masks.put(state, mask(state));
             count += states.size();
-            // Remove properties that never affect support, such as waterlogging or power.
+            // 排除不会影响支撑形状的含水、供电等属性。
             for (Property<?> property : new ArrayList<>(properties)) {
                 List<Property<?>> rest = properties.stream().filter(p -> p != property).toList();
                 Map<String, Integer> projected = new HashMap<>();
@@ -72,7 +72,7 @@ public class ExportBoardSupport {
                 blocks.put(id, entry);
             }
         }
-        String source = "'use strict';\n// Generated from Minecraft Java 26.3: support FULL/CENTER/RIGID bits 0..17, conductor bit 18, wire-connect bits 19..24 (down/up/north/south/west/east), null-direction bit 25.\n"
+        String source = "'use strict';\n// 从 Java 26.3 导出：支撑形状占 0～17 位，导电为第 18 位，六向红石连接占 19～24 位，空方向占第 25 位。\n"
             + "(function(root){const data=" + new Gson().toJson(blocks) + ";\n"
             + "if(typeof module!=='undefined')module.exports=data;else root.BoardSupportData=data;})(typeof window!=='undefined'?window:globalThis);\n";
         Files.writeString(Path.of(args[0]), source);

@@ -3,13 +3,11 @@ package io.github.litematicrender.schematic;
 import io.github.litematicrender.nbt.NbtCompound;
 import io.github.litematicrender.world.Vec3i;
 
-/**
- * Sub-region of a schematic: relative position + size.
- */
+/** 投影子区域：相对位置和有符号尺寸。 */
 public final class SubRegion {
     public final String name;
-    public final Vec3i position;   // relative Position of the region (from NBT "Position")
-    public final Vec3i size;       // Size (can contain negative components in some files)
+    public final Vec3i position;
+    public final Vec3i size;       // 原始尺寸分量可能为负。
 
     public SubRegion(String name, Vec3i position, Vec3i size) {
         this.name = name;

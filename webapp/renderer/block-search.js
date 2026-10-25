@@ -16,7 +16,7 @@
   }
   function locate(){
     const hit=page?.results[index];if(!hit||!state.viewReady||state.cpuPreview)return;
-    // Preserve normal orbit framing. A perspective camera places the target ahead of the viewer.
+    // 保持普通视角取景规则，定位时用透视相机将目标放到观察者前方。
     setFly(true);state.flyYaw=0;state.flyPitch=-.12;state.flyPos=[hit.position[0]+.5,hit.position[1]+1.4,hit.position[2]+4];
     state.flyDirty=true;updateCoordinates();drawView();
   }

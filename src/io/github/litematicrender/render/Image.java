@@ -7,10 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
 
-/**
- * Simple RGBA image, mirroring the parts of com.mojang.blaze3d.platform.NativeImage we need.
- * Pixels are stored as ARGB ints (alpha in bits 24-31), row-major, top-to-bottom.
- */
+/** 简化的 RGBA 图像；像素按从上到下的行顺序保存为 ARGB 整数。 */
 public final class Image {
     public final int width;
     public final int height;
@@ -49,14 +46,14 @@ public final class Image {
         return (a << 24) | (r << 16) | (g << 8) | b;
     }
 
-    /** Nearest-neighbor sample in [0,1) UV space. */
+    /** 在 0～1 UV 空间中采用最近邻采样。 */
     public int sampleNearest(float u, float v) {
         int x = Math.min(this.width - 1, Math.max(0, (int) (u * this.width)));
         int y = Math.min(this.height - 1, Math.max(0, (int) (v * this.height)));
         return this.pixel(x, y);
     }
 
-    /** Copies a region of src into this image at dstX/dstY (this = destination). */
+
     public void blitFrom(Image src, int srcX, int srcY, int dstX, int dstY, int w, int h) {
         for (int y = 0; y < h; y++) {
             int dy = dstY + y;
@@ -73,7 +70,7 @@ public final class Image {
         }
     }
 
-    /** Copies a region of this image into dst at dstX/dstY (this = source). */
+
     public void blitTo(Image dst, int srcX, int srcY, int dstX, int dstY, int w, int h) {
         dst.blitFrom(this, srcX, srcY, dstX, dstY, w, h);
     }
@@ -84,7 +81,7 @@ public final class Image {
             BufferedImage img = ImageIO.read(input);
             if (img == null) throw new IOException("Unsupported image format");
             return fromBuffered(img);
-        }finally{try{input.close();}catch(IOException alreadyClosed){/* ImageIO closes a successfully decoded stream. */}}
+        }finally{try{input.close();}catch(IOException alreadyClosed){/** ImageIO 成功解码后会关闭输入流。 */}}
     }
 
     public static Image read(InputStream in) throws IOException {
@@ -120,7 +117,7 @@ public final class Image {
         }
     }
 
-    /** The missing texture: pink/black checkerboard (vanilla missingno). */
+    /** 缺失纹理使用原版粉黑棋盘格。 */
     public static Image missing() {
         return missing(16, 16);
     }

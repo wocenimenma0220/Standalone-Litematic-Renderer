@@ -9,7 +9,7 @@ import io.github.litematicrender.util.MiniJson;
 import java.util.*;
 import java.nio.charset.StandardCharsets;
 
-/** Required placeable items and saved container stacks, counted without building a render mesh. */
+/** 直接统计可放置建材和已保存容器物品，不构建渲染网格。 */
 public final class MaterialList {
     private final Map<String,String> names=new HashMap<>();
     private final Map<String,Integer> limits=new HashMap<>();

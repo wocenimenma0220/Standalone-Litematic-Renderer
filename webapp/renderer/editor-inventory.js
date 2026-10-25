@@ -2,7 +2,7 @@
 (() => {
   const SLOT_COUNT=36,HOTBAR_START=27,HOTBAR_SIZE=9;
   function cleanInventory(input){
-    // The old catalog pages were automatically filled; start the new personal backpack empty.
+    // 新个人背包从空槽开始，不迁移旧版自动填充目录页。
     const current=input?.version===2;
     const result={version:2,slot:current&&Number.isInteger(input.slot)&&input.slot>=0&&input.slot<HOTBAR_SIZE?input.slot:0,items:Array(SLOT_COUNT).fill(null)};
     if(current&&Array.isArray(input.items))for(let index=0;index<SLOT_COUNT;index++){

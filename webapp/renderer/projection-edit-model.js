@@ -22,7 +22,7 @@
   function placement(def,context){
     const states={...def.defaults},face=context.face||[0,1,0],look=context.look||[0,0,-1],id='minecraft:'+def.id,position=context.position;
     const faceName=direction(face,true),horizontal=direction(look),full=direction(look,true),properties=def.properties||{};
-    // Rail orientation remains a deliberate debug-stick operation.
+    // 铁轨形状继续由用户通过调试棒明确调整。
     if(!/(^|_)rail$/.test(def.id)){
       if(states.axis!==undefined)states.axis=Math.abs(face[0])?'x':Math.abs(face[2])?'z':'y';
       if(states.facing!==undefined){let facing=opposite(properties.facing?.includes('up')?full:horizontal);if(def.id==='observer'||def.id.endsWith('_stairs')||def.id.endsWith('_door')||def.id.endsWith('_fence_gate')||def.id.endsWith('_bed'))facing=def.id==='observer'?full:horizontal;if(def.id.endsWith('_trapdoor')&&face[1]===0)facing=faceName;if(def.id==='hopper'){facing=opposite(faceName);if(facing==='up')facing='down';}if(properties.facing?.includes(facing))states.facing=facing;}

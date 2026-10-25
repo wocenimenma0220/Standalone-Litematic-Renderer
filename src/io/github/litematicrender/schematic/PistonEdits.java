@@ -4,7 +4,7 @@ import io.github.litematicrender.nbt.NbtCompound;
 import io.github.litematicrender.world.Vec3i;
 import java.util.*;
 
-/** Keeps edited piston bases and their separate head cells in one atomic change. */
+/** 活塞底座和独立活塞头作为一次原子修改处理。 */
 public final class PistonEdits {
     private PistonEdits() {}
 
@@ -50,20 +50,20 @@ public final class PistonEdits {
 
     public static LinkedHashMap<Vec3i, NbtCompound> plan(ProjectionEdits edits, Map<Vec3i, NbtCompound> requested) {
         var result = new LinkedHashMap<>(requested);
-        // Retraction, rotation, replacement and deletion release only the old matching head.
+        // 收回、转向、替换或删除时，仅释放原来匹配的活塞头。
         for (var entry : requested.entrySet()) {
             Vec3i pos = entry.getKey(); var before = at(edits, pos); var after = entry.getValue();
             if (extended(before) && !(extended(after) && id(before).equals(id(after)) && facing(before).equals(facing(after)))) {
                 Vec3i previousHead = offset(pos, facing(before), 1);
                 if (!requested.containsKey(previousHead) && fittingHead(at(edits, previousHead), before)) result.put(previousHead, empty());
             }
-            // Vanilla head removal also removes its matching base; unrelated neighbors survive.
+            // 删除活塞头时一并清理匹配底座，不影响无关邻居。
             if (id(before).equals("minecraft:piston_head") && !sameHead(before, after)) {
                 Vec3i base = offset(pos, facing(before), -1);
                 if (!requested.containsKey(base) && fittingHead(before, at(edits, base))) result.put(base, empty());
             }
         }
-        // Use the final batch state so an explicitly cleared cell can receive a new head.
+        // 使用批次最终状态判断占用，允许明确清空的位置接收新活塞头。
         for (var entry : new ArrayList<>(result.entrySet())) {
             var base = entry.getValue(); if (!extended(base)) continue;
             Vec3i target = offset(entry.getKey(), facing(base), 1);

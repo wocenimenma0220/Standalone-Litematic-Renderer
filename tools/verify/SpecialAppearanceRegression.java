@@ -10,7 +10,7 @@ import io.github.litematicrender.world.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Behavioral fixtures for NBT appearance, activation, section ownership and frozen atlas lifetime. */
+
 public final class SpecialAppearanceRegression {
     static Path out;static BlockRegistry registry;static ModelBaker baker;static Colormaps colors;static SpriteAtlas atlas;
     static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}

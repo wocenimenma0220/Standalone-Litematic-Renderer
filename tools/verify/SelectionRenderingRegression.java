@@ -5,7 +5,7 @@ import io.github.litematicrender.serve.RenderEngine;
 import java.nio.file.*;
 import java.util.*;
 
-/** Pixel opacity, bounds propagation, fast voxel selection and export preparation reuse. */
+
 public final class SelectionRenderingRegression {
     static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
     public static void main(String[] args)throws Exception{

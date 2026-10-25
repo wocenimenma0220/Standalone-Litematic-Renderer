@@ -1,12 +1,11 @@
 'use strict';
-/* Java 26.3 ComparatorBlock, Level.updateNeighbourForOutputSignal, and the
- * individual blocks' getAnalogOutputSignal. No polling: NC/CUD causes checks. */
+/** 比较器与模拟量更新参考 Java 26.3；通过 NC/CUD 触发检查，不进行轮询。 */
 (function(root){
   const B=typeof module!=='undefined'?require('./board-wire.js'):root.BoardTiming;
   const {TimingWorld,DIR,OPP}=B,P=TimingWorld.prototype,key=p=>p.join(','),copy=x=>JSON.parse(JSON.stringify(x));
   const at=(p,d)=>p.map((v,i)=>v+DIR[d][i]),frame=id=>['item_frame','glow_item_frame'].includes(id);
   const songs={11:[11,71],13:[1,178],5:[15,178],blocks:[3,345],bounce:[8,234],cat:[2,185],chirp:[4,185],creator_music_box:[11,73],creator:[12,176],far:[5,174],lava_chicken:[9,134],mall:[6,197],mellohi:[7,96],otherside:[14,195],pigstep:[13,149],precipice:[13,299],relic:[14,218],stal:[8,150],strad:[9,188],tears:[10,175],wait:[12,238],ward:[10,251]};
-  // Values and lengths from data/minecraft/jukebox_song/*.json in the 26.3 jar.
+  // 唱片长度和模拟量来自 26.3 的 jukebox_song 资源。
   B.jukeboxSongs=Object.fromEntries(Object.entries(songs).map(([id,[signal,seconds]])=>['music_disc_'+id,{signal,ticks:seconds*20+20}]));
   B.extraItems=[['book','书'],['writable_book','书与笔'],['written_book','成书'],['enchanted_book','附魔书'],['arrow','箭'],['snowball','雪球'],['egg','鸡蛋'],['bucket','铁桶'],['water_bucket','水桶'],['lava_bucket','岩浆桶'],['flint_and_steel','打火石'],['shears','剪刀'],['bone_meal','骨粉'],...Object.keys(B.jukeboxSongs).map(id=>[id,'音乐唱片 '+id.slice(11)])].map(([id,name])=>({id,name,categories:[]}));
   const old={};for(const n of ['analog','containerAt','inventoryRefs','inventoryChanged','accepts','slotsFor','own','execute','write','tickBlock','snapshot','restore','maxStack'])old[n]=P[n];

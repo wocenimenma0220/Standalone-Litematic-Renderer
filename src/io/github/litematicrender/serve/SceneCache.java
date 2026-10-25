@@ -6,7 +6,7 @@ import java.nio.file.*;
 import java.nio.file.attribute.FileTime;
 import java.util.*;
 
-/** Immutable completed scene bundles, checksum validation and bounded disk retention. */
+/** 仅缓存已完成场景，使用校验和验证并限制磁盘保留量。 */
 final class SceneCache {
     record Entry(Path directory,Map<String,Object> result){}
     private final Path root,settings;

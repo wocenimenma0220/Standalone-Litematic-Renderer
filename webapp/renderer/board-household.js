@@ -1,6 +1,5 @@
 'use strict';
-/* 26.3 Door/TrapDoor/FenceGate, ContainerOpenersCounter, Leaves/Scaffolding.
- * Distance changes use scheduled ticks. Random decay is intentionally disabled. */
+/** 门、容器人数和树叶/脚手架距离遵循 26.3 规则；距离变化使用计划刻，不引入随机凋落。 */
 (function(root){
  const B=typeof module!=='undefined'?require('./board-rails.js'):root.BoardTiming,S=typeof module!=='undefined'?require('./board-support.js'):root.BoardSupport;
  const {TimingWorld,DIR,OPP}=B,P=TimingWorld.prototype,at=(p,d)=>p.map((v,i)=>v+DIR[d][i]),key=p=>p.join(',');

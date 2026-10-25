@@ -14,7 +14,7 @@ for(let sample=0;sample<5;sample++){
   if(layer.order.some((id,i)=>id!==expected[i]))throw new Error('64-bit depth order differs from comparator');
   for(let i=0;i<count;i++)depths[i]=-depths[i];
 }
-// Both paths start from the same previous ordering, as during a real camera turn.
+
 const centers=Float64Array.from({length:count*3},()=>Math.floor(random()*10000)/100);
 let totalOld=0,totalNew=0;
 const previous=Array.from({length:count},(_,i)=>i);

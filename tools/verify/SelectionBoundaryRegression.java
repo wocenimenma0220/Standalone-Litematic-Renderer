@@ -8,7 +8,7 @@ import io.github.litematicrender.world.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Independent selection meshing exposes all six borders and preserves real model shapes. */
+/** 检查独立选区六个边界的暴露面和真实模型形状。 */
 public final class SelectionBoundaryRegression {
     static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
     static List<SceneMesh.MeshQuad> faces(SceneMesh mesh){var result=new ArrayList<SceneMesh.MeshQuad>();for(var layer:List.of(mesh.solid,mesh.cutout,mesh.portal,mesh.fluid,mesh.translucent))result.addAll(layer);return result;}

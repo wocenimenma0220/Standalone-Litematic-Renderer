@@ -5,7 +5,7 @@ import io.github.litematicrender.render.Image;
 import java.util.Map;
 import static io.github.litematicrender.render.scene.EntityGeometry.*;
 
-/** Vanilla static skull models. Player profiles deliberately stay in HeadGeometry. */
+/** 原版静态生物头颅模型；玩家皮肤由 HeadGeometry 单独处理。 */
 final class MobHeadGeometry {
     static void emit(EntityGeometry geometry,SceneMesh mesh,BlockState state,int x,int y,int z,float[] light,Map<String,Image> sprites) {
         String kind=state.blockId.substring(state.blockId.indexOf(':')+1).replace("_wall_","_");

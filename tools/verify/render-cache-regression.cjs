@@ -26,7 +26,7 @@ app.once('browser-window-created', (_event, win) => {
         const view = state.view, gl = view.gl, draw = view.draw.bind(view);
         let draws = 0;
         view.draw = cam => { draws++; return draw(cam); };
-        // Neither camera interaction nor idle refinement may rebuild the engine scene.
+        // 相机交互和空闲细化都不能触发引擎重新构建场景。
         window.engine.exportScene = () => { throw new Error('Camera rebuilt scene'); };
         window.engine.renderPreview = () => { throw new Error('Camera rendered CPU preview'); };
         drawView(); drawView();
@@ -62,8 +62,7 @@ app.once('browser-window-created', (_event, win) => {
         await delay(REFINE_DELAY + 100);
         if (els.gl.width !== width || els.gl.height !== height) throw new Error('Fly idle quality did not recover');
         setFly(false);
-        // Measure completed GPU work on the actual large model, keeping the same
-        // camera and cached transparent ordering at both resolutions.
+        // 在真实大模型上测量已完成的 GPU 工作，两种分辨率保持相同相机和透明排序缓存。
         const cam = orbitCamera(); cam.background = backdropColor();
         const benchmark = scale => {
           draw({ ...cam, renderScale: scale }); gl.finish();

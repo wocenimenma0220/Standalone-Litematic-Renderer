@@ -1,24 +1,17 @@
-// LitematicRender.exe — portable root launcher.
-//
-// Replaces 启动.bat / 命令行渲染.bat with a single windowed exe that lives in the extracted root.
-//
-// Verified semantics (see _launcher-poc/proof/ for the evidence):
-//   * Root is derived from the exe's own location (AppDomain.CurrentDomain.BaseDirectory), never
-//     from the current working directory, so double-clicking from anywhere works.
-//   * ELECTRON_RUN_AS_NODE is REMOVED from the child environment. A parent shell that exports it
-//     makes Electron run as plain Node and crash with
-//     "Cannot read properties of undefined (reading 'handle')".
-//   * Electron is started as  electron.exe "<root>\webapp"  plus any forwarded argv.
-//   * The child's stdout/stderr are captured to <root>\logs\launcher.log; a MessageBox surfaces
-//     the tail on a non-zero exit, which is what the .bat got from `start /wait` + the console.
-//   * `--cli` routes to runtime\bin\java.exe and relays its output to whatever stdout the caller
-//     gave us, falling back to AttachConsole only when there is no inherited handle.
-//   * Relative file arguments are absolutized against the caller's CWD in GUI mode, because the
-//     launcher sets Electron's working directory to the app root.
-//
-// Build (no SDK required, ships with Windows):
-//   C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /platform:x64
-//     /optimize+ /win32icon:app.ico /out:LitematicRender.exe Launcher.cs
+// 便携版根目录启动器。
+// 使用一个窗口程序统一承担图形启动和命令行导出。
+
+// 安装根目录始终由 EXE 自身位置决定，不依赖调用方工作目录。
+
+// 必须删除 ELECTRON_RUN_AS_NODE 环境变量，避免 Electron 被当成纯 Node 启动。
+
+
+// 子进程输出写入 logs/launcher.log，异常退出时展示诊断末尾。
+
+// 命令行模式调用内置 Java，优先沿用调用方输出句柄，无句柄时再附加控制台。
+
+// 图形模式启动前，按调用方工作目录将相对文件参数转为绝对路径。
+
 
 using System;
 using System.Diagnostics;
@@ -33,7 +26,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyDescription("Minecraft 投影预览")]
 [assembly: AssemblyVersion("1.2.0.0")]
 [assembly: AssemblyFileVersion("1.2.0.0")]
-[assembly: AssemblyInformationalVersion("1.2.0test-v1")]
+[assembly: AssemblyInformationalVersion("1.2.0tetst-v2")]
 
 internal static class Launcher
 {
@@ -46,9 +39,9 @@ internal static class Launcher
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool SetEnvironmentVariableW(string name, string value);
 
-    // Some shells supply PATH and Path as separate native entries. Framework's case-insensitive
-    // ProcessStartInfo.EnvironmentVariables throws on that block, before either engine can start.
-    // Normalize only duplicate entries in this launcher's own process; the parent is unchanged.
+    // 只合并当前启动器进程中的重复 PATH/Path 环境条目，避免 Framework 构造子进程环境失败。
+
+
     private static void NormalizeInheritedEnvironment()
     {
         IntPtr block = GetEnvironmentStringsW();
@@ -83,7 +76,7 @@ internal static class Launcher
                 throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         }
     }
-    // ---------------------------------------------------------------- native interop
+
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = false)]
     private static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
@@ -126,27 +119,25 @@ internal static class Launcher
 
     private static string _root;
 
-    // ---------------------------------------------------------------------- entry point
 
     [STAThread]
     private static int Main(string[] rawArgs)
     {
         _root = ResolveRoot();
 
-        // Environment.GetCommandLineArgs() is used instead of Main's args so that a forwarded
-        // argument containing '=' or a path that looks like a switch is never reinterpreted.
+        // 读取完整原始命令行参数，避免带等号或类似开关的路径被重新解释。
+
         string[] argv = StripExeName(Environment.GetCommandLineArgs());
         bool cli = argv.Length > 0 && string.Equals(argv[0], "--cli", StringComparison.OrdinalIgnoreCase);
 
-        // Capture the caller's directory before anything changes it; GUI mode needs it to resolve
-        // relative file arguments the way a command-line user expects.
+
         string callerCwd = Directory.GetCurrentDirectory();
 
         try
         {
             NormalizeInheritedEnvironment();
-            // CLI mode leaves argv alone: it does not change the process working directory, so the
-            // JVM resolves relative paths against the caller's CWD natively, exactly as the .bat did.
+
+
             return cli ? RunCli(argv) : RunGui(AbsolutizeArguments(argv, callerCwd));
         }
         catch (Exception ex)
@@ -155,11 +146,10 @@ internal static class Launcher
         }
     }
 
-    /// <summary>
-    /// The extracted root is the directory holding this exe. BaseDirectory is used rather than
-    /// Assembly.Location because it stays correct for single-file hosts and never depends on the
-    /// process working directory.
-    /// </summary>
+
+    // 安装根目录使用 AppDomain.BaseDirectory，兼容不同宿主方式且不受工作目录影响。
+
+
     private static string ResolveRoot()
     {
         string dir = AppDomain.CurrentDomain.BaseDirectory;
@@ -183,19 +173,12 @@ internal static class Launcher
         return rest;
     }
 
-    /// <summary>
-    /// Rewrites relative file arguments to absolute paths before they are handed to Electron.
-    ///
-    /// The launcher starts Electron with its working directory set to the app root, so a bare
-    /// "schematic.litematic" would otherwise resolve against the app root instead of the directory
-    /// the user was actually standing in. 命令行渲染.bat had the opposite behaviour (it never
-    /// changed directory, so the JVM resolved relative arguments against the caller's CWD); this
-    /// keeps that intent.
-    ///
-    /// Only arguments that (a) are not already rooted and (b) genuinely exist relative to the
-    /// launcher's own working directory are touched, so switches such as --dev or --cli and
-    /// app-relative resource names pass through untouched.
-    /// </summary>
+
+    // 只将调用方目录中实际存在的相对文件参数转为绝对路径；开关和资源名称原样传递。
+
+
+
+
     private static string[] AbsolutizeArguments(string[] argv, string callerCwd)
     {
         string[] result = new string[argv.Length];
@@ -204,21 +187,20 @@ internal static class Launcher
             string a = argv[i];
             result[i] = a;
             if (string.IsNullOrEmpty(a)) continue;
-            if (a[0] == '-') continue;                       // a switch, never a path
-            if (Path.IsPathRooted(a)) continue;              // already absolute
+            if (a[0] == '-') continue;
+            if (Path.IsPathRooted(a)) continue;
             try
             {
                 string candidate = Path.GetFullPath(Path.Combine(callerCwd, a));
                 if (File.Exists(candidate) || Directory.Exists(candidate)) result[i] = candidate;
             }
-            catch (ArgumentException) { /* illegal path chars: leave it alone */ }
+            catch (ArgumentException) {   }
             catch (NotSupportedException) { }
             catch (PathTooLongException) { }
         }
         return result;
     }
 
-    // ------------------------------------------------------------------------ GUI mode
 
     private static int RunGui(string[] argv)
     {
@@ -239,16 +221,16 @@ internal static class Launcher
         }
 
         ProcessStartInfo psi = new ProcessStartInfo(electron);
-        psi.UseShellExecute = false;          // required for EnvironmentVariables + redirection
-        psi.WorkingDirectory = _root;         // see report: CWD is not load-bearing, but a stable
-                                              // value keeps relative engine output predictable
+        psi.UseShellExecute = false;
+        psi.WorkingDirectory = _root;
+
         psi.CreateNoWindow = true;
         psi.RedirectStandardOutput = true;
         psi.RedirectStandardError = true;
 
-        // ---- THE CRITICAL LINE -------------------------------------------------------
-        // Remove, do not blank: Electron's native code tests for the variable's presence, so an
-        // empty-but-present value is not guaranteed to be treated as "unset".
+
+        // 环境变量必须删除，不能仅设为空；Electron 原生代码可能只检查其是否存在。
+
         psi.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE");
         // -----------------------------------------------------------------------------
 
@@ -277,10 +259,7 @@ internal static class Launcher
         return 0;
     }
 
-    /// <summary>
-    /// Mirrors package.json's "main": the app directory is the <c>app</c> argument, then any
-    /// forwarded argv (a .litematic path, --dev, …) follow it.
-    /// </summary>
+
     private static string BuildArguments(string appDir, string[] argv)
     {
         string args = Quote(appDir);
@@ -291,7 +270,6 @@ internal static class Launcher
         return args;
     }
 
-    // ------------------------------------------------------------------------ CLI mode
 
     private static int RunCli(string[] argv)
     {
@@ -312,16 +290,13 @@ internal static class Launcher
         psi.UseShellExecute = false;
         psi.WorkingDirectory = _root;
 
-        // Redirect ALWAYS, then relay to our own stdout/stderr ourselves.
-        //
-        // Simply leaving these false does not work: .NET's Process.Start creates the child with
-        // bInheritHandles = FALSE when no redirection is requested, so java receives no std handles
-        // at all and every progress line and error message is silently discarded (measured — see
-        // proof/hd2-direct.log, where the child's output vanished despite a cmd-level 1> redirect).
+        // 始终重定向子进程输出，再转发到本进程；不重定向时 .NET 可能不继承标准句柄。
+
+
         psi.RedirectStandardOutput = true;
         psi.RedirectStandardError = true;
 
-        // Same reasoning as GUI mode: never let a stale value leak into the JVM.
+
         psi.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE");
 
         string args = "-Xmx4g -Dfile.encoding=UTF-8 -Djava.net.useSystemProxies=true " +
@@ -345,28 +320,22 @@ internal static class Launcher
         }
     }
 
-    /// <summary>
-    /// Gives CLI mode somewhere to write when the caller left us no stdout.
-    ///
-    /// Measured behaviour of a /target:winexe process (see proof/handle-probe.txt):
-    ///   * launched directly             -> std handles are the caller's pipe/file (usable)
-    ///   * launched via `start [ /wait ]` -> std handles are NULL
-    /// The inherited handles therefore win, and AttachConsole is only the fallback for the NULL
-    /// case. Attaching unconditionally would hijack a perfectly good pipe and divert output to the
-    /// real console, where a caller capturing stdout would never see it.
-    /// </summary>
+
+    // 优先使用调用方的管道或文件输出，仅在没有继承句柄时附加控制台，避免劫持输出。
+
+
     private static void EnsureConsoleForCli()
     {
         IntPtr inherited = GetStdHandle(STD_OUTPUT_HANDLE);
         if (inherited != IntPtr.Zero && inherited != new IntPtr(-1))
         {
-            return;   // caller gave us a usable stdout; leave it alone
+            return;
         }
 
         if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
 
-        // With no inherited handle we now have a real console; install CONOUT$ as stdout/stderr so
-        // the relay below has a destination.
+        // 无继承句柄时使用 CONOUT$ 为转发安装输出目标。
+
         SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES();
         sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
         sa.bInheritHandle = true;
@@ -386,24 +355,19 @@ internal static class Launcher
             se.AutoFlush = true;
             Console.SetError(se);
         }
-        catch (IOException) { /* no usable console; harmless */ }
+        catch (IOException) {   }
     }
 
-    // ------------------------------------------------------------------- process plumbing
 
     private static int Launch(string exe, ProcessStartInfo psi, out string tail)
     {
         return Launch(exe, psi, out tail, false);
     }
 
-    /// <summary>
-    /// Runs a child to completion.
-    /// </summary>
-    /// <param name="relay">
-    /// When true the child's stdout/stderr are written through to this process's own console in
-    /// real time, which is what makes <c>--cli</c> behave like the .bat it replaces. Log-file
-    /// capture still happens either way.
-    /// </param>
+
+    // 实时转发子进程输出，同时保留日志文件记录。
+
+
     private static int Launch(string exe, ProcessStartInfo psi, out string tail, bool relay)
     {
         System.Text.StringBuilder captured = new System.Text.StringBuilder();
@@ -441,7 +405,7 @@ internal static class Launcher
         p.BeginOutputReadLine();
         p.BeginErrorReadLine();
         p.WaitForExit();
-        p.WaitForExit();   // documented second call: lets the async readers drain
+        p.WaitForExit();   // 再次等待进程完成，以确保异步输出读取已经排空。
 
         tail = captured.ToString().Trim();
         if (tail.Length > 0) Log(tail);
@@ -449,13 +413,13 @@ internal static class Launcher
         return p.ExitCode;
     }
 
-    /// <summary>Keeps the captured diagnostic tail bounded.</summary>
+
     private static void Trim(System.Text.StringBuilder sb)
     {
         if (sb.Length > 8000) sb.Remove(0, sb.Length - 6000);
     }
 
-    /// <summary>Windows command-line quoting (the rules CommandLineToArgvW applies).</summary>
+    // 使用 Windows CommandLineToArgvW 对应规则转义参数。
     private static string Quote(string arg)
     {
         if (arg.Length > 0 && arg.IndexOfAny(new char[] { ' ', '\t', '\n', '\v', '"' }) < 0) return arg;
@@ -484,7 +448,6 @@ internal static class Launcher
         return sb.ToString();
     }
 
-    // ----------------------------------------------------------------------- diagnostics
 
     private static string LogPath()
     {
@@ -501,13 +464,13 @@ internal static class Launcher
             File.AppendAllText(path,
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") + "  " + line + Environment.NewLine);
         }
-        catch (Exception) { /* a read-only install location must not break launching */ }
+        catch (Exception) {   }
     }
 
-    /// <summary>
-    /// Reports a failure the way each mode can actually show it: a MessageBox for the windowed
-    /// path (there is no console to print a stack to), stderr for the console path.
-    /// </summary>
+
+    // 图形模式使用消息框报告错误，命令行模式写入标准错误。
+
+
     private static int Fail(bool console, string caption, string detail, int code)
     {
         Log("FAIL [" + caption + "] " + detail);

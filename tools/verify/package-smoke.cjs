@@ -8,7 +8,7 @@ if (localSkin) dialog.showOpenDialog = async () => ({ canceled: false, filePaths
 process.argv = process.argv.slice(0, 2);
 const report = { pass: false };
 let windowRef;
-// Load the real packaged main/preload/UI while keeping its test window hidden.
+// 加载真实便携包入口，但隐藏测试窗口。
 BrowserWindow.prototype.show = function () {};
 app.on('browser-window-created', (_event, win) => {
   windowRef = win;
@@ -23,7 +23,7 @@ app.on('browser-window-created', (_event, win) => {
         if (!state.viewReady) throw new Error('packaged 3D view did not load');
         let skinChecks = null;
         if (${skinTest}) {
-          // Status text changes the surrounding layout; compare at a fixed viewport size.
+          // 状态文字会影响周围布局，比较时固定视口尺寸。
           const viewport = state.view.canvas.parentElement;
           viewport.style.width = viewport.style.minWidth = viewport.style.maxWidth = '512px';
           viewport.style.height = viewport.style.minHeight = viewport.style.maxHeight = '512px';
@@ -80,7 +80,7 @@ app.on('browser-window-created', (_event, win) => {
       }
       report.pass = true;
       fs.writeFileSync(output, JSON.stringify(report, null, 2));
-      // Let the real app's before-quit handler terminate the engine.
+      // 由应用自己的退出钩子终止引擎。
       app.quit();
     } catch (e) {
       report.error = e.stack;

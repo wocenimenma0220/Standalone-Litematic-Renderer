@@ -1,4 +1,4 @@
-"""Copy original item layers used by the offline 2D inventory palette."""
+"""复制离线二维背包目录需要的原版物品图层。"""
 import json
 import subprocess
 from pathlib import Path

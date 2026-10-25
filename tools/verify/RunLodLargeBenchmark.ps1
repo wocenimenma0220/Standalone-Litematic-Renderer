@@ -1,11 +1,15 @@
-param([string]$Schematic='D:\litematic-display\璃月港.litematic',[ValidatePattern('^[1-9][0-9]*m$')][string]$HeapLimit='1536m')
+param([Parameter(Mandatory=$true)][string]$Schematic,[ValidatePattern('^[1-9][0-9]*m$')][string]$HeapLimit='1536m',[string]$JavaExecutable='')
 $ErrorActionPreference='Stop'
 $benchmarkRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $benchmarkOutput=Join-Path $PSScriptRoot 'lod-large-output'
 New-Item -ItemType Directory -Path $benchmarkOutput -Force | Out-Null
 if(Test-Path -LiteralPath (Join-Path $benchmarkOutput 'result.json')){Remove-Item -LiteralPath (Join-Path $benchmarkOutput 'result.json') -Force}
 $benchmarkLaunch=[Diagnostics.ProcessStartInfo]::new()
-$benchmarkLaunch.FileName='D:\litematic-display\jdk-25.0.4.1+1\bin\java.exe'
+if(-not $JavaExecutable){
+    $bundledJava=Join-Path $benchmarkRoot 'runtime/bin/java.exe'
+    $JavaExecutable=if(Test-Path -LiteralPath $bundledJava){$bundledJava}elseif($env:JAVA_HOME){Join-Path $env:JAVA_HOME 'bin/java.exe'}else{(Get-Command java -ErrorAction Stop).Source}
+}
+$benchmarkLaunch.FileName=$JavaExecutable
 $benchmarkLaunch.WorkingDirectory=$benchmarkRoot
 $benchmarkLaunch.UseShellExecute=$false;$benchmarkLaunch.CreateNoWindow=$true
 $benchmarkLaunch.RedirectStandardOutput=$true;$benchmarkLaunch.RedirectStandardError=$true

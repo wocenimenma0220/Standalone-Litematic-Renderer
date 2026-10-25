@@ -1,3 +1,3 @@
-// The demo selector was removed: mechanisms now run together by default.
-// Unified coverage retains this command as a compatibility entry point.
+// 机制默认统一运行，沿用该文件作为兼容验证入口。
+
 require('./board-unified-ui.cjs');

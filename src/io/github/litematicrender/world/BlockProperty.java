@@ -7,10 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * A single block property (like net.minecraft.world.level.block.state.properties.Property).
- * Values are stored as strings; index = position in the values list.
- */
+/** 方块属性以字符串值列表表示，状态保存对应值的索引。 */
 public final class BlockProperty {
     private final String name;
     private final List<String> values;

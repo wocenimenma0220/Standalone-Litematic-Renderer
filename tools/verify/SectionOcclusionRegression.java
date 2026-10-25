@@ -5,7 +5,7 @@ import io.github.litematicrender.nbt.*;
 import io.github.litematicrender.nbt.io.NbtFileUtils;
 import java.nio.file.*;
 
-/** Two separate rooms: closed walls, then a doorway and a glass window. */
+
 public class SectionOcclusionRegression {
     public static void main(String[] args)throws Exception {
         Path root=Path.of(args[0]).toAbsolutePath(),out=Path.of(args[1]).toAbsolutePath();Files.createDirectories(out);

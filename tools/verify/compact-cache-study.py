@@ -1,7 +1,6 @@
-"""Independent LMESH6/7 reader, lossless 40-byte unit-face check and 16/32 cache-group study.
+"""独立读取 LMESH6/7，验证 40 字节单位面无损编码，并研究 16/32 格缓存分组；缓存访问模拟与生产网格基准分别统计。"""
 
-The 16/32 grouping portion remains a cache-access simulation, separate from the production mesher benchmark.
-"""
+
 from pathlib import Path
 from collections import defaultdict, OrderedDict
 import struct, zlib, json, time, math, sys
@@ -54,7 +53,7 @@ def compact(raw,at,position):
     if seen!=15:return None
     encoded=struct.pack('<hhhBB',*local,axis,permutation)+b''.join(raw[at+v*20+12:at+v*20+20] for v in range(4))
     assert len(encoded)==40
-    # Decode through the stored record; compare all 80 bytes, including UVs and corner RGBA.
+    # 通过存储记录解码，并逐字节比较全部 80 字节，包括 UV 和顶点颜色。
     x,y,z,axis,permutation=struct.unpack_from('<hhhBB',encoded); base=[x+position[0]*16,y+position[1]*16,z+position[2]*16];a,b=(axis+1)%3,(axis+2)%3
     decoded=bytearray()
     for v in range(4):

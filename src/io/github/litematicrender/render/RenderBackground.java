@@ -4,7 +4,7 @@ import java.awt.Color;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 
-/** Background pixels are present before glass/water blend onto the render target. */
+/** 先写背景，再混合玻璃与水，确保半透明颜色正确。 */
 public final class RenderBackground {
     private RenderBackground() {}
     public static boolean isTransparent(RenderSettings settings) {

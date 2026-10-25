@@ -51,7 +51,7 @@ public final class StateModelRegression {
             }
         }
         picture(mesh,"pistons");
-        // A head's full plate may hide its neighbour; this must remain distinct from a skull.
+
         var shape=new BlockShape(baker,atlas);var stone=baker.bake(baker.selectVariant("minecraft:stone",state("stone"))).quadsForFace(Quad.NORTH).get(0);
         check(shape.faceOccluded(stone,Quad.NORTH,state("piston_head").with("facing","south")),"piston head plate lost its boundary coverage");
         System.out.println("PASS: 48 piston/base/head states, 6 facings, normal/sticky and short/long mapping");
@@ -71,7 +71,7 @@ public final class StateModelRegression {
         for(var support:supports)check(at(mesh,support).size()==6,"head removed supporting stone face at "+support);
         for(var s:cells.values())if(BlockRegistry.isHead(s.blockId))check(!shapes.occludes(s)&&!shapes.isShapeFullBlock(s),"skull classified as full block: "+s);
         picture(mesh,"heads-on-stone");
-        // Resource-pack proxy geometry must not override the skull block entity's real shape.
+
         Path pack=output.resolve("head-proxy-pack"),definition=pack.resolve("assets/minecraft/blockstates/player_head.json");
         Files.createDirectories(definition.getParent());Files.writeString(definition,"{\"variants\":{\"\":{\"model\":\"minecraft:block/stone\"}}}");
         var resources=baker.resources();var imported=resources.importPack(pack);var oldRegistry=registry;var oldBaker=baker;
@@ -106,7 +106,7 @@ public final class StateModelRegression {
             check(Math.abs(pose.y()-.5625)<1e-8,"slope position not snapped to rail");
             boolean positive=slope.equals("ascending_west")||slope.equals("ascending_north");check((pose.pitch()>0)==positive,"slope tilted downhill: "+slope);
         }
-        // Sample across the joint: the front and rear wheels can occupy different track blocks.
+
         for(double x:new double[]{.85,1.0,1.15}) {
             var pose=MinecartPose.resolve(sample,x,x<1?.0625:x-1+.0625,.5,(bx,by,bz)->bz!=0?BlockState.air():bx==0&&by==0?state("rail").with("shape","east_west"):bx==1&&by==0?state("rail").with("shape","ascending_east"):BlockState.air());
             check(pose.pitch()<-10&&pose.pitch()>-46,"flat/slope joint failed: "+x+" "+pose);

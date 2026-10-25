@@ -6,7 +6,7 @@ import java.nio.file.attribute.FileTime;
 import java.io.*;
 import java.util.*;
 
-/** Real base atlas roundtrip, animation sheets, corruption and content/order invalidation. */
+/** 检查基础图集往返、动画帧、损坏回退以及内容和顺序失效。 */
 public final class ResourceImageCacheRegression {
     static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
     static SpriteAtlas atlas(RenderEngine engine)throws Exception{var field=RenderEngine.class.getDeclaredField("atlas");field.setAccessible(true);return (SpriteAtlas)field.get(engine);}

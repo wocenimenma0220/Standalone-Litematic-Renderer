@@ -1,6 +1,5 @@
 'use strict';
-/* Java 26.3 RedstoneTorchBlock/RedstoneWallTorchBlock, DispenserBlock,
- * DropperBlock and DispenserBlockEntity.getRandomSlot. */
+/** 红石火把、发射器和投掷器行为参考 Java 26.3 原版实现。 */
 (function(root){
   const B=typeof module!=='undefined'?require('./board-analog.js'):root.BoardTiming;
   const {TimingWorld,DIR,OPP}=B,P=TimingWorld.prototype,key=p=>p.join(','),copy=x=>JSON.parse(JSON.stringify(x));
@@ -46,7 +45,7 @@
       else if(item.id==='tnt')this.emitDispensed(p,s,item,'primed_tnt');
       else this.emitDispensed(p,s,item,['arrow','tipped_arrow','spectral_arrow','egg','blue_egg','brown_egg','snowball','experience_bottle','splash_potion','lingering_potion','firework_rocket','fire_charge','wind_charge'].includes(item.id)?'projectile':'item');
     }else this.emitDispensed(p,s,item);
-    // Container.setItem calls setChanged even when a full target rejected the item.
+    // 即使目标槽已满且拒绝物品，Container.setItem 仍会标记库存变化。
     if(consume){c.slots[slot]=item.count>1?{...item,count:item.count-1}:remainder;if(remainder&&item.count>1){let left=true;for(let i=0;i<c.slots.length&&left;i++){const r=c.slots[i];if(!r||r.id===remainder.id&&r.count<r.max){c.slots[i]={...remainder,count:(r?.count||0)+1};left=false;}}if(left)this.emitDispensed(p,s,remainder);}}
     this.push([{kind:'投掷完成',pos:p,slot}]);
   };

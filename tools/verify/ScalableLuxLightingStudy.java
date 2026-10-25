@@ -8,7 +8,7 @@ import io.github.litematicrender.world.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Independent offline experiment, not a port of ScalableLux and not used by the application. */
+/** 独立离线实验，仅用于研究，不进入应用运行路径。 */
 public final class ScalableLuxLightingStudy {
     private static final int[][] DIR={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     private record Case(String name,int sx,int sy,int sz,LightVolume.Cells source,Map<String,Object> details) {

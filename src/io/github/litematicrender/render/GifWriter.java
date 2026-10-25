@@ -9,20 +9,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Minimal animated-GIF encoder (GIF89a).
- *
- * <p>Written by hand rather than pulled in as a dependency so the engine stays a single folder of
- * class files with no third-party jars. It covers what an animation export needs: a global palette,
- * per-frame transparency, per-frame delays, and infinite looping.
- *
- * <p>Frames must share the same dimensions. Colours are quantised to a 256-entry palette built from
- * all frames at once, which keeps colours stable across the animation instead of flickering.
- */
+/** 无外部依赖的 GIF89a 编码器，支持全局调色板、循环播放和逐帧压缩。 */
 public final class GifWriter {
     private final int width;
     private final int height;
-    /** 256 RGB entries, 0xRRGGBB. Index 0 is reserved for transparency. */
+    /** 调色板保存 256 个 RGB 值，索引 0 保留给透明像素。 */
     private final int[] palette = new int[256];
     private final Sink out = new Sink();
     private static final class Sink {
@@ -31,7 +22,7 @@ public final class GifWriter {
         void write(byte[] bytes, int start, int length) { try { stream.write(bytes,start,length); } catch (IOException e) { throw new java.io.UncheckedIOException(e); } }
         byte[] toByteArray() { return ((ByteArrayOutputStream)stream).toByteArray(); }
     }
-    /** argb -> palette index, so the O(256) search runs once per distinct colour. */
+    /** 按颜色缓存调色板索引，避免对同一种颜色反复搜索 256 项。 */
     private final Map<Integer, Integer> nearestCache = new HashMap<>();
     private int framesWritten;
 
@@ -43,7 +34,7 @@ public final class GifWriter {
     @FunctionalInterface public interface FrameSource { Image render(int tick) throws Exception; }
     @FunctionalInterface public interface Progress { void update(String stage,int completed,int total); }
 
-    /** Render once, spool raw pixels, then encode with one stable palette and bounded frame memory. */
+    /** 先渲染并暂存原始像素，再使用统一调色板编码，限制帧内存占用。 */
     public static void writeFrames(Path file, int frameCount, int delayCs, FrameSource source) throws Exception {
         writeFrames(file,frameCount,delayCs,source,(stage,completed,total)->{});
     }
@@ -87,12 +78,7 @@ public final class GifWriter {
         }
     }
 
-    /**
-     * Quantises the given frames and writes the whole GIF.
-     *
-     * @param frames    ARGB images, all the same size
-     * @param delayCs   per-frame delay in centiseconds (GIF's unit; 1 cs = 10 ms)
-     */
+    /** 所有帧尺寸相同；帧间隔以百分之一秒为单位。 */
     public static void write(Path file, java.util.List<Image> frames, int delayCs) throws IOException {
         if (frames.isEmpty()) throw new IOException("no frames to write");
         Image first = frames.get(0);
@@ -113,17 +99,7 @@ public final class GifWriter {
 
     // ------------------------------------------------------------------
 
-    /**
-     * Builds a palette from the colours the frames actually contain.
-     *
-     * <p>A fixed RGB lattice is tempting but wrong for Minecraft art: block textures use a small
-     * number of muted, low-saturation colours, and a uniform lattice spends almost all of its
-     * entries on hues that never appear — which shows up as speckled dithering across flat stone
-     * and wood. Counting colours first puts the palette where the pixels are.
-     *
-     * <p>Colours are bucketed to 5 bits per channel, the most frequent buckets are taken, and any
-     * remaining slots are filled with the average colour of the frames so gradients stay smooth.
-     */
+    /** 调色板从实际帧颜色生成，避免固定 RGB 网格损失 Minecraft 贴图的低饱和度细节。 */
     private void buildPalette(java.util.List<Image> frames) {
         var builder=new PaletteBuilder();
         for(Image frame:frames)builder.add(frame);
@@ -138,17 +114,17 @@ public final class GifWriter {
             int[] px = f.pixels();
             for (int argb : px) {
                 int a = (argb >>> 24) & 0xFF;
-                if (a == 0) continue;              // partially transparent detail still needs colour
+                if (a == 0) continue;              // 半透明细节也必须参与颜色统计。
                 int r = (argb >>> 16) & 0xFF, g = (argb >>> 8) & 0xFF, b = argb & 0xFF;
                 sums[0] += r*(long)a; sums[1] += g*(long)a; sums[2] += b*(long)a; total+=a;
-                // 5 bits per channel, but rounded so neighbouring colours share a bucket.
+
                 int key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
                 histogram.merge(key, (long)a, Long::sum);
             }
         }
 
         void finish(int[] palette) {
-        // index 0 is reserved for transparency by the frame encoder.
+        // 索引 0 专用于透明像素。
         int idx = 1;
         List<Map.Entry<Integer, Long>> sorted = new ArrayList<>(histogram.entrySet());
         sorted.sort((x, y) -> Long.compare(y.getValue(), x.getValue()));
@@ -156,12 +132,12 @@ public final class GifWriter {
             if (idx >= 256) break;
             int key = e.getKey();
             int r = (key >>> 10) & 0x1F, g = (key >>> 5) & 0x1F, b = key & 0x1F;
-            // Reconstruct the centre of the bucket rather than its floor, to avoid a dark bias.
+            // 使用量化桶中心值，避免整体颜色偏暗。
             palette[idx++] = (((r << 3) | 4) << 16) | (((g << 3) | 4) << 8) | ((b << 3) | 4);
         }
 
-        // If the art used fewer than 255 distinct colours, pad with the average so the encoder
-        // always has a full table (GIF requires a power-of-two size).
+        // 不足 255 种颜色时用均值补齐，以满足 GIF 调色板长度要求。
+
         if (idx < 256) {
             int ar = total == 0 ? 0 : (int) (sums[0] / total);
             int ag = total == 0 ? 0 : (int) (sums[1] / total);
@@ -174,7 +150,7 @@ public final class GifWriter {
         }
     }
 
-    /** Nearest colour; coverage is resolved separately at each pixel position. */
+    /** 查找最近颜色；透明覆盖率由像素位置独立计算。 */
     private int nearest(int argb) {
         Integer cached = this.nearestCache.get(argb);
         if (cached != null) return cached;
@@ -208,46 +184,46 @@ public final class GifWriter {
         writeString("GIF89a");
         writeShort(this.width);
         writeShort(this.height);
-        this.out.write(0xF7);              // global colour table, 256 entries, 8-bit
-        this.out.write(0);                 // background colour index
-        this.out.write(0);                 // pixel aspect ratio
+        this.out.write(0xF7);
+        this.out.write(0);
+        this.out.write(0);
         for (int i = 0; i < 256; i++) {
             int c = this.palette[i];
             this.out.write((c >>> 16) & 0xFF);
             this.out.write((c >>> 8) & 0xFF);
             this.out.write(c & 0xFF);
         }
-        // NETSCAPE2.0 application extension: loop forever.
+        // 使用 NETSCAPE2.0 扩展实现无限循环。
         this.out.write(0x21);
         this.out.write(0xFF);
         this.out.write(11);
         writeString("NETSCAPE2.0");
         this.out.write(3);
         this.out.write(1);
-        writeShort(0);                     // 0 = infinite
+        writeShort(0);
         this.out.write(0);
     }
 
     private void writeFrame(Image img, int delayCs) {
-        // Each full frame replaces the preceding one. Clear it back to transparent before
-        // drawing the next frame, including the last-to-first loop transition.
+        // 每帧先清除上一帧内容，末帧回到首帧时同样处理，避免残影。
+
         this.out.write(0x21);
         this.out.write(0xF9);
         this.out.write(4);
-        this.out.write(0x09);              // disposal 2 (restore background) + transparent flag
+        this.out.write(0x09);              // 使用清除到背景的帧处置方式，并开启透明标记。
         writeShort(Math.max(1, delayCs));
-        this.out.write(0);                 // transparent colour index
+        this.out.write(0);
         this.out.write(0);
 
-        // Image descriptor.
+
         this.out.write(0x2C);
         writeShort(0);
         writeShort(0);
         writeShort(this.width);
         writeShort(this.height);
-        this.out.write(0);                 // no local colour table, not interlaced
+        this.out.write(0);
 
-        // LZW-compressed indices.
+
         byte[] indices = new byte[this.width * this.height];
         for (int y = 0; y < this.height; y++) {
             for (int x = 0; x < this.width; x++) {
@@ -263,7 +239,7 @@ public final class GifWriter {
         this.out.write(0x3B);
     }
 
-    /** GIF has binary alpha. A fixed 16x16 Bayer mask preserves fractional coverage without flicker. */
+    /** GIF 仅支持二值透明度；固定 16×16 Bayer 掩码保留覆盖率并避免闪烁。 */
     private static boolean visible(int alpha,int x,int y) {
         if(alpha==0)return false;
         if(alpha==255)return true;
@@ -276,7 +252,7 @@ public final class GifWriter {
     }
 
     // ------------------------------------------------------------------
-    // LZW, as GIF specifies it (variable code width, clear/end codes).
+    // 按 GIF 规范写入可变位宽 LZW 数据及清除、结束代码。
 
     private void writeLzw(byte[] data) {
         final int minCodeSize = 8;
@@ -317,7 +293,7 @@ public final class GifWriter {
         bw.write(endCode, codeSize);
         bw.flush();
 
-        // Emit as sub-blocks of at most 255 bytes.
+        // 每个数据子块不超过 255 字节。
         byte[] payload = bw.toByteArray();
         int offset = 0;
         while (offset < payload.length) {
@@ -329,7 +305,7 @@ public final class GifWriter {
         this.out.write(0);
     }
 
-    /** LSB-first bit accumulator, which is the order GIF's LZW stream uses. */
+    /** GIF 的 LZW 位流使用低位优先的位累积器。 */
     private static final class BitWriter {
         private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
         private int acc;

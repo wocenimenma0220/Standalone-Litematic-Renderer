@@ -7,7 +7,7 @@ import java.nio.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** LMESH7: compressed/checksummed pages plus lossless compact unit faces and full-geometry fallback. */
+/** LMESH7 使用压缩页和校验，单位面紧凑编码，复杂几何保留无损回退。 */
 public final class StreamMeshExporter {
     public static final int HEADER_BYTES=64,VERTEX_BYTES=20,PAGE_QUADS=8192,LOD_COUNT=4;
     public static final int MAX_RAW_PAGE=16*1024*1024;
@@ -22,10 +22,10 @@ public final class StreamMeshExporter {
         List<SectionVisibility.Position> sections();
         void prepareStreaming();
         SceneMesh buildSection(SectionVisibility.Position position);
-        /** Number of 16-cell ownership sections built together on each axis. */
+        /** 每个轴上一次构建的 16 格归属区段数。 */
         default int buildUnitSections(){return 1;}
         default int sectionWorkers(){return 1;}
-        /** Called once on each worker after atlas/light publication; mutable caches must be local. */
+        /** 图集和光照发布后，每个工作线程初始化一次，所有可变缓存必须在线程内部。 */
         default Source forkForSections(){return this;}
         default Map<SectionVisibility.Position,SceneMesh> buildSections(List<SectionVisibility.Position> positions){
             var result=new LinkedHashMap<SectionVisibility.Position,SceneMesh>();for(var position:positions)result.put(position,buildSection(position));return result;
@@ -52,8 +52,8 @@ public final class StreamMeshExporter {
         var entries=new ArrayList<Entry>();float[] bounds={Float.POSITIVE_INFINITY,Float.POSITIVE_INFINITY,Float.POSITIVE_INFINITY,Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY};
         long total=0;int maximum=0;Map<String,Object> skins=Map.of(),entities=Map.of();
         Files.createDirectories(destination.toAbsolutePath().getParent());Path temporary=progress==null?Files.createTempFile(destination.toAbsolutePath().getParent(),".lmesh5-",".tmp"):destination;
-        // Stable light/atlas are shared; workers own mutable builder caches. Publish in submission
-        // order so camera priority and deterministic files survive out-of-order completion.
+        // 工作线程共享只读光照和图集，按提交顺序发布结果，保持优先级和输出文件确定性。
+
         int buildUnit=Math.max(1,Math.min(2,builder.buildUnitSections()));
         int workers=positions.size()<32?1:Math.max(1,Math.min(4,builder.sectionWorkers()));
         var ready=new java.util.concurrent.ArrayBlockingQueue<PreparedSection>(Math.max(2,buildUnit*buildUnit*buildUnit));
@@ -122,7 +122,7 @@ public final class StreamMeshExporter {
             }
             if(entries.isEmpty())Arrays.fill(bounds,0);
             long catalog=file.getFilePointer();
-            // Buffer only the final catalog. Live geometry pages remain immediately readable.
+            // 只缓冲最终目录，实时几何页写出后立即可读。
             try(var data=new DataOutputStream(new BufferedOutputStream(new OutputStream(){
                 @Override public void write(int value)throws IOException{file.write(value);}
                 @Override public void write(byte[] bytes,int offset,int length)throws IOException{file.write(bytes,offset,length);}

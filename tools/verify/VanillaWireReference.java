@@ -14,7 +14,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
-/** Calls the actual vanilla private connection method and public signal methods. */
+
 public class VanillaWireReference {
     private static class Grid implements BlockGetter {
         final Map<BlockPos, BlockState> cells = new HashMap<>();

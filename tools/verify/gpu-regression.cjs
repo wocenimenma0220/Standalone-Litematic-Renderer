@@ -25,7 +25,7 @@ function regression() {
   try {
     const gpu = new GpuView(document.getElementById('scene'));
     const gl = gpu.gl;
-    // Two overlapping red/blue planes from different blending layers.
+
     const parts = [];
     function quad(z, u, reversed = false) {
       let corners = [[-2,-2,z], [2,-2,z], [2,2,z], [-2,2,z]];
@@ -79,7 +79,7 @@ function regression() {
     }
     gpu.draw({ orbit: false, eye: [0,0,-5], target: [0,0,0], fovDeg: 60 });
     const layer = gpu.layers[0];
-    // Exercise the no-uint-index path used by older graphics drivers.
+
     layer.indexBuffer = null; layer.indices = null;
     layer.sortedData = new Float32Array(layer.data.length); layer.lastDirection = null;
     gpu.draw({ orbit: true, rotationDeg: 0, slantDeg: 0, zoom: 1 });
@@ -118,11 +118,11 @@ function regression() {
     if(legacy.some((value,i)=>value!==compact[i]))throw new Error('4-vertex mesh differs from legacy triangles');
     gpu.draw(camera);const culled=read(),stats={...gpu.drawStats};
     if(compact.some((value,i)=>value!==culled[i])||stats.visibleQuads>=stats.totalQuads)throw new Error('frustum culling changed pixels or did not exclude offscreen geometry');
-    // Translate while preserving direction: the visibility change must invalidate transparent order.
+
     gpu.draw({eye:[80,0,5],target:[80,0,0],fovDeg:60});const translated=read();
     gpu.draw({eye:[80,0,5],target:[80,0,0],fovDeg:60,culling:false});const translatedFull=read();
     if(translated.some((value,i)=>value!==translatedFull[i]))throw new Error('translation did not refresh transparent visibility');
-    // Force the driver without 32-bit indices; exercise a second 16-bit vertex-address batch.
+
     const extension=gl.getExtension.bind(gl);gl.getExtension=name=>name==='OES_element_index_uint'?null:extension(name);
     const many=[];for(let q=0;q<17000;q++)many.push(...quad(0,.25));
     gpu.uploadMesh(meshBytes([{ordinal:0,data:many}],true));gpu.draw({orbit:true,rotationDeg:0,slantDeg:0,zoom:1});
@@ -130,8 +130,8 @@ function regression() {
     gpu.uploadMesh(meshBytes(testParts,true));gpu.draw(camera);const noUintBlend=read();
     if(culled.some((value,i)=>value!==noUintBlend[i])||gl.getError()!==gl.NO_ERROR)throw new Error('no-uint transparent fallback changed pixels');
     gl.getExtension=extension;
-    // A tinted face with varying AO must bake each corner independently. Interpolation
-    // of baked colors equals interpolated shade times the face's constant tint.
+    // 每个顶点独立合成染色与 AO，插值结果必须保持一致。
+
     const shades=[.2,.4,.8,.6],tint=[.8,.6,.4];
     const lit=quad(0,.25).map((value,i)=>{
       const corner=[0,1,2,0,2,3][Math.floor(i/9)],component=i%9;

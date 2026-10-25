@@ -1,8 +1,6 @@
-"""Observer arrows must point toward the output, opposite vanilla FACING.
+"""检查实际侦测器贴图箭头是否朝向输出端，覆盖逻辑状态测试无法发现的 UV 镜像。"""
 
-Tests actual generated sprite pixels; logical state-only tests cannot catch
-UV mirroring that makes a correctly simulated clock look back-to-front.
-"""
+
 import json
 from pathlib import Path
 from PIL import Image
@@ -21,8 +19,8 @@ def arrow_centroid(facing, view):
     assert len(ink) >= 20, (facing, view, 'arrow must be visible')
     return tuple(sum(p[k] for p in ink) / len(ink) for k in (0, 1))
 
-# An arrow's wide tail carries more ink than its tip: a left-pointing arrow
-# has its centroid right of center, and vice versa (similarly for up/down).
+# 箭头尾部比尖端面积更大，朝左箭头的像素重心偏右，其他方向同理。
+
 for view, directions in [('sprite', {'east': (0, 1), 'west': (0, -1), 'up': (1, -1), 'down': (1, 1)}),
                          ('top', {'east': (0, 1), 'west': (0, -1), 'north': (1, -1), 'south': (1, 1)})]:
     for facing, (axis, sign) in directions.items():

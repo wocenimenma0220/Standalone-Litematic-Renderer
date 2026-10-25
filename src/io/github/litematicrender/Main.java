@@ -5,19 +5,7 @@ import io.github.litematicrender.render.CliRenderer;
 
 import java.nio.file.Path;
 
-/**
- * Application entry point.
- *
- * <p>The GUI lives in the Electron/web shell; this Java side is the render engine and is driven
- * either from the command line (for scripting and testing) or over the line-based JSON protocol
- * used by the shell.
- *
- * <pre>
- *   java ... io.github.litematicrender.Main --render &lt;file.litematic&gt; [out.png] [width] [height]
- *   java ... io.github.litematicrender.Main --anim   &lt;file.litematic&gt; [out.gif] [size] [frames]
- *   java ... io.github.litematicrender.Main --serve
- * </pre>
- */
+/** 应用入口：命令行负责 PNG/GIF 导出，桌面界面通过逐行 JSON 协议调用 Java 引擎。 */
 public final class Main {
     public static void main(String[] args) throws Exception {
         Path base = Path.of(System.getProperty("litematicrender.home", ".")).toAbsolutePath();
@@ -60,7 +48,7 @@ public final class Main {
         out.add(rest.length > 0 ? rest[0] : "");
         out.add(vanilla.toString());
         out.add(rest.length > 1 ? rest[1] : "render.png");
-        // Forward the optional trailing arguments verbatim: width, height, rotation, slant.
+        // 原样转发可选的宽、高、旋转角和俯仰角参数。
         for (int i = 2; i < rest.length; i++) out.add(rest[i]);
         return out.toArray(String[]::new);
     }

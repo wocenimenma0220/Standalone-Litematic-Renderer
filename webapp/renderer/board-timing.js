@@ -1,7 +1,5 @@
 'use strict';
-/* Java 26.3 reference: ServerLevel, ScheduledTick, CollectingNeighborUpdater,
- * ObserverBlock, DiodeBlock/RepeaterBlock, RedstoneLampBlock, CopperBulbBlock.
- * Explicit tasks make every update resumable, including across save/load. */
+/** 参考 Java 26.3 的世界阶段、计划刻和邻居更新器，以显式任务支持逐事件推进和中途保存。 */
 (function(root) {
   const Support=typeof module!=='undefined'?require('./board-support.js'):root.BoardSupport;
   const DIR={west:[-1,0,0],east:[1,0,0],down:[0,-1,0],up:[0,1,0],north:[0,0,-1],south:[0,0,1]};
@@ -83,7 +81,7 @@
     execute(t){this.parent=this.record(t.kind,{...t,parent:t.parent??null});
       if(t.kind==='set')this.write(t);
       else if(t.kind==='afterSet'){
-        // Level.setBlock re-reads the position after onPlace; callbacks may have replaced it.
+        // onPlace 可能替换当前位置，外层 setBlock 必须重新读取状态。
         if(sameCell(this.get(t.pos),t.cell)){const tasks=[];if(t.flags&1){tasks.push(...this.nc(t.pos,undefined,t.before?.id||'air'));if(t.cell&&this.analog&&this.analog(t.pos)!==null)tasks.push({kind:'比较器更新',pos:t.pos});}if(!(t.flags&16))tasks.push(...(this.indirectTasks?.(t.pos,t.before)||[]),...this.pp(t.pos),...(this.indirectTasks?.(t.pos,t.cell)||[]));this.push(tasks);}
       }
       else if(t.kind==='NC'||t.kind==='PP')this.neighbor(t);
@@ -95,7 +93,7 @@
         if(s?.id==='observer'&&s.states.powered==='true'&&!this.hasScheduled(t.pos,s.id))this.push([{kind:'set',pos:t.pos,cell:{id:s.id,states:{...s.states,powered:'false'}},flags:18},...this.outputTasks(t.pos,s)]);
       }else if(t.kind==='placed'){const s=this.get(t.pos);if(s?.id==='repeater'&&this.input(t.pos,s))this.schedule(t.pos,s.id,1);}
     }
-    collect(){// All chunks are loaded in this first-round world. Preserve per-chunk drain semantics.
+    collect(){// 二维世界将所有区段视为已加载，仍保留按区段排空计划刻的顺序。
       const groups=new Map();for(const tick of this.scheduled){const k=`${Math.floor(tick.pos[0]/16)},${Math.floor(tick.pos[2]/16)}`;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(tick);}
       const full=(a,b)=>a.triggerTick-b.triggerTick||a.priority-b.priority||a.subTickOrder-b.subTickOrder;
       const intra=(a,b)=>a.priority-b.priority||a.subTickOrder-b.subTickOrder;

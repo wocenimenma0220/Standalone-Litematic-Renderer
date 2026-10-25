@@ -2,12 +2,12 @@ package io.github.litematicrender.render.scene;
 
 import java.util.*;
 
-/** Conservative 16-cube empty-space connectivity, independent of lighting. */
+/** 与光照独立的 16 格区段空气连通性，用于保守遮挡判断。 */
 public final class SectionVisibility {
     public record Position(int x,int y,int z) {}
     public static final class Section {
         public final byte[] solid=new byte[512];
-        /** For each entry face, a six-bit set of connected exit faces. */
+        /** 每个入口面对应六位出口面集合。 */
         public final byte[] exits=new byte[6];
     }
     public final Map<Position,Section> sections=new LinkedHashMap<>();

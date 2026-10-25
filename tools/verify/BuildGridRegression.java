@@ -6,7 +6,7 @@ import io.github.litematicrender.world.BlockRegistry;
 import java.nio.file.*;
 import java.util.*;
 
-/** Compares real SceneBuilder output for 16- and 32-cell build units. */
+
 public final class BuildGridRegression {
     private static void check(boolean value,String message){if(!value)throw new AssertionError(message);}
     private static long median(List<Long> values){values.sort(Long::compare);return values.get(values.size()/2);}

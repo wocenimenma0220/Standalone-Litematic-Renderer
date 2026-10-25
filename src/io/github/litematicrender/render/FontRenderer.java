@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.zip.ZipInputStream;
 
-/** Minecraft bitmap and Unihex fonts. Output is oversampled 2x to preserve Chinese glyph detail. */
+/** 支持 Minecraft 位图和 Unihex 字体，以两倍采样保留中文细节。 */
 public final class FontRenderer {
     private record Glyph(Image sheet, int x, int y, int w, int h, float scale, float advance) {}
     private final Map<Integer, Glyph> glyphs = new HashMap<>();
@@ -20,7 +20,7 @@ public final class FontRenderer {
         @Override protected boolean removeEldestEntry(Map.Entry<SignKey,SignPanel> item) { return size()>256; }
     };
 
-    /** Resource-session cache. Coordinates and lighting do not change the text pixels. */
+    /** 文字像素缓存属于资源会话，坐标和光照不影响缓存内容。 */
     public synchronized SignPanel signPanel(List<String> lines,int color,boolean glow,boolean hanging) {
         SignKey key=new SignKey(List.copyOf(lines.subList(0,Math.min(4,lines.size()))),color,glow,hanging);
         SignPanel cached=signPanels.get(key);if(cached!=null)return cached;
@@ -173,7 +173,7 @@ public final class FontRenderer {
     public int missingGlyphCount() { return missingGlyphs; }
     public boolean canRenderAny(String text) { return text.codePoints().anyMatch(cp -> supported(cp) && glyphs.containsKey(cp)); }
 
-    /** Draws a sign line at 2x resolution, clipping at the game's logical pixel limit. */
+    /** 以两倍分辨率绘制告示牌文字，并按游戏逻辑宽度裁剪。 */
     public Image renderLine(String text, int argb, int maxWidth, Integer outline) {
         List<Glyph> laid = new ArrayList<>();
         List<Integer> positions = new ArrayList<>();

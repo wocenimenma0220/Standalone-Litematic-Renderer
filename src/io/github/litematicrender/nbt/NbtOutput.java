@@ -3,7 +3,7 @@ package io.github.litematicrender.nbt;
 import java.io.DataOutput;
 import java.io.IOException;
 
-/** Thin facade over DataOutput used by element write methods. */
+/** 为标签写入提供统一的 DataOutput 包装。 */
 public final class NbtOutput {
     private final DataOutput out;
 

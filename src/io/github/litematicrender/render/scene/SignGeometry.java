@@ -5,7 +5,7 @@ import io.github.litematicrender.render.Image;
 import io.github.litematicrender.world.BlockState;
 import java.util.*;
 
-/** Vanilla sign text planes with ordinary light sampling and full-bright glow-ink outlines. */
+/** 原版告示牌文字面，支持普通光照和发光墨囊描边。 */
 public final class SignGeometry {
     private SignGeometry() {}
     public static void emit(SceneMesh mesh, BlockState state, BlockEntityData.Sign sign, FontRenderer font,

@@ -1,6 +1,6 @@
 'use strict';
 
-/** Inclusive block coordinates; render bounds use the far edge of the last block. */
+/** 选区角点包含该方块，渲染上界使用末格的远端边缘。 */
 class RenderSelection {
   constructor(){this.enabled=false;this.renderEnabled=false;this.mode='region';this.reset();}
   reset(){this.corners=[null,null];this.active=0;this.layer=0;this.revision=(this.revision||0)+1;}
@@ -23,7 +23,7 @@ class RenderSelection {
     if(this.mode==='layer'){this.layer+=amount;this.revision++;return;}
     const p=this.corners[this.active];if(!p)throw Error('请先用左右键选择角点');
     if(!Array.isArray(direction)||direction.length!==3||!direction.every(Number.isFinite)||!Math.hypot(...direction))throw Error('请先调整观察方向');
-    // Litematica uses horizontal facing until the view tilts at least 60 degrees.
+    // 视角倾斜达到 60 度前按水平方向步进，与 Litematica 一致。
     const axis=Math.abs(direction[1])>=Math.hypot(...direction)*Math.sin(Math.PI/3)?1:Math.abs(direction[0])>Math.abs(direction[2])?0:2,next=p.slice();
     next[axis]+=Math.sign(direction[axis]||1)*amount;this.setCorner(this.active,next);
   }

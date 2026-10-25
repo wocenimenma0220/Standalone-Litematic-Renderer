@@ -3,12 +3,12 @@ package io.github.litematicrender.render.scene;
 import io.github.litematicrender.world.*;
 import java.util.*;
 
-/** Lighting around occupied sections; distant empty space does not allocate voxel arrays. */
+/** 只在占用区段附近分配光照，远处空白不分配体素数组。 */
 public final class SparseLightVolume implements LightSampler {
     private record Section(int x,int y,int z) {
         @Override public int hashCode(){return coordinateHash(x,y,z);}
     }
-    // Record's linear x/z hash creates long collision chains across wide buildings.
+    // 对 X/Z 坐标进行混合哈希，避免宽建筑中产生长碰撞链。
     private static int coordinateHash(int x,int y,int z) {
         int hash=x*0x8da6b343^y*0xd8163841^z*0xcb1ab31f;
         hash^=hash>>>16;hash*=0x7feb352d;hash^=hash>>>15;return hash;
@@ -47,7 +47,7 @@ public final class SparseLightVolume implements LightSampler {
         }
         void freeze() {
             top=absorption.isEmpty()?-1:absorption.lastKey();
-            // The first absorber removes at least one level; after 14 more cells it is dark.
+            // 首个吸收格至少降低一级亮度，再经过 14 格后光照归零。
             if(top>blocker){levels=new byte[15];for(int i=0;i<levels.length;i++)levels[i]=(byte)calculate(top-i);}
             absorption=null;
         }
@@ -67,7 +67,7 @@ public final class SparseLightVolume implements LightSampler {
     private Chunk create(Section section) {
         Chunk existing=chunks.get(section);if(existing!=null)return existing;
         long available=Runtime.getRuntime().maxMemory()-(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory());
-        // Existing chunks are already included in used heap; reserve only incremental headroom.
+        // 已有区段已计入堆占用，只为新增数据预留容量。
         if(available<32L*1024*1024){System.gc();available=Runtime.getRuntime().maxMemory()-(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory());}
         if(available<16L*1024*1024)throw new IllegalArgumentException("投影过大，分块光照所需内存不足；请拆分投影。");
         Chunk created=new Chunk(section,ids.size());ids.add(created);chunks.put(section,created);return created;
@@ -114,14 +114,14 @@ public final class SparseLightVolume implements LightSampler {
         for(Chunk chunk:ids)for(int local=0;local<4096;local++) {
             if(local==0&&Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
             int x=chunk.section.x*16+(local&15),y=chunk.section.y*16+(local>>8),z=chunk.section.z*16+((local>>4)&15);
-            // Padding must not become a source of sky along incomplete section edges.
+            // 边缘填充不能在不完整区段旁生成额外天空光。
             if(!inside(x,y,z)){chunk.sky.set(local,0);continue;}
             BlockState state=state(chunk,local);
             chunk.sky.set(local,shapes.lightPermeable(state)?(realLighting?direct(x,y,z):15):0);
             int emission=realLighting?LightVolume.realEmission(state):LightVolume.emission(state);chunk.block.set(local,emission);hasBlockLight|=emission>0;
         }
         if(realLighting){seedEmptyBorders();parallelPropagation();compact();return;}
-        // 1.0.8 seeds full sky in every permeable cell, so no sky spread is needed.
+
         propagateBlock();compact();
     }
     private void compact(){for(Chunk chunk:ids){chunk.sky.compact();chunk.block.compact();}}
@@ -136,7 +136,7 @@ public final class SparseLightVolume implements LightSampler {
         Throwable error=failure.get();if(error instanceof RuntimeException runtime)throw runtime;if(error instanceof Error fatal)throw fatal;if(error!=null)throw new IllegalStateException(error);
     }
     private int direct(int x,int y,int z){ColumnData data=columns.get(new Column(x,z));return data==null?15:data.direct(y);}
-    /** Analytic sky in unallocated air, as in 1.0.10; no arrays for distant gaps. */
+    /** 未分配空气中的天空光采用解析计算，避免为空白间隙分配数组。 */
     private int emptySky(int x,int y,int z) {
         int value=direct(x,y,z);
         for(int dx=-14;dx<=14&&value<15;dx++)for(int dz=-14+Math.abs(dx);dz<=14-Math.abs(dx);dz++) {
@@ -201,7 +201,7 @@ public final class SparseLightVolume implements LightSampler {
         for(int d=0;d<6;d++) {
             Chunk target=neighbor(chunk,local,d);if(target==null)continue;
             int destination=(local+DELTA[d])&4095;
-            // Crossing X/Z edges must wrap only that coordinate, preserving the other axes.
+            // 跨 X/Z 边界时只回绕对应坐标，保持其他轴不变。
             if(target!=chunk)destination=d<2?(local&~15)|((local+DELTA[d])&15):d<4?(local&255)|((local+DELTA[d])&3840):(local&~240)|((local+DELTA[d])&240);
             int cost=skylight&&d==3&&level==15?0:1;
             if((skylight?target.sky:target.block).get(destination)<level-cost)return true;
@@ -210,7 +210,7 @@ public final class SparseLightVolume implements LightSampler {
     }
     private void propagateBlock() {
         var queue=new LongQueue(); long enqueued=0,capacity=(long)sx*sy*sz;
-        // Keep the old dense voxel order for emitter seeds, including queue saturation.
+        // 保持旧密集路径的光源播种顺序，包括队列饱和时的行为。
         var seeds=new ArrayList<Long>();
         for(Chunk chunk:ids)for(int local=0;local<4096;local++)if(chunk.block.get(local)>1)seeds.add(((long)chunk.id<<12)|local);
         seeds.sort(Comparator.comparingLong(this::voxelIndex));
@@ -253,7 +253,7 @@ public final class SparseLightVolume implements LightSampler {
     }
     @Override public LightSampler forSection(int x,int y,int z) {
         if(!computed)throw new IllegalStateException("Light snapshot is not ready");
-        // Origins need not align with the world section. Cover [-1,+17] sampling on each axis.
+        // 投影原点可能不对齐区段，每轴需覆盖 -1～17 的采样范围。
         final int bx=(x-1)>>4,by=(y-1)>>4,bz=(z-1)>>4;
         final Chunk[] neighborhood=new Chunk[27];
         for(int dy=0;dy<3;dy++)for(int dz=0;dz<3;dz++)for(int dx=0;dx<3;dx++)

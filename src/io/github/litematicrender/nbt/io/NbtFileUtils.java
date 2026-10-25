@@ -15,10 +15,7 @@ import java.nio.file.Path;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.GZIPInputStream;
 
-/**
- * File level helpers. Ported from malilib DataFileUtils:
- * Detect GZIP from its header. Parse failures must never trigger an uncompressed retry.
- */
+/** 通过文件头识别 GZIP；解析失败不能再尝试按未压缩格式读取。 */
 public final class NbtFileUtils {
     private NbtFileUtils() {}
 
@@ -69,7 +66,7 @@ public final class NbtFileUtils {
         }
     }
 
-    /** Stream variant used by zip-embedded schematics. */
+    /** 用于 ZIP 内嵌投影的流式读取入口。 */
     public static NbtCompound readCompressedOrRawStream(InputStream rawStream) throws IOException {
         try (DataInputStream in = decoded(rawStream)) {
             return NbtIo.readFile(in, NbtSizeTracker.FILE_MAX_BYTES);

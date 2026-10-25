@@ -3,16 +3,10 @@ package io.github.litematicrender.render.raster;
 import io.github.litematicrender.render.Image;
 import io.github.litematicrender.render.SpriteAtlas;
 
-/**
- * Software rasterizer: scans quads with a depth buffer into an RGBA image.
- *
- * <p>Opaque geometry is depth-tested against a view-space depth buffer. Translucent geometry is
- * drawn back-to-front with plain source-over blending and does not write depth, matching how a
- * renderer composites glass/water on top of the already-finished opaque pass.
- */
+/** 软件光栅化：不透明面进行深度测试和写入，半透明面从后向前混合且不写深度。 */
 public final class Rasterizer {
     public final Image color;
-    public final float[] depth;   // view-space depth per pixel, larger = closer
+    public final float[] depth;
     public final Camera camera;
     private final SpriteAtlas atlas;
     public boolean writeColor=true;
@@ -37,12 +31,7 @@ public final class Rasterizer {
     private final double[] V2 = new double[3];
     private final double[] V3 = new double[3];
 
-    /**
-     * Rasterizes one world-space quad.
-     *
-     * @param ao per-vertex ambient occlusion (may be null for flat shading)
-     * @param translucent when true, blend source-over without depth writes
-     */
+    /** AO 为各顶点的环境光遮蔽；半透明面只做混合，不写深度。 */
     public void drawQuad(double wx0, double wy0, double wz0,
                          double wx1, double wy1, double wz1,
                          double wx2, double wy2, double wz2,
@@ -55,14 +44,7 @@ public final class Rasterizer {
             shade, ao, translucent);
     }
 
-    /**
-     * Rasterizes one world-space quad.
-     *
-     * @param direct when non-null, sampled straight from this image with UV in [0,1]
-     *               (used for text drawn onto signs)
-     * @param ao per-vertex ambient occlusion (may be null for flat shading)
-     * @param translucent when true, blend source-over without depth writes
-     */
+
     public void drawQuad(double wx0, double wy0, double wz0,
                          double wx1, double wy1, double wz1,
                          double wx2, double wy2, double wz2,
@@ -75,16 +57,7 @@ public final class Rasterizer {
             shade, ao, translucent, false);
     }
 
-    /**
-     * Rasterizes one world-space quad.
-     *
-     * @param direct when non-null, sampled straight from this image with UV in [0,1]
-     * @param ao per-vertex ambient occlusion (may be null for flat shading)
-     * @param translucent when true, blend source-over without depth writes
-     * @param doubleSided skip back-face culling, for faces with no fixed orientation
-     *                    (cross-shaped plants, torch sides) — the inverse of vanilla's
-     *                    {@code withCull(true)}, which terrain uses by default
-     */
+
     public void drawQuad(double wx0, double wy0, double wz0,
                          double wx1, double wy1, double wz1,
                          double wx2, double wy2, double wz2,
@@ -140,12 +113,9 @@ public final class Rasterizer {
         boolean triangle1=Math.abs(d1)>=1e-9,triangle2=Math.abs(d2)>=1e-9;
         if (!triangle1 && !triangle2) return;
 
-        // Back-face culling: a quad whose projected winding faces away from the camera cannot
-        // contribute a pixel. Vanilla enables this for terrain (MC 26.3's TERRAIN_SNIPPET keeps the
-        // default withCull(true) for SOLID_TERRAIN and CUTOUT_TERRAIN) and it discards 52-67% of
-        // this schematic's quads. The signed area is the cheapest form of the test, since the
-        // projected corners are already computed. Double-sided faces — cross plants, torch sides,
-        // which the baker tags NO_FACE — opt out, matching vanilla's withCull(false).
+        // 按投影绕序剔除背面，双面植物和火把侧面例外，遵循原版 withCull 语义。
+
+
         if (!doubleSided) {
             double area = (sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0);
             if (area >= 0) return;
@@ -160,7 +130,7 @@ public final class Rasterizer {
                 double uFrac, vFrac, vz;
                 float vShade;
                 double weight0,weight1,weight2;int corner1,corner2;
-                // tri (p0,p1,p2)
+
                 double l0 = ((sy1 - sy2) * (pxs - sx2) + (sx2 - sx1) * (pys - sy2)) / d1;
                 double l1 = ((sy2 - sy0) * (pxs - sx2) + (sx0 - sx2) * (pys - sy2)) / d1;
                 double l2 = 1 - l0 - l1;
@@ -205,18 +175,18 @@ public final class Rasterizer {
                 if (atlasImg != null) {
                     int tx, ty;
                     if (entry == null) {
-                        // direct image: UV is already image space
+
                         tx = Math.min(atlasImg.width - 1, Math.max(0, (int) ((float) uFrac * atlasImg.width)));
                         ty = Math.min(atlasImg.height - 1, Math.max(0, (int) ((float) vFrac * atlasImg.height)));
                     } else {
-                        // Keep sampling in sprite pixel space. Normalised float atlas UVs can round
-                        // a texture-edge sample differently after unrelated generated tiles move.
+                        // 在单张贴图的像素空间中采样，避免图集布局变化引入边缘舍入差异。
+
                         tx = entry.pixelX + Math.min(entry.contents.frameWidth-1,Math.max(0,(int)(uFrac*entry.contents.frameWidth)));
                         ty = entry.pixelY + Math.min(entry.contents.frameHeight-1,Math.max(0,(int)(vFrac*entry.contents.frameHeight)));
                     }
                     int texel = atlasImg.pixel(tx, ty);
                     int ta = Image.alpha(texel);
-                    if (ta == 0) continue;   // fully transparent: no write, no depth
+                    if (ta == 0) continue;   // 完全透明的像素不写颜色，也不写深度。
                     int tr = clamp255(Image.red(texel) * cr);
                     int tg = clamp255(Image.green(texel) * cg);
                     int tb = clamp255(Image.blue(texel) * cb);
@@ -239,12 +209,9 @@ public final class Rasterizer {
                         if(writeColor)px[idx] = argb;
                     }
                 } else {
-                    // Translucent geometry, matching how quickcraft draws its translucent layers
-                    // with depth testing enabled but no depth writes:
-                    //   * it is HIDDEN by opaque geometry in front of it (depth test, dVal < dep),
-                    //     otherwise glass/water would paint over the whole model;
-                    //   * it does NOT write depth, so translucent surfaces behind it still draw
-                    //     and blend in back-to-front order.
+                    // 半透明面读取不透明深度进行遮挡，但不写深度，让后方面仍能按顺序混合。
+
+
                     if (vz < dep[idx]) continue;
                     px[idx] = srcOver(px[idx], argb);
                 }
@@ -257,7 +224,7 @@ public final class Rasterizer {
         return i < 0 ? 0 : (i > 255 ? 255 : i);
     }
 
-    /** Straight (non-premultiplied) source-over compositing. */
+    /** 使用非预乘透明度的源覆盖混合。 */
     private static int srcOver(int dst, int src) {
         int sa = (src >>> 24) & 0xFF;
         if (sa == 255) return src;

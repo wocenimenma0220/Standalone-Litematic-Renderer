@@ -1,12 +1,6 @@
 'use strict';
 
-/**
- * Electron main process.
- *
- * Owns the window and one long-lived Java render-engine child process. The engine is driven over
- * line-based JSON-RPC on stdin/stdout; a request queue with a single worker keeps the engine's
- * single "current render" state consistent and gives the UI clean progress/cancel semantics.
- */
+/** Electron 主进程持有窗口、Java 子进程和串行请求队列。 */
 
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('node:path');
@@ -18,7 +12,7 @@ const { SceneTransfer, INLINE_LIMIT } = require('./scene-transfer');
 const { clearRenderingCache,clearInterruptedCache } = require('./cache-cleanup');
 const {BackgroundExports}=require('./background-exports');
 
-/** The project root (…/litematic-render): one level above this file's directory. */
+
 const APP_HOME = path.resolve(__dirname, '..');
 const uiSettings = new UiSettings(APP_HOME);
 const sceneTransfer = new SceneTransfer();
@@ -32,7 +26,7 @@ function diagnostic(message) {
       fs.copyFileSync(file, file + '.previous');fs.truncateSync(file, 0);
     }
     fs.appendFileSync(file, new Date().toISOString() + ' ' + message + '\n', 'utf8');
-  } catch { /* diagnostics must not interrupt loading */ }
+  } catch {   }
 }
 app.setName('投影预览');
 app.setAppUserModelId('io.kindasus.projectionpreview');
@@ -67,8 +61,8 @@ function createWindow() {
       sandbox: false,
     },
   });
-  // The app has its own File / Keys / Commands bar. A hidden native menu still
-  // takes focus on Alt release and interrupts pointer-locked selection tools.
+  // 应用已有页面菜单，关闭隐藏的原生菜单，避免释放 Alt 时抢走焦点和鼠标锁定。
+
   mainWindow.setMenu(null);
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.on('render-process-gone', (_event, details) => diagnostic('preview process exited: ' + JSON.stringify(details)));
@@ -79,7 +73,7 @@ function createWindow() {
   if (process.argv.includes('--dev')) mainWindow.webContents.openDevTools({ mode: 'detach' });
 }
 
-/** Starts the Java engine, resolving the bundled runtime first so no system Java is required. */
+
 function startEngine() {
   const runtime = resolveRuntime(APP_HOME);
   const client = new EngineClient({
@@ -107,7 +101,7 @@ function startEngine() {
 function requireCurrentEngine(client) {
   if (!client || client !== engine || client.stopping || shutdownPromise) throw Error('渲染已强制停止');
 }
-// Capture the engine before any await: an old request must never reach its replacement.
+// 在任何异步等待前固定引擎实例，旧请求不能进入替换后的引擎。
 function handleEngine(channel, handler) {
   ipcMain.handle(channel, (event, ...args) => {
     const client = engine;
@@ -131,7 +125,7 @@ ipcMain.handle('engine:forceStop', () => {
   const previous = engine;
   const previousPid=previous?.proc?.pid;
   openedSchematic = null;pendingEdits=false;
-  // Kill first, independently of outstanding RPC calls and file transfers.
+  // 先独立终止进程，再等待在途传输和临时资源清理。
   const stopped = previous ? previous.forceStop() : Promise.resolve();
   renderStopPromise = (async () => {
     await Promise.all([stopped, sceneTransfer.close(), selectionTransfer.close()]);
@@ -144,7 +138,7 @@ ipcMain.handle('engine:forceStop', () => {
 });
 
 // ---------------------------------------------------------------------------
-// IPC surface
+
 
 ipcMain.handle('engine:status', async () => {
   const runtime = resolveRuntime(APP_HOME);
@@ -276,14 +270,7 @@ handleEngine('skins:importLocal', async (client, _event, identity) => {
   return client.call('importSkin', { identity: identity.trim(), path: choice.filePaths[0] });
 });
 
-/**
- * Bakes the scene once and returns what the WebGL viewer needs: the atlas as a data URL and the
- * mesh as an ArrayBuffer.
- *
- * <p>The bytes travel over IPC rather than as {@code file://} URLs, because a file-backed page may
- * not fetch other file URLs. Keeping the mesh binary matters — a data URL would inflate 30 MB of
- * vertices to roughly 40 MB of text.
- */
+/** 图集通过数据 URL 传输，网格保持二进制，避免 Base64 膨胀顶点数据。 */
 ipcMain.handle('engine:readSceneChunk', (event, request = {}) => sceneTransfer.read(event.sender.id, request.id, request.offset, request.length));
 ipcMain.handle('engine:readSelectionChunk',(event,request={})=>selectionTransfer.read(event.sender.id,request.id,request.offset,request.length));
 ipcMain.handle('engine:releaseSelection',()=>selectionTransfer.close());
@@ -304,6 +291,7 @@ handleEngine('engine:cancelPreview',async client=>{await sceneTransfer.close();r
 handleEngine('engine:previewResult',async(client,event,request)=>scenePayload(client,event,await client.call('previewResult',request)));
 handleEngine('engine:previewComplete',(client,_event,id)=>client.call('previewResult',{id,overview:false}));
 handleEngine('engine:exportScene', async (client, event, options = {}) => {
+  const progressId=typeof options.progressId==='string'?options.progressId.slice(0,64):'';
   const dir = path.join(APP_HOME, 'renders', '.gpu');
   await fs.promises.mkdir(dir, { recursive: true });
   requireCurrentEngine(client);
@@ -317,11 +305,13 @@ handleEngine('engine:exportScene', async (client, event, options = {}) => {
     realLighting: options.realLighting === true,
     lightingEnabled: options.lightingEnabled !== false,
     streaming: options.streaming === true,
+    progressId,
   });
-  return scenePayload(client,event,res);
+  return scenePayload(client,event,res,{progressId});
 });
 async function scenePayload(client,event,res,options={}) {
   requireCurrentEngine(client);
+  if(options.progressId)event.sender.send('engine:event',{event:'previewProgress',progressId:options.progressId,stage:'transfer'});
   const atlasBuffer = await fs.promises.readFile(res.atlas);
   const meshBytes = (await fs.promises.stat(res.mesh)).size;
   requireCurrentEngine(client);
@@ -329,7 +319,7 @@ async function scenePayload(client,event,res,options={}) {
   let payload;
   if (['LMESH5','LMESH6','LMESH7'].includes(res.meshFormat) || meshBytes > INLINE_LIMIT) {
     payload = { meshTransfer: await (options.transfer||sceneTransfer).open(res.mesh, event.sender.id,{...options,committedBytes:res.committedBytes}) };
-    diagnostic('using chunked scene transfer');
+    diagnostic(['LMESH5','LMESH6','LMESH7'].includes(res.meshFormat)?'using sectioned scene transfer':'transferring complete mesh in batches');
   } else {
     const meshBuffer = await fs.promises.readFile(res.mesh);
     payload = { meshArrayBuffer: meshBuffer.buffer.slice(meshBuffer.byteOffset, meshBuffer.byteOffset + meshBuffer.byteLength) };
@@ -348,9 +338,9 @@ handleEngine('engine:editPick',(client,_event,request)=>client.call('editPick',r
 handleEngine('engine:editBlock',async(client,_event,request)=>{const result=await client.call('editBlock',request);requireCurrentEngine(client);if(result.changed)pendingEdits=true;return result;});
 handleEngine('engine:editStates',(client,_event,positions)=>client.call('editStates',{positions}));
 handleEngine('engine:inspectPosition',(client,_event,position)=>client.call('inspectPosition',{position}));
-handleEngine('engine:commitEdits',async client=>{const result=await client.call('commitEdits',{});requireCurrentEngine(client);if(result.changed)openedSchematic=result.path;pendingEdits=false;return result;});
+handleEngine('engine:commitEdits',async client=>{const result=await client.call('commitEdits',{rebasePreview:true});requireCurrentEngine(client);if(result.changed)openedSchematic=result.path;pendingEdits=false;return result;});
 handleEngine('engine:editPatch',async(client,_event,options={})=>{
-  const result=await client.call('editPatch',{directory:path.join(APP_HOME,'renders','.edit','preview'),selection:options.selection});requireCurrentEngine(client);if(result.empty)return result;
+  const result=await client.call('editPatch',{directory:path.join(APP_HOME,'renders','.edit','preview'),selection:options.selection});requireCurrentEngine(client);if(result.empty||result.rebuildRequired)return result;
   const buffer=await fs.promises.readFile(result.mesh),atlas=await fs.promises.readFile(result.atlas),selected=result.selectionMesh?await fs.promises.readFile(result.selectionMesh):null;
   return {cells:result.cells,revision:result.revision,quads:result.quads,meshArrayBuffer:buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.byteLength),selectionArrayBuffer:selected?selected.buffer.slice(selected.byteOffset,selected.byteOffset+selected.byteLength):null,atlasDataUrl:'data:image/png;base64,'+atlas.toString('base64')};
 });
@@ -361,12 +351,8 @@ handleEngine('engine:exportEdited',async(client,_event,request={})=>{
   return client.call('exportEdited',{out:output});
 });
 
-// --- resource pack management ------------------------------------------------
 
-/**
- * User-imported pack paths, persisted so they survive restarts. The engine loads vanilla, then the
- * built-in packs, then these — in this order — so an import can override a built-in.
- */
+/** 用户资源路径持久化保存，加载在内置包之后以覆盖其外观。 */
 const packStore = {
   file: () => path.join(APP_HOME, 'renders', 'packs.json'),
   removedFile: () => path.join(APP_HOME, 'settings', 'removed-builtins.json'),
@@ -487,7 +473,7 @@ ipcMain.handle('shell:reveal', (_e, target) => {
   if (target && fs.existsSync(target)) shell.showItemInFolder(target);
 });
 
-/** Writes base64 image data (used by "save as" from the preview). */
+
 ipcMain.handle('file:writeBase64', async (_e, { file, base64 }) => {
   await fs.promises.writeFile(file, Buffer.from(base64, 'base64'));
   return { path: file, bytes: Buffer.from(base64, 'base64').length };
@@ -507,8 +493,8 @@ app.whenReady().then(async () => {
     }
   }
 
-  // A .litematic passed on the command line opens on launch, which is what makes the app usable as
-  // a file handler (drag a schematic onto the exe, or "open with").
+  // 命令行传入的投影在启动后打开，支持拖到 EXE 和文件关联。
+
   const cliFile = process.argv.slice(1).find((a) => a.toLowerCase().endsWith('.litematic'));
   if (cliFile && mainWindow) {
     startupFile = path.resolve(cliFile);
@@ -535,7 +521,8 @@ app.on('before-quit', event => {
       await selectionTransfer.close();
       await backgroundExports.close();
       if(renderStopPromise)await renderStopPromise.catch(()=>{});
-      if(pendingEdits&&engine?.isRunning()&&!renderStopPromise)await engine.call('commitEdits',{});
+      // 提交排在在途修改之后，不依赖界面是否已收到修改回复。
+      if(engine?.isRunning()&&!renderStopPromise)await engine.call('commitEdits',{});
       if(engine)await engine.stop();
       await uiSettings.queue;
       if((await uiSettings.read()).clearCacheOnExit){await clearRenderingCache(APP_HOME);diagnostic('render cache cleared on exit');}

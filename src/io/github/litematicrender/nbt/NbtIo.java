@@ -6,14 +6,11 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
-/**
- * Reads/writes the vanilla NBT binary format using plain DataInput/DataOutput.
- * Ported from malilib CompoundData/DataFileUtils (pure Java).
- */
+/** 使用 DataInput/DataOutput 读写原版 NBT，源自 malilib CompoundData/DataFileUtils。 */
 public final class NbtIo {
     private NbtIo() {}
 
-    /** Reads an unnamed-root compound (the standard file format: type byte + root name + compound body). */
+    /** 标准根复合标签格式：类型字节、根名称、复合标签正文。 */
     public static NbtCompound readFile(DataInput input, long maxBytes) throws IOException {
         return readFile(input, new NbtSizeTracker(maxBytes));
     }
@@ -26,7 +23,7 @@ public final class NbtIo {
         if (type != NbtTypes.TAG_COMPOUND) {
             throw new IOException("Root tag is not a compound: " + NbtTypes.typeName(type));
         }
-        input.readUTF(); // discard root name
+        input.readUTF();
         return NbtCompound.read(input, 0, tracker);
     }
 

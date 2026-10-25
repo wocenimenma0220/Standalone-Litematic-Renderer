@@ -2,7 +2,7 @@ import io.github.litematicrender.serve.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Real cold/warm timings; the first overview timestamp means file-ready, not a UI frame. */
+
 public final class ProgressiveCacheBenchmark {
     static void write(Path file,Map<String,Object> values)throws Exception{var method=JsonRpcServer.class.getDeclaredMethod("toJson",Object.class);method.setAccessible(true);Files.writeString(file,(String)method.invoke(null,values));}
     public static void main(String[] args)throws Exception {

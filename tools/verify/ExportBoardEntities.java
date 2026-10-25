@@ -8,7 +8,7 @@ import io.github.litematicrender.world.*;
 import io.github.litematicrender.render.CliRenderer;
 import java.nio.file.*;
 import java.util.*;
-/** Reuse the already supported 3D entity geometry as orthographic 2D sprites. */
+
 public class ExportBoardEntities {
  public static void main(String[] args)throws Exception{
   Path root=Path.of(args[0]),out=root.resolve("webapp/renderer/board-entities");Files.createDirectories(out);

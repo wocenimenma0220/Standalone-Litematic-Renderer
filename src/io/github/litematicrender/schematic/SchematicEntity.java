@@ -3,7 +3,7 @@ package io.github.litematicrender.schematic;
 import io.github.litematicrender.nbt.*;
 import java.util.*;
 
-/** A saved entity in region-relative coordinates; passenger world Pos tags are deliberately ignored. */
+/** 实体坐标相对所在区域，忽略乘客数据中的独立世界 Pos。 */
 public record SchematicEntity(String id,NbtCompound data,double x,double y,double z,float yaw,float pitch,boolean riding) {
     public static double number(NbtElement value,double fallback) {
         if(value instanceof NbtScalars.NbtByte n)return n.value;

@@ -1,0 +1,17 @@
+name: 验证
+on: [push, pull_request]
+jobs:
+  fast:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: 编译和逻辑回归
+        shell: pwsh
+        run: ./verify.ps1 -JdkHome $env:JAVA_HOME

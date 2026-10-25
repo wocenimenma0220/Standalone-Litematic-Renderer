@@ -92,7 +92,7 @@ public class SkinRegression {
         var offline=new SkinResolver(home);
         check(offline.load(named)!=null && (int)offline.summary().get("downloaded")==0,"downloaded profile cannot render offline");
         scene(project,output,home,named,"real-player-offline.png");
-        // Schematic fixture for the real desktop preview, using the downloaded profile identity.
+
         var state=EntityRegression.registry.getOrMissing("minecraft:player_head").defaultState.with("rotation","0");
         EntityRegression.output=output;
         EntityRegression.writeSchematic(new BlockState[]{state},Map.of(LitematicaSchematic.pack(0,0,0),named));

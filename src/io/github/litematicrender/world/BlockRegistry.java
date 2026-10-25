@@ -10,21 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * Data-driven block registry.
- *
- * Unlike vanilla (Block classes with hard-coded StateDefinitions), we build the
- * property table per block from its blockstates/*.json: every variant key or
- * multipart "when" condition contributes properties and values. This keeps the
- * runtime free of Minecraft code while matching variant selection semantics for
- * rendering purposes.
- */
+/** 从资源的 blockstates 定义推导属性表，补充外观所需但 JSON 未声明的原版属性。 */
 public final class BlockRegistry {
     public static final class BlockInfo {
         public final String id;
         public final LinkedHashMap<String, BlockProperty> properties = new LinkedHashMap<>();
         public final BlockState defaultState;
-        /** raw blockstates json (variants/multipart) — consumed by the model baker */
+
         public final Map<String, Object> definition;
 
         BlockInfo(String id, LinkedHashMap<String, BlockProperty> properties, Map<String, Object> definition) {
@@ -33,7 +25,7 @@ public final class BlockRegistry {
             this.definition = definition;
             BlockProperty[] props = properties.values().toArray(BlockProperty[]::new);
             int[] defaults = new int[props.length];
-            for (int i = 0; i < props.length; i++) defaults[i] = 0; // first value acts as default
+            for (int i = 0; i < props.length; i++) defaults[i] = 0;
             this.defaultState = new BlockState(id, props, defaults);
         }
 
@@ -55,11 +47,11 @@ public final class BlockRegistry {
 
     public static BlockRegistry load(ResourceManager resources) {
         BlockRegistry registry = new BlockRegistry(resources);
-        // collect raw definitions: blockstates/<name>.json per namespace
+
         for (String[] pair : resources.listResources("blockstates", ".json")) {
             String ns = pair[0];
             String rel = pair[1];
-            // rel is "blockstates/<name>.json" (relative to namespace)
+
             String name = rel.substring("blockstates/".length(), rel.length() - 5);
             String blockId = ns + ":" + name;
             try {
@@ -82,7 +74,7 @@ public final class BlockRegistry {
         Map<String, Object> variants = MiniJson.asObject(json.get("variants"));
         if (variants != null) {
             for (Map.Entry<String, Object> e : variants.entrySet()) {
-                // key like "facing=east,half=lower,hinge=left,open=false" or ""
+
                 addKeyToProps(propValues, e.getKey());
             }
         }
@@ -98,8 +90,8 @@ public final class BlockRegistry {
             }
         }
 
-        // Multipart files usually mention only connected states. Keep the absent state too:
-        // otherwise palette north=none/false silently falls back to the first connected value.
+        // multipart 通常只声明已连接状态，需要补齐未连接值，避免静默回退。
+
         for (var entry : propValues.entrySet()) {
             var domain = entry.getValue();
             if (domain.values.contains("true") || domain.values.contains("false")) {
@@ -110,14 +102,9 @@ public final class BlockRegistry {
                     || domain.values.contains("side") || domain.values.contains("up"))) domain.add("none");
         }
 
-        // Properties that affect appearance but never appear in the blockstate json.
-        //
-        // The registry derives its property table from the blockstate file, so any property that
-        // is not part of a variant key or a multipart condition is invisible to it — and a palette
-        // entry carrying that property is then silently dropped by tryWith(). Redstone wire is the
-        // case that mattered: its multipart conditions only mention north/south/east/west, so
-        // "power" (which vanilla's BlockColors.getColoringProperties() registers for tinting)
-        // never made it into the table and every wire rendered as power 0, near-black red.
+        // 补充影响外观但未出现在模型条件中的属性，例如红石粉的 power。
+
+
         List<String> extra = EXTRA_TINT_PROPERTIES.get(blockId);
         if (extra != null) {
             for (String name : extra) {
@@ -126,8 +113,8 @@ public final class BlockRegistry {
                 }
             }
         }
-        // Blocks whose blockstate model is empty still carry real properties in the palette. Give
-        // them a table so tryWith() accepts those properties instead of dropping them.
+        // 空模型方块也必须保留真实属性，避免箱子等状态被丢弃。
+
         if (MODELLESS_BLOCKS.contains(blockId)) {
             for (Map.Entry<String, List<String>> e : MODELLESS_PROPERTIES.entrySet()) {
                 if (!propValues.containsKey(e.getKey())) {
@@ -142,7 +129,7 @@ public final class BlockRegistry {
                 }
             }
         }
-        // Wall head orientation lives in the entity renderer, not in the empty skull model JSON.
+
         if (blockId.equals("minecraft:decorated_pot")) {
             propValues.putIfAbsent("facing", valuesFor(List.of("north","east","south","west")));
             propValues.putIfAbsent("cracked", valuesFor(List.of("false","true")));
@@ -157,8 +144,8 @@ public final class BlockRegistry {
         if ((blockId.endsWith("_wall_head") || blockId.endsWith("_wall_skull")) && !propValues.containsKey("facing")) {
             propValues.put("facing", valuesFor(List.of("north", "south", "east", "west")));
         }
-        // Fluids: `level` and `falling` never appear in a blockstate json, and dropping `level`
-        // turned every stored flow gradient into a flat source surface.
+        // 流体的 level 和 falling 不在模型条件中，需显式保留以显示流动高度。
+
         if (FLUID_BLOCKS.contains(blockId)) {
             for (Map.Entry<String, List<String>> e : FLUID_PROPERTIES.entrySet()) {
                 if (!propValues.containsKey(e.getKey())) {
@@ -166,17 +153,15 @@ public final class BlockRegistry {
                 }
             }
         }
-        // `waterlogged` is a property of around forty vanilla block classes (leaves, stairs, fences,
-        // slabs, coral, ...). It never appears in a blockstate json, because whether a block is
-        // waterlogged does not change its model — the fluid is drawn separately. Without it here,
-        // tryWith() dropped the property from every palette entry, and water inside waterlogged
-        // blocks never rendered.
+        // 含水状态不改变实体模型，但决定独立流体层，必须保留 waterlogged。
+
+
         if (!propValues.containsKey("waterlogged")) {
             propValues.put("waterlogged", valuesFor(List.of("false", "true")));
         }
 
         for (Map.Entry<String, LinkedHashSetSet> e : propValues.entrySet()) {
-            // stable order: boolean-ish false,true; numeric ascending; enum as encountered (sorted alphabetically for stability)
+            // 属性值采用稳定顺序：布尔值、升序数字和稳定枚举顺序。
             List<String> values = new ArrayList<>(e.getValue().values);
             values.sort(BlockRegistry::compareValues);
             props.put(e.getKey(), new BlockProperty(e.getKey(), values));
@@ -191,61 +176,38 @@ public final class BlockRegistry {
         return set;
     }
 
-    /**
-     * Extra properties to accept beyond what the blockstate json mentions, by block id.
-     * Mirrors the blocks vanilla's {@code BlockColors} registers a tint source for whose
-     * {@code relevantProperties()} do not appear in the blockstate file.
-     */
+    /** 按方块类型补充原版染色依赖的额外属性。 */
     private static final Map<String, List<String>> EXTRA_TINT_PROPERTIES = Map.of(
         "minecraft:redstone_wire", List.of("power"),
         "minecraft:melon_stem", List.of("age"),
         "minecraft:pumpkin_stem", List.of("age")
     );
 
-    /** Value ranges for the extra properties, 0..15 for both POWER and AGE. */
+
     private static final Map<String, List<String>> EXTRA_TINT_VALUES = Map.of(
         "power", List.of("0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"),
         "age", List.of("0", "1", "2", "3", "4", "5", "6", "7")
     );
 
-    /**
-     * Fluid states, whose blockstate json is empty because the game draws them with a fluid renderer.
-     *
-     * <p>This is the same class of bug as the chests': the derived property table comes from the
-     * blockstate file, fluid files declare nothing, and {@code tryWith} then silently drops
-     * {@code level} from every palette entry. A schematic that stores a proper flow gradient —
-     * {@code water[level=0]} through {@code water[level=8]}, which real files do carry — collapsed
-     * to nine identical sources and every surface rendered flat. {@code falling} marks a column
-     * that is dropping rather than spreading.
-     */
+    /** 流体由专用渲染器绘制，因此空 blockstate JSON 之外仍需补齐流体属性。 */
     private static final Map<String, List<String>> FLUID_PROPERTIES = Map.of(
         "level", List.of("0", "1", "2", "3", "4", "5", "6", "7", "8"),
         "falling", List.of("false", "true")
     );
 
-    /** Blocks that take the fluid property set above. */
+
     private static final java.util.Set<String> FLUID_BLOCKS = java.util.Set.of(
         "minecraft:water", "minecraft:lava", "minecraft:bubble_column"
     );
 
-    /**
-     * Properties carried by blocks whose blockstate model is empty, and which therefore never show
-     * up in a variant key.
-     *
-     * <p>Chests are the case that matters: their blockstate json declares a single unnamed variant,
-     * so the derived property table is empty and every property from the schematic's palette is
-     * silently dropped by {@code tryWith}. The consequence was that all chests rendered facing north
-     * and as singles — a double chest became two overlapping full-width boxes. The game itself keeps
-     * these properties on the block, which is how {@code ChestBlock.TYPE} drives the half-width
-     * models.
-     */
+    /** 为箱子等无实体模型条件的方块补齐其状态属性。 */
     private static final Map<String, List<String>> MODELLESS_PROPERTIES = Map.of(
         "facing", List.of("north", "south", "west", "east"),
         "type", List.of("single", "left", "right"),
         "waterlogged", List.of("false", "true")
     );
 
-    /** Blocks that take the model-less property set above. */
+
     private static final java.util.Set<String> MODELLESS_BLOCKS = java.util.Set.of(
         "minecraft:chest", "minecraft:trapped_chest", "minecraft:ender_chest"
     );
@@ -259,27 +221,20 @@ public final class BlockRegistry {
 
     public static boolean isCopperGolemStatue(String blockId) { return COPPER_GOLEM_STATUES.contains(blockId); }
 
-    /**
-     * Property sets for other blocks whose blockstate json ignores a property the game keeps.
-     *
-     * <p>Heads are the case here: {@code skeleton_skull.json} has one empty variant, because the
-     * entity renderer rotates the model from the block's {@code rotation} value (0..15, in
-     * 22.5-degree steps). Without it in the table, tryWith() dropped the property and every head
-     * faced the same way.
-     */
+    /** 头颅的实际朝向由方块实体渲染读取，需保留模型 JSON 未使用的属性。 */
     private static final Map<String, List<String>> HEADED_PROPERTIES = Map.of(
         "rotation", List.of("0", "1", "2", "3", "4", "5", "6", "7",
                             "8", "9", "10", "11", "12", "13", "14", "15")
     );
 
-    /** Blocks that take the headed property set above (ground-standing heads and skulls). */
+
     private static final java.util.Set<String> HEADED_BLOCKS = java.util.Set.of(
         "minecraft:skeleton_skull", "minecraft:wither_skeleton_skull",
         "minecraft:player_head", "minecraft:zombie_head", "minecraft:creeper_head",
         "minecraft:piglin_head", "minecraft:dragon_head"
     );
 
-    /** Actual skull block entities, excluding ordinary models such as piston_head. */
+
     public static boolean isHead(String blockId) {
         return (blockId.endsWith("_head")||blockId.endsWith("_skull"))
             && HEADED_BLOCKS.contains(blockId.replace("_wall_", "_"));
@@ -313,18 +268,18 @@ public final class BlockRegistry {
 
     private static void addValueToProps(Map<String, LinkedHashSetSet> props, String name, String value) {
         if (value.isEmpty()) return;
-        // multipart values can be "true|false" or "1|2|3"
+
         for (String v : value.split("\\|")) {
             if (v.isEmpty()) continue;
             props.computeIfAbsent(name, k -> new LinkedHashSetSet()).add(v);
         }
     }
 
-    /** value ordering: booleans (false<true), numbers ascending, strings alphabetical. */
+
     private static int compareValues(String a, String b) {
         Boolean ab = parseBool(a), bb = parseBool(b);
         if (ab != null && bb != null) return Boolean.compare(ab, bb);
-        if (ab != null) return 1;    // bools after non-bools? keep groups: non-bools first if other is bool
+        if (ab != null) return 1;
         if (bb != null) return -1;
         Double ad = parseNum(a), bd = parseNum(b);
         if (ad != null && bd != null) return Double.compare(ad, bd);
@@ -344,7 +299,7 @@ public final class BlockRegistry {
         return null;
     }
 
-    /** Simple insertion-ordered string set. */
+
     private static final class LinkedHashSetSet {
         final java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>();
         void add(String v) { this.values.add(v); }
@@ -353,27 +308,23 @@ public final class BlockRegistry {
     public BlockInfo get(String blockId) {
         BlockInfo info = this.blocks.get(blockId);
         if (info != null) return info;
-        // Schematics are saved by many game versions; when a block was renamed, follow the
-        // rename so an older file still renders instead of showing a missing-model cube.
+        // 旧版方块重命名先映射到当前标识，再查询真实属性表。
+
         String current = LEGACY_RENAMES.get(blockId);
         return current == null ? null : this.blocks.get(current);
     }
 
-    /**
-     * Blocks renamed across versions, old id → current id.
-     * {@code minecraft:chain} became {@code minecraft:iron_chain} when the copper chain
-     * variants were added.
-     */
+
     private static final Map<String, String> LEGACY_RENAMES = Map.of(
         "minecraft:chain", "minecraft:iron_chain"
     );
 
     public BlockInfo getOrMissing(String blockId) {
-        // Follow legacy renames first: an older schematic must resolve to the current block's
-        // real property table, otherwise its variant conditions never match.
+
+
         BlockInfo info = this.get(blockId);
         if (info != null) return info;
-        // missing block: create a stub info (missing model will render pink/black)
+        // 缺失方块使用占位信息，后续显示粉黑缺失纹理。
         return this.blocks.computeIfAbsent(blockId, id -> new BlockInfo(id, new LinkedHashMap<>(), new HashMap<>()));
     }
 
@@ -385,12 +336,12 @@ public final class BlockRegistry {
         return this.blocks.size();
     }
 
-    /** All known block ids, for diagnostics and audits. */
+
     public java.util.Set<String> blockIds() {
         return java.util.Collections.unmodifiableSet(this.blocks.keySet());
     }
 
-    /** Parses "minecraft:oak_stairs[facing=east,half=bottom]" into a BlockState. */
+
     public BlockState parseState(String fullId) {
         String blockId = fullId;
         Map<String, String> propValues = new LinkedHashMap<>();

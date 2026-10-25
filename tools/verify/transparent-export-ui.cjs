@@ -49,7 +49,7 @@ app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish
    if(!state.cpuPreviewReady||!els.viewport.classList.contains('checker'))throw Error('CPU checker preview failed');`);
   saves.push(path.join(out,'cpu-grid.png'));await exportAndWait('exportPng');
   if(animations[1].result.delayCentiseconds!==2)throw Error('RPC animation default delay differs from the UI');
-  // Bypass Electron's parameter normalization to exercise the Java RPC precedence too.
+
   await original.call(engine,'render',{width:192,height:192,transparent:true,background:0xFFFFFF,out:path.join(out,'rpc-override.png')});
   await original.call(engine,'render',{width:192,height:192,transparent:false,backgroundMode:'checker',background:0xFFFFFF,out:path.join(out,'rpc-checker.png')});
   for(const name of ['grid-export.png','grid-export.gif','white.png','override.png','image-export.png','image-export.gif','cpu-grid.png','rpc-override.png','rpc-checker.png'])if(!fs.existsSync(path.join(out,name)))throw Error('Missing export: '+name);

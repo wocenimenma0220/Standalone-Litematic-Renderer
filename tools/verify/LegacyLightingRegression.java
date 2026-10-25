@@ -9,7 +9,7 @@ import java.nio.file.*;
 import java.lang.reflect.*;
 import java.util.*;
 
-/** Compare lighting against the actual classes shipped in the 1.0.8 ZIP. */
+
 public final class LegacyLightingRegression {
     static void check(boolean ok,String message){if(!ok)throw new AssertionError(message);}
     static void set(Object object,String key,Object value)throws Exception{var field=object.getClass().getDeclaredField(key);field.setAccessible(true);field.set(object,value);}

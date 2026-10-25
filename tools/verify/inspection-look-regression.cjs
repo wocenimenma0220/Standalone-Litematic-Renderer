@@ -17,7 +17,7 @@ app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish
    await window.__uiReady;if(els.welcome.open)await dismissWelcome(false);await window.engine.loadResources(null);
    await loadFile(${JSON.stringify(path.resolve(__dirname,'fly-output/inspection.litematic'))});check(state.viewReady,'actual scene failed');
    setFly(true);await wait(0);
-   // A Windows cursor warp may be preceded by zero-delta events on lock/focus.
+   // Windows 鼠标跳转前可能先收到锁定或焦点产生的零增量事件。
    move(0,0);move(300,-180);
    state.flyPos=[.5,.45,-2];state.flyYaw=Math.PI;state.flyPitch=0;drawView();
    await inspectCenter();check(state.inspectedBlock?.id==='minecraft:chest','real chest was not inspected');
@@ -33,7 +33,7 @@ app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish
    for(let i=0;i<12;i++)move(2,1);
    check(Math.abs(state.flyYaw-(yaw-32*.0025))<1e-9,'continuous mouse movement lost deltas');
    check(JSON.stringify(state.flyPos)===JSON.stringify(position)&&state.view.revision===revision,'resume changed position or rebuilt the scene');
-   // Clicking outside the panel resumes once; it must not reopen inspection.
+   // 点击面板外部只恢复一次漫游，不得重新打开详情。
    showInspection({hit:true,name:'石头',id:'minecraft:stone',position:[0,0,0],region:'test',properties:{}});
    const clickYaw=state.flyYaw,clickPitch=state.flyPitch;
    els.viewport.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,button:0,clientX:80,clientY:80}));
@@ -41,11 +41,11 @@ app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish
    move(-600,350);check(state.flyYaw===clickYaw&&state.flyPitch===clickPitch,'click-to-resume caused a camera jump');
    move(4,3);check(Math.abs(state.flyYaw-(clickYaw-.01))<1e-9,'click-to-resume ignored normal movement');
    check(els.inspector.classList.contains('hidden'),'resume click reopened panel');
-   // Promise completion and duplicate change events must not discard another real movement.
+   // 请求完成和重复状态事件不能丢弃下一次真实鼠标移动。
    document.dispatchEvent(new Event('pointerlockchange'));resumeFlyLook();await wait(0);
    const activeYaw=state.flyYaw;move(3,0);check(Math.abs(state.flyYaw-(activeYaw-.0075))<1e-9,'duplicate lock notification reset movement');
    pauseFlyLook();const paused=state.flyYaw;move(200,0);check(state.flyYaw===paused,'unlocked movement rotated camera');
-   // Chromium can resolve the request before delivering pointerlockchange.
+   // Chromium 可能先完成请求，再发送鼠标锁定变化事件。
    els.viewport.requestPointerLock=()=>{Object.defineProperty(document,'pointerLockElement',{configurable:true,value:els.viewport});return Promise.resolve();};
    resumeFlyLook();await wait(0);move(0,0);move(250,-200);
    check(state.flyYaw===paused,'promise-first acquisition applied warp');

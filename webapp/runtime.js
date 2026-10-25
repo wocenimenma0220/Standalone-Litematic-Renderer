@@ -1,14 +1,6 @@
 'use strict';
 
-/**
- * Locates a Java runtime and the engine classpath.
- *
- * Search order (first hit wins) so the app is portable but still usable during development:
- *   1. `<home>/runtime/`            — a jlink image shipped inside the green zip
- *   2. `<home>/../../jdk-*`         — the workspace JDK used while developing
- *   3. `JAVA_HOME`
- *   4. `java` on PATH
- */
+/** Java 查找顺序：内置 runtime、工作区 JDK、JAVA_HOME、系统 PATH；类路径固定为项目 bin。 */
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -25,7 +17,7 @@ function isJavaExe(p) {
   }
 }
 
-/** A directory that looks like a Java home. */
+
 function asJavaHome(dir) {
   if (!dir) return null;
   const exe = path.join(dir, 'bin', javaExeName());
@@ -33,7 +25,7 @@ function asJavaHome(dir) {
 }
 
 function findJdkBeside(home) {
-  // `<home>/../../jdk-*` — the layout of this workspace during development.
+
   const parent = path.resolve(home, '..', '..');
   let entries;
   try {
@@ -53,9 +45,7 @@ function findJdkBeside(home) {
   return null;
 }
 
-/**
- * @returns {{javaExe: string, classpath: string, source: string}}
- */
+
 function resolveRuntime(home) {
   const classes = path.join(home, 'bin');
   const classpath = classes;

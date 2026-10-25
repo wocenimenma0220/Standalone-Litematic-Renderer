@@ -3,27 +3,7 @@ package io.github.litematicrender.render.scene;
 import io.github.litematicrender.world.BlockShape;
 import io.github.litematicrender.world.BlockState;
 
-/**
- * Offline light propagation for a schematic: sky light and block light, stored per cell and later
- * sampled as a per-vertex light value.
- *
- * <p>Defaults to the lighting appearance shipped in 1.0.8; the optional realLighting mode
- * restores 1.0.10 sky occlusion and state-dependent emission. Dense and sparse volumes
- * share the same sampling contract, with compact queues and allocation guards.
- *
- * <ul>
- *   <li><b>Sky light</b> uses the old full-sky seed for permeable cells, including covered cells.</li>
- *   <li><b>Block light</b> uses the 1.0.8 emission table and loses one level per step.</li>
- * </ul>
- *
- * <p>FIFO propagation preserves the old bounded-queue order while storing one voxel index
- * per entry. Interactive removal/decrease propagation is not needed.
- *
- * <p>The result is two nibble grids plus the lightmap composition in {@link #brightness}, which
- * mirrors the game's {@code core/lightmap.fsh}. Sky and block light stay separate until that final
- * step: the shader samples them as the two axes of a 16x16 texture and adds them, so merging them
- * earlier is a lossy shortcut and is what used to turn unlit faces pure black.
- */
+/** 离线计算天空光和方块光，随后采样为顶点光照；兼容旧版明亮外观和平滑光照模式。 */
 public final class LightVolume implements LightSampler {
     private final int sx, sy, sz;
     private final BlockState[] cells;
@@ -34,10 +14,10 @@ public final class LightVolume implements LightSampler {
     private final LightGrid block;
     private final boolean realLighting;
 
-    /** Highest block-light emission present in the scene; 0 means no emitters at all. */
+
     private int maxEmission;
 
-    /** Reserve room for references, light channels and propagation queues before allocating. */
+    /** 分配前为引用、光照通道、传播队列、模型和缓存预留内存。 */
     public static int checkedCellCount(long sx, long sy, long sz) {
         long count;
         try { count = Math.multiplyExact(Math.multiplyExact(sx, sy), sz); }
@@ -46,7 +26,7 @@ public final class LightVolume implements LightSampler {
             throw new IllegalArgumentException("投影区域跨度过大，无法计算光照；请缩小区域之间的距离。");
         Runtime runtime = Runtime.getRuntime();
         long available = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory());
-        // Conservative references/channels/queue estimate with headroom for geometry and caches.
+
         if (count > Math.max(1, available / 32))
             throw new IllegalArgumentException("投影区域跨度过大，光照所需内存不足；请拆分投影或缩小空白区域。");
         return (int)count;
@@ -69,7 +49,7 @@ public final class LightVolume implements LightSampler {
         this.sky = new LightGrid(count);
         this.block = new LightGrid(count);
     }
-    /** Streamed geometry needs only light channels and queues; block states stay bit-packed. */
+    /** 流式场景只保留光照和传播队列，方块状态继续压缩存储。 */
     public static int checkedCompactCellCount(long sx,long sy,long sz) {
         long count;try{count=Math.multiplyExact(Math.multiplyExact(sx,sy),sz);}catch(ArithmeticException error){throw new IllegalArgumentException("光照范围过大",error);}
         if(sx<=0||sy<=0||sz<=0||count>Integer.MAX_VALUE-8)throw new IllegalArgumentException("光照范围过大");
@@ -106,7 +86,7 @@ public final class LightVolume implements LightSampler {
         return this.shapes.lightPermeable(this.at(x, y, z));
     }
 
-    /** Runs both channels. Call once, after construction. */
+
     public void compute() {
         if (this.realLighting) {
             seedRealLight();
@@ -118,7 +98,7 @@ public final class LightVolume implements LightSampler {
         sky.compact();block.compact();
     }
 
-    /** Sky and block light use separate grids and can propagate safely in parallel. */
+    /** 天空光和方块光使用独立网格，可以并行传播。 */
     private void parallel(Runnable first,Runnable second) {
         if(!Boolean.parseBoolean(System.getProperty("litematicrender.light.parallel","true"))||(long)sx*sy*sz<262_144||Runtime.getRuntime().availableProcessors()<2){first.run();second.run();return;}
         var failure=new java.util.concurrent.atomic.AtomicReference<Throwable>();
@@ -129,14 +109,12 @@ public final class LightVolume implements LightSampler {
         Throwable error=failure.get();if(error instanceof RuntimeException runtime)throw runtime;if(error instanceof Error fatal)throw fatal;if(error!=null)throw new IllegalStateException(error);
     }
 
-    // ------------------------------------------------------------------ sky light
 
-    /** 1.0.10 direct sky: roofs block columns; water and leaves absorb light. */
     private void seedRealLight() {
         sky.fill(15);
         byte[] columns=new byte[sx*sz];java.util.Arrays.fill(columns,(byte)15);
-        // Keep packed block reads contiguous within each Y plane. Scanning a tall column
-        // first can evict every decoded page before the next adjacent column reuses it.
+        // 按 Y 层连续读取压缩方块页，避免逐列扫描反复淘汰邻列需要的解压页。
+
         for (int y=sy-1;y>=0;y--) for (int z=0;z<sz;z++) {
             if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
             for (int x=0;x<sx;x++) {
@@ -152,7 +130,7 @@ public final class LightVolume implements LightSampler {
 
     private static final int[][] DIRECTIONS={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
 
-    /** Increasing FIFO with one pending entry per cell and storage proportional to the frontier. */
+    /** 队列中每格最多保留一项，存储量随传播前沿增长。 */
     private void spreadReal(LightGrid values, boolean skylight) {
         var queue=new IntQueue(values.length);
         var queued=new java.util.BitSet(values.length);
@@ -206,17 +184,12 @@ public final class LightVolume implements LightSampler {
         int remove(){int result=values[head];head=(head+1)%values.length;size--;return result;}
     }
 
-    /**
-     * Seeds 15 on the highest light-permeable cell of each column and everything open above it.
-     *
-     * <p>A column whose top cell is opaque has no sky access at all; one capped by water starts the
-     * seed below the water surface, and the water itself attenuates as the spread runs.
-     */
+    /** 为暴露于天空的可透光列设置初始天空光；顶部不透明时不能播种。 */
     private void seedSky() {
         for (int z = 0; z < this.sz; z++) {
             if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
             for (int x = 0; x < this.sx; x++) {
-                // Preserve the brighter 1.0.8 snapshot, including covered permeable cells.
+                // 保持 1.0.8 的明亮结果，包括被覆盖的可透光格。
                 int y = this.sy - 1;
                 while (y >= 0 && !this.permeable(x, y, z)) y--;
                 for (; y >= 0; y--) if (this.permeable(x, y, z)) this.sky.set(this.idx(x, y, z),15);
@@ -225,10 +198,9 @@ public final class LightVolume implements LightSampler {
     }
 
     private void spreadSky() {
-        // Vanilla propagates sky downward for free. That is equivalent to seeding every open column
-        // at 15 (done above) and then running one uniform BFS with down-steps free while the light
-        // is at 15. The queue here implements exactly that: a downward step does not attenuate when
-        // the source level is 15 and the target is permeable.
+        // 原版 15 级天空光向下传播时不衰减，其他方向按正常规则传播。
+
+
         int[] queue = new int[this.sky.length];
         int head=0,tail=0;
         for (int i = 0; i < this.sky.length; i++) {
@@ -257,7 +229,6 @@ public final class LightVolume implements LightSampler {
         }
     }
 
-    // ------------------------------------------------------------------ block light
 
     private void seedBlock() {
         for (int i = 0; i < this.block.length; i++) {
@@ -298,28 +269,16 @@ public final class LightVolume implements LightSampler {
         }
     }
 
-    // ------------------------------------------------------------------ sampling
 
-    /**
-     * The light value a face should use, sampled one step toward the face — the cell the face looks
-     * into, which is how vanilla picks the lightmap coordinates for a flush face.
-     *
-     * <p>Sky and block light are returned as two separate channels, not collapsed to their maximum.
-     * The game keeps them apart all the way to the shader (they are the two axes of the 16x16
-     * lightmap texture, packed as {@code UV2} and sampled independently), and collapsing them here
-     * throws away information the brightness curve needs — see {@link #brightness}.
-     *
-     * @param dx,dy,dz the face normal in steps (-1, 0 or +1)
-     * @return packed {@code (sky << 8) | block}, both 0..15
-     */
+    /** 面片读取朝向一侧的相邻格光照，天空光和方块光分别返回。 */
     public int faceLight(int x, int y, int z, int dx, int dy, int dz) {
         int nx = x + dx, ny = y + dy, nz = z + dz;
-        if (!this.inside(nx, ny, nz)) return pack(15, 0);       // outside the build: full sky
+        if (!this.inside(nx, ny, nz)) return pack(15, 0);
         int i = this.idx(nx, ny, nz);
         return pack(this.sky.get(i) & 0xFF, this.block.get(i) & 0xFF);
     }
 
-    /** The two light channels at a cell, used for unculled geometry (crosses, torches). */
+    /** 无固定剔除面的几何读取自身位置的两个光照通道。 */
     public int cellLight(int x, int y, int z) {
         if (!this.inside(x, y, z)) return pack(15, 0);
         int i = this.idx(x, y, z);
@@ -339,10 +298,10 @@ public final class LightVolume implements LightSampler {
         return state.blockId.equals("minecraft:water")||"true".equals(state.getValue("waterlogged"))||state.blockId.endsWith("_leaves")?1:0;
     }
 
-    // Block absorption is independent of render texture transparency.
+    // 光照吸收与渲染贴图的透明度分别处理。
     static int blockOpacity(BlockState state,BlockShape shapes) { return skyOpacity(state,shapes); }
 
-    /** State-dependent emission table restored from 1.0.10. */
+
     static int realEmission(BlockState state) {
         if(state==null||"false".equals(state.getValue("lit")))return 0;
         String id=state.blockId;
@@ -363,80 +322,45 @@ public final class LightVolume implements LightSampler {
         };
     }
 
-    /**
-     * The channel-wise maximum of two packed light values.
-     *
-     * <p>Vanilla {@code FluidRenderer.getLightCoords} is
-     * {@code LightCoordsUtil.max(getLightCoords(pos), getLightCoords(pos.above()))}: a fluid is lit
-     * by whichever of its own cell and the cell above is brighter, so a waterfall's own surface is
-     * not shadowed by the water it is falling into. {@code LightCoordsUtil.max} takes the two
-     * channels separately, which is what this reproduces.
-     */
+    /** 流体分别取自身格和上方格的两个光照通道最大值。 */
     public static int max(int a, int b) {
         return pack(Math.max(skyOf(a), skyOf(b)), Math.max(blockOf(a), blockOf(b)));
     }
 
-    /** Sky channel of a packed light value, 0..15. */
+
     public static int skyOf(int packed) { return (packed >> 8) & 0xFF; }
 
-    /** Block channel of a packed light value, 0..15. */
+
     public static int blockOf(int packed) { return packed & 0xFF; }
 
-    // ------------------------------------------------------------------ lightmap
 
-    /** Vanilla {@code Lightmap.getBrightness}: {@code v/(4-3v)} with {@code v = level/15}. */
+    /** 使用原版亮度曲线 v/(4-3v)，其中 v=level/15。 */
     public static float curve(int level) {
         float v = Math.max(0, Math.min(15, level)) / 15f;
         return v / (4f - 3f * v);
     }
 
-    /**
-     * The ambient floor colour, matching the overworld's {@code visual/ambient_light_color}
-     * ({@code #0a0a0a} = 10/255), with a minimum of one 255th so a completely unlit surface stays
-     * faintly visible rather than collapsing to pure black.
-     *
-     * <p>Vanilla's {@code LightmapRenderStateExtractor} takes the larger of this ambient colour and
-     * the dimension's {@code ambient_light} scalar-derived colour; the {@code max(1/255, …)} is the
-     * same clamp the game applies when it packs the lightmap texture, and it is what vanilla's own
-     * lightmap shader relies on for its {@code max(AmbientColor, NightVisionColor)} term.
-     */
+    /** 环境色下限遵循主世界设置，保留微弱可见度。 */
     private static final float AMBIENT = Math.max(1f / 255f, 10f / 255f);
 
-    /** {@code EnvironmentAttributes.BLOCK_LIGHT_TINT}: {@code ARGB.vector3fFromRGB24(-10100)}. */
+
     private static final float BLOCK_TINT_R = ((-10100 >> 16) & 0xFF) / 255f;
     private static final float BLOCK_TINT_G = ((-10100 >> 8) & 0xFF) / 255f;
     private static final float BLOCK_TINT_B = (-10100 & 0xFF) / 255f;
 
-    /**
-     * A packed light value turned into the RGB factor a texture is multiplied by.
-     *
-     * <p>Port of vanilla's lightmap shader ({@code core/lightmap.fsh}), which is what actually
-     * converts light levels into colour. Reproducing it matters more than it looks: the common
-     * shortcut — take the brighter of the two channels and run it through {@code getBrightness} —
-     * is <em>not</em> equivalent. It loses water attenuation and the block-light tint, and
-     * most visibly it sends any cell with sky 0 and block 0 to a literal zero, which is what made
-     * scattered faces render as solid black squares.
-     *
-     * <p>Two deviations from the shader, both deliberate: the {@code gamma} option (BrightnessFactor)
-     * is left at 0, since the offline renderer has no options screen, and night vision, the darkness
-     * effect and the boss-overlay darkening are all absent from a schematic snapshot.
-     *
-     * @param packed a value from {@link #faceLight} or {@link #cellLight}
-     * @param out    receives r, g, b in 0..1
-     */
+    /** 按原版 lightmap.fsh 将天空光与方块光转换为纹理的 RGB 乘数。 */
     public static void brightness(int packed, float[] out) {
         float blockLevel = blockOf(packed) / 15f;
         float skyLevel = skyOf(packed) / 15f;
         float blockBrightness = curve(blockOf(packed));
         float skyBrightness = curve(skyOf(packed));
 
-        // color = ambient; color += skyLightColor * skyBrightness; color += blockLightColor * blockBrightness
-        // SkyLightColor is white (EnvironmentAttributes.SKY_LIGHT_COLOR default 0xFFFFFF).
+
         float r = AMBIENT + skyBrightness;
         float g = AMBIENT + skyBrightness;
         float b = AMBIENT + skyBrightness;
 
-        // BlockLightColor = mix(BlockLightTint, white, 0.9 * parabolicMixFactor(block_level))
+
         float mix = 0.9f * (2f * blockLevel - 1f) * (2f * blockLevel - 1f);
         float br = BLOCK_TINT_R + (1f - BLOCK_TINT_R) * mix;
         float bg = BLOCK_TINT_G + (1f - BLOCK_TINT_G) * mix;
@@ -450,7 +374,7 @@ public final class LightVolume implements LightSampler {
         out[2] = Math.min(1f, b);
     }
 
-    /** Light-emitting blocks by id; the game's luminance table, reduced to what schematics carry. */
+    /** 按方块标识和保存状态查询原版发光强度。 */
     private static final java.util.Map<String, Integer> EMISSIONS = java.util.Map.ofEntries(
         java.util.Map.entry("minecraft:torch", 14),
         java.util.Map.entry("minecraft:soul_torch", 10),
@@ -476,6 +400,6 @@ public final class LightVolume implements LightSampler {
         java.util.Map.entry("minecraft:amethyst_cluster", 5),
         java.util.Map.entry("minecraft:crying_obsidian", 10),
         java.util.Map.entry("minecraft:light", 15),
-        java.util.Map.entry("minecraft:ochre_candle", 3)   // candles vary; 3 is the lit baseline
+        java.util.Map.entry("minecraft:ochre_candle", 3)
     );
 }

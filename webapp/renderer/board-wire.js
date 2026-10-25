@@ -1,6 +1,5 @@
 'use strict';
-/* Java 26.3 RedstoneWireBlock + DefaultRedstoneWireEvaluator (no experiments).
- * Updates remain depth-first NC/PP tasks, including HashSet notification order. */
+/** 红石粉使用 26.3 普通规则，NC/PP 更新按深度优先执行，并保持 HashSet 通知顺序。 */
 (function(root){
   const B=typeof module!=='undefined'?require('./board-components.js'):root.BoardTiming;
   const Support=typeof module!=='undefined'?require('./board-support.js'):root.BoardSupport;
@@ -9,8 +8,8 @@
   const at=(p,d)=>p.map((v,i)=>v+DIR[d][i]),wire=s=>s?.id==='redstone_wire';
   const dot=s=>H.every(d=>!s.states[d]||s.states[d]==='none'),cross=s=>H.every(d=>s.states[d]&&s.states[d]!=='none');
   const cell=(power=0,side='none')=>({id:'redstone_wire',states:{north:side,east:side,south:side,west:side,power:String(power)}});
-  // Seven entries in a default Java HashSet use a 16-bucket HashMap. Bucket
-  // iteration is ascending; equal hashes retain insertion order (no resize).
+  // 默认 Java HashSet 的七项使用 16 桶 HashMap；按桶序迭代，同哈希保持插入顺序。
+
   function notificationPositions(p){return [p,...V.map(d=>at(p,d))].map((pos,index)=>{const hash=((pos[1]+Math.imul(pos[2],31))*31+pos[0])|0;return {pos,index,bucket:(hash^(hash>>>16))&15};}).sort((a,b)=>a.bucket-b.bucket||a.index-b.index).map(x=>x.pos);}
   Object.assign(B,{isWire:wire,wireCell:cell,wireNotificationPositions:notificationPositions});
   B.EXTRA_TASKS.push('红石线强度','红石线拐角','红石线周边','红石线高低邻线','红石线间接形状');

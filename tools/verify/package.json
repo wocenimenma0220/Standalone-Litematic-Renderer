@@ -1,0 +1,6 @@
+{
+  "name": "litematic-render-verification",
+  "private": true,
+  "type": "commonjs",
+  "devDependencies": { "playwright": "1.62.1" }
+}

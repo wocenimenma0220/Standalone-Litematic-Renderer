@@ -27,12 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Render engine: loads a resource pack once, then answers render requests.
- *
- * <p>Kept deliberately free of any transport concern — {@link JsonRpcServer} owns stdin/stdout,
- * this class owns the expensive state (resources, atlas, model baker) and the render calls.
- */
+/** 渲染引擎持有资源、图集、模型和投影状态，传输协议由 JsonRpcServer 单独负责。 */
 public final class RenderEngine implements AutoCloseable {
     private final Path home;
     private final AtomicBoolean cancelled = new AtomicBoolean();
@@ -48,16 +43,7 @@ public final class RenderEngine implements AutoCloseable {
     private List<Path> loadedUserPacks = List.of();
     private List<String> loadedUserPackNames = List.of();
 
-    /**
-     * Built geometry for the open schematic, reused across renders.
-     *
-     * <p>Building a scene walks every block and bakes ambient occlusion and per-face lighting; it
-     * depends on the schematic and resource pack but <em>not</em> on the camera. Measured on a
-     * 15k-block schematic: 32 ms to build once, versus 146 000 quads worth of work thrown away on
-     * every drag. This is the CPU analogue of what the game does by uploading static geometry to
-     * the GPU once and only changing the model-view matrix while dragging — see
-     * {@code QuickLitematicaPreviewAccess.drawMesh}, which fits-drags without rebuilding.
-     */
+    /** 场景生成与相机无关，旋转和缩放只需复用网格；文件或资源变化才使缓存失效。 */
     private SceneMesh scene;
     private SceneBuilder sceneBuilder;
     private SceneMesh selectedScene;
@@ -72,10 +58,10 @@ public final class RenderEngine implements AutoCloseable {
     private boolean streamRealLighting;
     private boolean sceneRealLighting;
     private boolean sceneLightingEnabled=true,streamLightingEnabled=true;
-    /** True when the last render reused {@link #scene} instead of rebuilding it. */
+
     private boolean sceneFromMesh;
 
-    /** Cached parse of the currently open schematic, keyed by path + mtime + size. */
+
     private LitematicaSchematic schematic;
     private Path schematicPath;
     private io.github.litematicrender.schematic.ProjectionEdits edits;
@@ -83,6 +69,9 @@ public final class RenderEngine implements AutoCloseable {
     private boolean editsDirty;
     private SceneBuilder editBaseBuilder;
     private int editRevision;
+    private io.github.litematicrender.render.Image editAtlasImage;
+    private int editAtlasTick;
+    private Path editAtlasPath;
     private long schematicStamp;
     private String schematicDigest,loadedResourceFingerprint;
     private SceneCache diskCache;
@@ -128,7 +117,7 @@ public final class RenderEngine implements AutoCloseable {
     }
     public synchronized void invalidateScene() { this.scene=null;this.sceneKey=null; }
     public synchronized void releaseStreaming(){clearStream();}
-    /** Bounded pages avoid retaining millions of matching coordinates. */
+    /** 分页返回搜索位置，避免保留数百万匹配坐标。 */
     public synchronized Map<String,Object> searchBlocks(String query,int offset)throws Exception {
         ensureResources();if(schematic==null)throw new IllegalStateException("请先打开投影");
         query=query.trim().toLowerCase(java.util.Locale.ROOT);if(query.isEmpty()||query.length()>128||offset<0)throw new IllegalArgumentException("请输入有效的方块名称或 ID");
@@ -193,8 +182,11 @@ public final class RenderEngine implements AutoCloseable {
     }
     private Map<String,Object> editInfo(){var md=schematic.metadata();return Map.of("name",md.name,"author","LiteKinda","size",Map.of("x",md.enclosingSize.x(),"y",md.enclosingSize.y(),"z",md.enclosingSize.z()),"regionCount",md.regionCount,"totalBlocks",md.totalBlocks);}
     public synchronized Map<String,Object> commitEdits()throws Exception {
+        return commitEdits(false);
+    }
+    public synchronized Map<String,Object> commitEdits(boolean rebasePreview)throws Exception {
         if(!editsDirty)return Map.of("changed",false,"path",schematicPath==null?"":schematicPath.toAbsolutePath().toString());
-        edits.write(editWorkingPath);var info=open(editWorkingPath);editsDirty=false;var result=new LinkedHashMap<String,Object>();result.put("changed",true);result.put("path",editWorkingPath.toString());result.put("info",info);return result;
+        edits.write(editWorkingPath);var info=open(editWorkingPath);editsDirty=false;if(rebasePreview)edits.clearPreview();editAtlasImage=null;var result=new LinkedHashMap<String,Object>();result.put("changed",true);result.put("path",editWorkingPath.toString());result.put("info",info);return result;
     }
     public synchronized Map<String,Object> editStates(List<Object> positions){
         var result=new ArrayList<Map<String,Object>>();if(positions==null||positions.size()>64)throw new IllegalArgumentException("无效坐标列表");
@@ -204,18 +196,23 @@ public final class RenderEngine implements AutoCloseable {
     private Map<String,String> statePropertiesAt(int[] p){var regions=new ArrayList<>(schematic.regions().values());for(int i=regions.size()-1;i>=0;i--){var r=regions.get(i);var o=r.blockOrigin();int x=p[0]-o.x(),y=p[1]-o.y(),z=p[2]-o.z();if(x>=0&&y>=0&&z>=0&&x<r.blocks.sizeX&&y<r.blocks.sizeY&&z<r.blocks.sizeZ)return r.storedProperties(x,y,z);}return Map.of();}
     public synchronized Map<String,Object> editPatch(Path directory,double[] min,double[] max)throws Exception {
         if(edits==null)return Map.of("empty",true);Files.createDirectories(directory);var cells=edits.previewCells();
+        // 基础模型重建后接替补丁，避免连续编辑无限扩大局部模型。
+        if(cells.size()>8192)return Map.of("rebuildRequired",true,"cells",cells.size(),"revision",editRevision);
         var builder=new SceneBuilder(registry,baker,colormaps,atlas);for(var r:schematic.regions().values()){var o=r.blockOrigin();builder.addRegion(r,new int[]{o.x(),o.y(),o.z()});}
         var mesh=builder.buildEditing(cells,editBaseBuilder,null,null);Path full=directory.resolve("patch.bin"),image=directory.resolve("atlas.png");MeshExporter.write(mesh,atlas,full);
         var result=new LinkedHashMap<String,Object>();result.put("mesh",full.toString());result.put("atlas",image.toString());result.put("quads",mesh.quadCount);result.put("cells",cells.stream().map(p->List.of(p.x(),p.y(),p.z())).toList());result.put("revision",editRevision);
         if(min!=null){var selected=new SceneBuilder(registry,baker,colormaps,atlas);for(var r:schematic.regions().values()){var o=r.blockOrigin();selected.addRegion(r,new int[]{o.x(),o.y(),o.z()});}var selectedMesh=selected.buildEditing(cells,builder,min,max);Path path=directory.resolve("selection.bin");MeshExporter.write(selectedMesh,atlas,path);result.put("selectionMesh",path.toString());}
-        atlas.stitched.writePng(image);return result;
+        if(editAtlasImage!=atlas.stitched||editAtlasTick!=atlas.bakedTick()||!image.equals(editAtlasPath)||!Files.isRegularFile(image)){
+            atlas.stitched.writePng(image);editAtlasImage=atlas.stitched;editAtlasTick=atlas.bakedTick();editAtlasPath=image;
+        }
+        return result;
     }
     public synchronized Map<String,Object> inspectPosition(int[] position){return new BlockInspector(schematic,resources).inspectPosition(position[0],position[1],position[2]);}
     public synchronized Map<String,Object> exportEdited(Path output)throws Exception{
         if(schematic==null)throw new IllegalStateException("请先打开投影");
         var session=edits!=null?edits:new io.github.litematicrender.schematic.ProjectionEdits(schematicPath);session.write(output);return Map.of("path",output.toAbsolutePath().toString(),"author","LiteKinda");
     }
-    /** Voxel selection needs no geometry, lighting or entity inspection. */
+    /** 体素选点无需准备几何、光照或实体详情。 */
     public synchronized Map<String,Object> selectBlock(double[] origin,double[] direction,double maximum)throws Exception {
         if(schematic==null)throw new IllegalStateException("请先打开投影");
         double length=0;for(int i=0;i<3;i++){if(!Double.isFinite(origin[i])||Math.abs(origin[i])>30000000||!Double.isFinite(direction[i]))throw new IllegalArgumentException("无效的选择射线");length+=direction[i]*direction[i];}
@@ -295,42 +292,27 @@ public final class RenderEngine implements AutoCloseable {
         return Map.of("imported",true);
     }
 
-    /** Default resource pack shipped with the app. */
+
     public Path defaultPackRoot() {
         return this.home.resolve("assets/vanilla");
     }
 
-    /**
-     * Packs bundled with the app, loaded on top of vanilla and below anything the user imports.
-     *
-     * <p>They live in {@code assets/builtin/} as standard zips (or folders) with the usual
-     * {@code assets/<namespace>/...} layout. A pack only needs to cover the blocks it changes —
-     * anything missing falls through to vanilla.
-     */
-    /**
-     * Builtin packs that exist purely to make the renderer work — static model support (FastChest)
-     * and entity textures for the block-entity pass. They are infrastructure rather than look packs,
-     * so the UI hides them; the two real built-in look packs stay listed.
-     */
-    /** Every builtin pack, infrastructure included — this is the resource stack to load. */
+    /** 内置资源从 assets/builtin 加载，优先级高于原版、低于用户导入资源。 */
+    /** 基础模型和实体纹理属于渲染基础设施，不作为可选外观包展示。 */
+
     public List<Path> builtinPacks() {
         return io.github.litematicrender.resource.BuiltinPacks.list(this.home);
     }
 
-    /** The builtin packs worth showing in the UI: the look packs, not the plumbing. */
+
     public List<Path> visibleBuiltinPacks() {
         return builtinPacks().stream()
             .filter(io.github.litematicrender.resource.BuiltinPacks::visible)
             .toList();
     }
 
-    /** Loads (or reloads) the resource stack: vanilla, then built-ins, then the given pack root. */
-    /**
-     * Loads the resource stack: vanilla, then built-in packs, then user-imported packs.
-     *
-     * @param packRoot vanilla root, i.e. a directory containing {@code assets/}
-     * @param imports  user pack paths (zip or folder) in priority order, highest last
-     */
+
+    /** 资源加载顺序为原版、内置包、用户导入包；列表末尾优先级最高。 */
     public synchronized Map<String, Object> loadResources(Path packRoot, List<String> imports) throws Exception {
         long resourceStart=System.nanoTime(),resourceStep=resourceStart;
         Map<String,Object> timings=new LinkedHashMap<>();
@@ -354,12 +336,12 @@ public final class RenderEngine implements AutoCloseable {
         }
         closeResources();
         ResourceManager res = new ResourceManager(packRoot);
-        // Built-ins sit above vanilla, user packs above built-ins, so an import wins over a built-in.
+
         List<String> builtinNames = new ArrayList<>();
         for (Path p : builtin) {
             res.importPackUnchecked(p);
         }
-        // Report only the look packs; the plumbing packs load silently above.
+
         for (Path p : visibleBuiltinPacks()) {
             builtinNames.add(p.getFileName().toString());
         }
@@ -387,7 +369,7 @@ public final class RenderEngine implements AutoCloseable {
         this.loadedUserPacks = user;
         this.loadedUserPackNames = userNames;
         this.loadedResourceFingerprint=fingerprint;
-        // A different pack invalidates any materialised schematic.
+        // 资源变化后，已经解析的投影状态必须失效。
         this.schematic = null;
         this.schematicPath = null;
 
@@ -404,12 +386,12 @@ public final class RenderEngine implements AutoCloseable {
         return out;
     }
 
-    /** Convenience form with no user imports. */
+
     public synchronized Map<String, Object> loadResources(Path packRoot) throws Exception {
         return loadResources(packRoot, List.of());
     }
 
-    /** Reads a .litematic and reports its metadata; caches the parse for the next render. */
+
     public synchronized Map<String, Object> open(Path file) throws Exception {
         ensureResources();
         selectedScene=null;selectedSceneKey=null;
@@ -446,7 +428,7 @@ public final class RenderEngine implements AutoCloseable {
         return out;
     }
 
-    /** Renders the open schematic to a PNG. */
+
     public synchronized Map<String, Object> render(Path outPng, RenderSettings settings, boolean reportDiagnostics)
             throws Exception {
         ensureResources();
@@ -459,7 +441,7 @@ public final class RenderEngine implements AutoCloseable {
         long t0 = System.currentTimeMillis();
         SceneMesh mesh = sceneMesh(settings.realLighting,settings.lightingEnabled);
         settings.selectionMesh=selectionScene(settings);
-        // "interactive" trades resolution for latency: see SchematicRenderer.interactiveScale.
+
         RenderSettings effective = settings.interactiveMaxEdge > 0
             ? SchematicRenderer.interactiveScale(settings, settings.interactiveMaxEdge)
             : settings;
@@ -484,18 +466,15 @@ public final class RenderEngine implements AutoCloseable {
         }finally{if(streamIndex!=null){scene=null;sceneKey=null;pickedScene=null;picker=null;}}
     }
 
-    /**
-     * The scene for the open schematic, rebuilt only when something it depends on changes.
-     *
-     * <p>The key covers everything that feeds the bake: which file is open, and which resource
-     * packs are stacked. Anything camera-related (rotation, slant, size) is deliberately absent —
-     * that is the whole point, since those are exactly what a drag changes.
-     */
+    /** 场景缓存覆盖全部烘焙输入，相机参数不参与缓存键。 */
     private SceneMesh sceneMesh() { return sceneMesh(this.sceneRealLighting,this.sceneLightingEnabled); }
 
     private SceneMesh sceneMesh(boolean realLighting) { return sceneMesh(realLighting,true); }
 
     private SceneMesh sceneMesh(boolean realLighting,boolean lightingEnabled) {
+        return sceneMesh(realLighting,lightingEnabled,stage->{});
+    }
+    private SceneMesh sceneMesh(boolean realLighting,boolean lightingEnabled,java.util.function.Consumer<String> progress) {
         SceneBuilder preparedBuilder=streamBuilder!=null&&streamRealLighting==realLighting&&streamLightingEnabled==lightingEnabled?streamBuilder:null;
         this.sceneLightingEnabled=lightingEnabled;
         this.sceneRealLighting=realLighting;
@@ -503,6 +482,7 @@ public final class RenderEngine implements AutoCloseable {
             + "|" + System.identityHashCode(this.baker) + "|" + realLighting + "|" + lightingEnabled;
         if (this.scene != null && key.equals(this.sceneKey)) {
             this.sceneFromMesh = true;
+            progress.accept("cached");
             return this.scene;
         }
         SceneBuilder builder = preparedBuilder!=null?preparedBuilder:new SceneBuilder(this.registry, this.baker, this.colormaps, this.atlas).realLighting(realLighting).lightingEnabled(lightingEnabled);
@@ -512,7 +492,8 @@ public final class RenderEngine implements AutoCloseable {
             var r = e.getValue();
             var origin=r.blockOrigin();builder.addRegion(r, new int[]{origin.x(),origin.y(),origin.z()});
         }
-        this.scene = builder.build();
+        builder.preparationProgress(progress);
+        try{this.scene = builder.build();}finally{builder.preparationProgress(stage->{});}
         this.sceneBuilder=builder;
         this.sceneKey = key;
         this.sceneFromMesh = false;
@@ -539,20 +520,12 @@ public final class RenderEngine implements AutoCloseable {
         return Map.of("atlas",atlasOut.toAbsolutePath().toString(),"mesh",meshOut.toAbsolutePath().toString(),"meshFormat","LMESH4","quads",mesh.quadCount,"vertices",vertices,"exportMillis",System.currentTimeMillis()-start);
     }
 
-    /** Renders without writing a file; used for fast previews of a crop or a thumbnail. */
+
     public synchronized long renderStamp(Path outPng, RenderSettings settings) throws Exception {
         return ((Number) render(outPng, settings, false).get("renderMillis")).longValue();
     }
 
-    /**
-     * Exports the scene for the WebGL viewer: the atlas as a texture, and the mesh as a vertex
-     * buffer.
-     *
-     * <p>Everything camera-independent is resolved here — models, lighting, ambient occlusion,
-     * layer assignment, translucent subdivision — so the viewer only ever re-projects vertices.
-     * That is the division of labour the game uses, and the reason quickcraft's preview drags
-     * smoothly: it draws from resident buffers and changes nothing but the model-view matrix.
-     */
+    /** 导出 WebGL 场景时统一完成模型、光照、材质分层和半透明细分。 */
     public synchronized Map<String, Object> exportScene(Path atlasOut, Path meshOut) throws Exception {
         return exportScene(atlasOut,meshOut,false);
     }
@@ -565,16 +538,22 @@ public final class RenderEngine implements AutoCloseable {
         return exportScene(atlasOut,meshOut,force,realLighting,true);
     }
     public synchronized Map<String,Object> exportScene(Path atlasOut,Path meshOut,boolean force,boolean realLighting,boolean lightingEnabled)throws Exception {
+        return exportScene(atlasOut,meshOut,force,realLighting,lightingEnabled,stage->{});
+    }
+    public synchronized Map<String,Object> exportScene(Path atlasOut,Path meshOut,boolean force,boolean realLighting,boolean lightingEnabled,java.util.function.Consumer<String> progress)throws Exception {
         clearStream();
+        progress.accept("resources");
         ensureResources();
         if (this.schematic == null) {
             throw new IllegalStateException("no schematic open; call open first");
         }
         if(force){this.scene=null;this.sceneKey=null;}
         long buildStart=System.currentTimeMillis();
-        SceneMesh mesh = sceneMesh(realLighting,lightingEnabled);
+        SceneMesh mesh = sceneMesh(realLighting,lightingEnabled,progress);
         long t0 = System.currentTimeMillis();
+        progress.accept("textures");
         this.atlas.stitched.writePng(atlasOut);
+        progress.accept("encoding");
         int vertices = MeshExporter.write(mesh, this.atlas, meshOut);
         long t1 = System.currentTimeMillis();
 
@@ -598,7 +577,7 @@ public final class RenderEngine implements AutoCloseable {
         return out;
     }
 
-    /** GPU preview path: retain the compressed world and lighting, never the complete face graph. */
+    /** GPU 分块路径保留压缩世界与光照，不保留完整面片对象图。 */
     public synchronized Map<String,Object> exportStreamScene(Path atlasOut,Path meshOut,boolean force,boolean realLighting)throws Exception {
         return exportStreamScene(atlasOut,meshOut,force,realLighting,true);
     }
@@ -682,7 +661,7 @@ public final class RenderEngine implements AutoCloseable {
     public synchronized Map<String,Object> sceneCacheStats()throws java.io.IOException{var stats=new LinkedHashMap<String,Object>(diskCache().stats());Path root=home.resolve("cache/previews");long bytes=0;if(Files.isDirectory(root))try(var files=Files.walk(root)){for(Path file:files.filter(Files::isRegularFile).toList())bytes+=Files.size(file);}stats.put("overviewTemporaryBytes",bytes);return stats;}
     public synchronized Map<String,Object> configureSceneCache(long megabytes,boolean clear)throws java.io.IOException{return diskCache().configure(megabytes,clear);}
 
-    /** Status/cancel deliberately do not acquire the render monitor held by the background build. */
+    /** 状态查询和取消不获取后台构建持有的渲染锁。 */
     public Map<String,Object> beginPreview(boolean force,boolean realLighting,boolean lightingEnabled) {
         cancelPreview();var job=new PreviewJob();previewJob=job;
         job.thread=Thread.ofPlatform().name("preview-"+job.id).daemon(true).unstarted(()->{
@@ -717,7 +696,7 @@ public final class RenderEngine implements AutoCloseable {
     private void discardPreview(PreviewJob job){Path path=job.directory;if(path==null)return;Path root=home.resolve("cache/previews").toAbsolutePath().normalize();path=path.toAbsolutePath().normalize();if(!root.equals(path.getParent())||!path.getFileName().toString().startsWith("preview-"))return;try{List<Path> paths;try(var walk=Files.walk(path)){paths=walk.sorted(java.util.Comparator.reverseOrder()).toList();}for(Path p:paths)if(!p.toRealPath().startsWith(root.toRealPath()))return;for(Path p:paths)Files.deleteIfExists(p);}catch(IOException ignored){}}
     private void prunePreviews(Path root)throws IOException{try(var files=Files.list(root)){for(Path directory:files.filter(p->p.getFileName().toString().startsWith("preview-")).toList())if(System.currentTimeMillis()-Files.getLastModifiedTime(directory).toMillis()>24L*60*60*1000){var expired=new PreviewJob();expired.directory=directory;discardPreview(expired);}}}
 
-    /** Axis-aligned bounds of every quad: minX, minY, minZ, maxX, maxY, maxZ. */
+
     private static float[] sceneBounds(SceneMesh mesh) {
         float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, minZ = Float.MAX_VALUE;
         float maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE, maxZ = -Float.MAX_VALUE;
@@ -737,9 +716,6 @@ public final class RenderEngine implements AutoCloseable {
     }
 
 
-    /**
-     * Renders one full camera revolution while advancing animated texture ticks.
-     */
     public synchronized Map<String, Object> renderAnimation(Path outGif, RenderSettings settings,
                                                             int ticks, int delayCs) throws Exception {
         return renderAnimation(outGif,settings,ticks,delayCs,(stage,completed,total)->{});

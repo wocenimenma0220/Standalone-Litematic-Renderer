@@ -1,8 +1,6 @@
 package io.github.litematicrender.world;
 
-/**
- * Vec3i replacement (pure data). Mirrors net.minecraft.core.Vec3i.
- */
+/** 与原版 Vec3i 对应的纯坐标数据。 */
 public record Vec3i(int x, int y, int z) {
     public static final Vec3i ZERO = new Vec3i(0, 0, 0);
 

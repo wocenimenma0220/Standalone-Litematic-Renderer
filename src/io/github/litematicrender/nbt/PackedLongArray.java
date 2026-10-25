@@ -10,11 +10,11 @@ import java.util.zip.DataFormatException;
 import java.util.zip.Deflater;
 import java.util.zip.Inflater;
 
-/** Immutable packed words: uniform pages cost one word; other pages stay compressed. */
+/** 不可变压缩页：均匀页仅保存一个值，其余页压缩存储。 */
 public final class PackedLongArray {
     public static final int PAGE_WORDS = 4096;
     private static final int PAGE_BYTES = PAGE_WORDS * Long.BYTES;
-    // Keys own only their page payload, never a schematic. Old schematics can be collected.
+    // 缓存键只引用页数据，不持有整个投影，避免旧投影无法回收。
     private static final class DecodedPages extends LinkedHashMap<Page,long[]> {
         Page lastPage;
         long[] lastWords;
@@ -63,7 +63,7 @@ public final class PackedLongArray {
     }
     public int length(){return length;}
     public long retainedBytes(){return retainedBytes;}
-    /** Copy only touched pages; edit history shares all other immutable page payloads. */
+    /** 仅复制改动页，编辑历史共享其余不可变页。 */
     public PackedLongArray withWords(java.util.Map<Integer,Long> changes){
         if(dense!=null)return paged(dense).withWords(changes);
         Page[] next=pages.clone();var grouped=new java.util.HashMap<Integer,long[]>();

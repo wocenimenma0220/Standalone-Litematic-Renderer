@@ -1,7 +1,7 @@
 @echo off
-rem Fetches the runtime dependencies the desktop shell needs (Electron).
-rem Only needed once, and only if you want to run from source; the packaged
-rem green zip already contains everything.
+rem 安装桌面界面依赖的 Electron 运行时。
+rem 源码运行时执行一次；便携包已经包含运行依赖。
+
 setlocal
 chcp 65001 >nul
 set "DIR=%~dp0"

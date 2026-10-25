@@ -6,7 +6,7 @@ import java.nio.file.*;
 import java.security.*;
 import java.util.*;
 
-/** Content identities, independent of mtimes, directory enumeration order and session objects. */
+/** 内容标识不依赖修改时间、目录顺序或会话对象。 */
 final class CacheFingerprint {
     private CacheFingerprint(){}
     static MessageDigest digest(){try{return MessageDigest.getInstance("SHA-256");}catch(NoSuchAlgorithmException e){throw new AssertionError(e);}}

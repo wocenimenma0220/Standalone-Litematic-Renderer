@@ -12,10 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-/**
- * Compound & list containers. Ported from malilib CompoundData/ListData (pure Java),
- * with OrDefault-style accessors for robust offline parsing.
- */
+/** 从 malilib 的 CompoundData/ListData 移植的容器，补充带默认值的访问方法以支持离线解析。 */
 public final class NbtCompound extends NbtElement {
     private final LinkedHashMap<String, NbtElement> values = new LinkedHashMap<>();
 
@@ -26,7 +23,7 @@ public final class NbtCompound extends NbtElement {
     @Override public int type() { return NbtTypes.TAG_COMPOUND; }
     @Override public NbtElement copy() { return new NbtCompound(this.values); }
 
-    // ---------- structure ----------
+
     public boolean contains(String key) { return this.values.containsKey(key); }
 
     public boolean contains(String key, int type) {
@@ -52,7 +49,7 @@ public final class NbtCompound extends NbtElement {
 
     public void combine(NbtCompound other) { this.values.putAll(other.values); }
 
-    // ---------- typed getters ----------
+
     public Optional<NbtCompound> getCompound(String key) {
         NbtElement el = this.values.get(key);
         return el instanceof NbtCompound c ? Optional.of(c) : Optional.empty();
@@ -78,7 +75,7 @@ public final class NbtCompound extends NbtElement {
         return el instanceof NbtScalars.NbtLongArray a ? Optional.of(a) : Optional.empty();
     }
 
-    // ---------- OrDefault accessors (numeric promotion like vanilla NBT) ----------
+    // 带默认值的访问方法沿用原版 NBT 数值提升规则。
     private Number numberOrNull(String key) {
         NbtElement el = this.values.get(key);
         if (el instanceof NbtScalars.NbtByte b) return b.value;
@@ -176,7 +173,7 @@ public final class NbtCompound extends NbtElement {
         return sb.append('}').toString();
     }
 
-    // Convenience write helpers (static-imported by schematic code)
+
     public NbtCompound putInt(String key, int v) { return this.put(key, new NbtScalars.NbtInt(v)); }
     public NbtCompound putLong(String key, long v) { return this.put(key, new NbtScalars.NbtLong(v)); }
     public NbtCompound putByte(String key, int v) { return this.put(key, new NbtScalars.NbtByte((byte) v)); }

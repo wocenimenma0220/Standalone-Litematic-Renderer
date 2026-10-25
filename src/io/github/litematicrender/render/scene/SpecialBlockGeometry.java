@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import static io.github.litematicrender.render.scene.EntityGeometry.*;
 
-/** Static block-entity snapshots. Textures are composed before the streaming atlas is frozen. */
+/** 静态方块实体外观必须在流式图集冻结前完成贴图合成。 */
 final class SpecialBlockGeometry {
     interface Blocks { BlockState at(int x,int y,int z); }
     private final EntityGeometry geometry;

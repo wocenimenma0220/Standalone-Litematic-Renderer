@@ -13,7 +13,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Public Minecraft skins, with immutable texture caching and an offline/local-file path. */
+/** 玩家皮肤支持不可变纹理缓存、离线读取和本地覆盖。 */
 public final class SkinResolver {
     public record Skin(String spriteId, Image image, boolean translucentOverlay) {}
     public record Request(String textureUrl, String uuid, String name) {
@@ -60,7 +60,7 @@ public final class SkinResolver {
         finally { Files.deleteIfExists(tmp); }
     }
 
-    /** Download distinct profiles in parallel, bounding the entire scene's network wait. */
+    /** 不同皮肤资料并行获取，但整个场景共享网络等待上限。 */
     public void prepare(List<NbtCompound> heads) {
         var pool = Executors.newFixedThreadPool(4, task -> {
             Thread t = new Thread(task, "minecraft-skin-loader"); t.setDaemon(true); return t;
@@ -75,7 +75,7 @@ public final class SkinResolver {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (ExecutionException | TimeoutException ignored) {
-            // Anything that does not finish within the scene budget uses Steve this frame.
+            // 超出场景等待预算的皮肤，本帧使用 Steve。
         } finally {
             requests.values().forEach(f -> { if (!f.isDone()) f.cancel(true); });
             pool.shutdownNow();
@@ -86,14 +86,14 @@ public final class SkinResolver {
         if (result == null || result.isCancelled() || result.isCompletedExceptionally()) return null;
         return result.getNow(null);
     }
-    /** Blocking form for verification and single-profile use. Failures always return Steve/null. */
+    /** 单资料阻塞查询供验证使用，失败时始终回退为 Steve 或空结果。 */
     public Skin load(NbtCompound head) { return loadSafely(readRequest(head)); }
     public Map<String, Object> summary() {
         int fallback = unidentified;
         for (var future : requests.values()) if (future.isCancelled() || future.isCompletedExceptionally() || future.getNow(null) == null) fallback++;
         return Map.of("online",online,"downloaded",downloads.get(),"cached",cacheHits.get(),"local",localHits.get(),"fallback",fallback);
     }
-    /** Identity of the resolved pixels actually used by this immutable scene snapshot. */
+    /** 缓存键记录实际使用的皮肤像素身份，属于不可变场景快照。 */
     public String contentFingerprint() {
         try {
             var hash=MessageDigest.getInstance("SHA-256");hash.update((byte)(online?1:0));hash.update(Integer.toString(unidentified).getBytes(StandardCharsets.US_ASCII));
@@ -117,7 +117,7 @@ public final class SkinResolver {
             Path file = cache.resolve("local").resolve(key + ".png");
             if (!Files.isRegularFile(file)) continue;
             try { byte[] bytes = readPng(file); Skin skin = skin(normalizeSkin(bytes), "local_" + digest(bytes)); localHits.incrementAndGet(); return skin; }
-            catch (Exception ignored) { /* a bad local override must not break other heads */ }
+            catch (Exception ignored) { /** 损坏的本地皮肤覆盖不能影响其他头颅。 */ }
         }
         String url = request.textureUrl();
         if (url == null) url = profileTexture(request);
@@ -128,7 +128,7 @@ public final class SkinResolver {
             Path png = cache.resolve("textures").resolve(hash + ".png");
             if (Files.isRegularFile(png)) {
                 try { Skin skin = skin(normalizeSkin(readPng(png)), hash); cacheHits.incrementAndGet(); return skin; }
-                catch (Exception ignored) { /* retry a corrupt texture when networking is enabled */ }
+                catch (Exception ignored) { /** 开启联网时允许重新下载损坏纹理。 */ }
             }
             if (!online) return null;
             byte[] bytes = fetcher.get(uri, IMAGE_LIMIT);
@@ -239,7 +239,7 @@ public final class SkinResolver {
         Image source = Image.read(png), image = new Image(64,64);
         if (source.width != width || source.height != height) throw new IOException("皮肤尺寸不匹配");
         for (int y=0;y<height;y++) for (int x=0;x<64;x++) image.setPixel(x,y,source.pixel(x,y));
-        // Vanilla's legacy-skin transparency repair, applied only to old 64x32 skins.
+
         if (height == 32) {
             boolean opaque = true;
             for (int y=0;y<32;y++) for (int x=32;x<64;x++) if (Image.alpha(image.pixel(x,y)) < 128) opaque=false;

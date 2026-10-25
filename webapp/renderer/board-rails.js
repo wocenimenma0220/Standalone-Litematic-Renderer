@@ -1,6 +1,5 @@
 'use strict';
-/* Direct planar port of Java 26.3 RailState, BaseRailBlock, RailBlock,
- * PoweredRailBlock (also activator rails) and DetectorRailBlock. */
+/** 将 Java 26.3 铁轨连接、充能、激活和探测轨规则映射到当前二维平面。 */
 (function(root){
   const B=typeof module!=='undefined'?require('./board-devices.js'):root.BoardTiming;
   const Support=typeof module!=='undefined'?require('./board-support.js'):root.BoardSupport;

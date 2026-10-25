@@ -1,0 +1,20 @@
+'use strict';
+const {chromium}=require('./browser-runtime.cjs'),assert=require('node:assert/strict'),path=require('node:path');
+(async()=>{const browser=await chromium.launch({headless:true,channel:process.env.PLAYWRIGHT_CHANNEL||'msedge',args:['--allow-file-access-from-files']});
+try{
+  const page=await browser.newPage(),loaded=[],errors=[];
+  page.on('request',r=>loaded.push(r.url()));page.on('pageerror',e=>{if(/board[-.]/.test(e.stack||''))errors.push(e.message);});
+  await page.goto('file:///'+path.resolve(__dirname,'../../webapp/renderer/index.html').replaceAll('\\','/'));
+  assert(!loaded.some(url=>url.endsWith('/board-physics-data.js')));assert(!loaded.some(url=>url.endsWith('/board-items/diamond.png')));
+  await page.locator('#menuBoard').click();await page.locator('#boardViewSide').click();assert(loaded.some(url=>url.endsWith('/board-physics-data.js')));
+  await page.locator('#boardTabs button').filter({hasText:'全部',exact:true}).click();await page.locator('#boardSearch').fill('stone');await page.locator('#boardPalette [data-block="stone"]').click();
+  const rect=await page.locator('#boardCanvas').boundingBox();await page.mouse.click(rect.x+rect.width/2,rect.y+rect.height/2);
+  await page.waitForFunction(()=>localStorage.getItem('litematic-board-v2-side'));
+  await page.evaluate(()=>{window.__snapshots=0;const original=BoardTiming.TimingWorld.prototype.snapshot;BoardTiming.TimingWorld.prototype.snapshot=function(){window.__snapshots++;return original.call(this);};const canvas=document.getElementById('boardCanvas');for(let i=0;i<100;i++)canvas.dispatchEvent(new WheelEvent('wheel',{clientX:200,clientY:200,deltaY:1,cancelable:true}));});
+  assert.equal(await page.evaluate(()=>window.__snapshots),0);
+  await page.locator('#boardClose').click();assert.equal(await page.evaluate(()=>window.__snapshots),0);
+  const count=loaded.filter(url=>url.endsWith('/board-physics-data.js')).length;
+  await page.locator('#menuBoard').click();await page.locator('#boardViewSide').click();assert.equal(loaded.filter(url=>url.endsWith('/board-physics-data.js')).length,count);
+  assert(await page.locator('#boardUndo').isDisabled());assert.deepEqual(errors,[]);
+  console.log('PASS UI: 二维首次打开才加载、连续缩放不复制时序、关闭即时保存及再次打开复用模块');
+}finally{await browser.close();}})().catch(error=>{console.error(error);process.exitCode=1;});

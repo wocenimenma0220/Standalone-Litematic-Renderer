@@ -6,7 +6,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.zip.*;
 
-/** Content-keyed base images and animation metadata; corrupt/missing caches rebuild normally. */
+/** 基础图片缓存按内容标识查找；缺失或损坏时正常重建。 */
 public final class ResourceImageCache {
     private ResourceImageCache(){}
     public record Images(Colormaps colors,SpriteAtlas atlas,boolean hit){}
@@ -30,7 +30,7 @@ public final class ResourceImageCache {
             var entry=zip.getNextEntry();if(entry==null||!entry.getName().equals("images")||entry.isDirectory())throw new IOException("Invalid resource cache entry");
             if(input.readInt()!=0x4c524931||!input.readUTF().equals(key))throw new IOException("Invalid resource cache version");
             var colors=Colormaps.readCache(input);var atlas=SpriteAtlas.readCache(input);
-            // EOF drains the entry and verifies ZIP CRC, including its final buffered bytes.
+            // 读取到流末尾以验证 ZIP CRC，包括最后一段缓冲字节。
             if(input.read()!=-1||zip.getNextEntry()!=null)throw new IOException("Unexpected resource cache data");
             return new Images(colors,atlas,true);
         }

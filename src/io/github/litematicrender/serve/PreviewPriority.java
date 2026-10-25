@@ -4,7 +4,7 @@ import io.github.litematicrender.render.scene.SectionVisibility;
 import io.github.litematicrender.util.MiniJson;
 import java.util.*;
 
-/** Immutable camera snapshot; reprioritizing pending work does not acquire the render monitor. */
+/** 不可变相机快照；重排待处理任务时不占用渲染锁。 */
 final class PreviewPriority {
     final double[] eye,planes;final boolean orbit;final int distance;
     PreviewPriority(Map<String,Object> values){

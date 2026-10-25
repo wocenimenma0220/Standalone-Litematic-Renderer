@@ -21,7 +21,7 @@ async function cacheValidator(home) {
   return {base,inside,validate};
 }
 
-/** Delete generated rendering data only, after the engine and scene reader have stopped. */
+/** 引擎和场景读取停止后，仅清理生成的渲染缓存。 */
 async function clearRenderingCache(home) {
   const {base,inside,validate}=await cacheValidator(home);
   for (const parts of [['cache','scenes'], ['cache','previews'], ['cache','resources'], ['renders','.gpu']]) {
@@ -38,7 +38,7 @@ async function clearRenderingCache(home) {
   }
 }
 
-/** Only the terminated preview's unfinished work; completed caches and export workers survive. */
+/** 只清理已终止预览进程的未完成任务，保留完成缓存和导出任务。 */
 async function clearInterruptedCache(home, pid, roots) {
   if(!Number.isSafeInteger(pid)||pid<=0||!roots)return;
   const {base,inside,validate}=await cacheValidator(home);

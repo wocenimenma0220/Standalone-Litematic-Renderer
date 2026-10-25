@@ -11,7 +11,7 @@ for(const view of ['side','top'])for(const id of ['piston','sticky_piston'])for(
   if(count===2){assert.equal(world.get(dx,dy).id,'piston_head');assert.equal(world.get(dx,dy).states.type,id==='sticky_piston'?'sticky':'normal');}
   const snapshot=world.snapshot();world.restore(snapshot);assert.deepEqual(world.snapshot(),snapshot,'save/load keeps both cells');
   const copy=new BoardWorld(catalog,view);copy.restore([['0,0',cell]]);assert.deepEqual(copy.snapshot(),snapshot,'old saves gain missing heads');
-  // Grab either the head or the base; move the entire assembly in one operation.
+
   assert(world.move({x:dx,y:dy},{x:dx+3,y:dy+2}));assert.equal(world.get(3,2).id,id);assert.equal(world.cells.size,count);
   assert(world.set(3,2,base(id,facing,'false')));assert.equal(world.cells.size,1,'retract removes head');
   assert(world.set(3,2,cell));assert(world.set(3+dx,2+dy,null));assert.equal(world.cells.size,0,'erase either half removes assembly');

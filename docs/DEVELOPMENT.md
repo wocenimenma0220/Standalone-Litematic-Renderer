@@ -1,123 +1,69 @@
-# 开发与命令行说明
+# 开发与验证
 
-[返回使用说明](../README.md)
+当前对外版本为 `1.2.0tetst-v2`，Electron 包版本为 `1.2.0-tetst-v2`。Java 引擎负责解析和渲染，Electron 界面通过逐行 UTF-8 JSON 调用引擎。
 
-## 从源码准备运行环境
+## 环境与启动
 
-日常使用请下载 [Release 便携版](https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases/latest)。源码仓库不包含 Java / Electron 运行时、完整原版资源和外观材质 ZIP。
+Windows 开发需要 PowerShell 7、JDK 21 或更新版本、Node.js。执行 `install.bat` 安装 Electron。打包另需 JDK 的 `jlink` 和 Windows 自带的 .NET Framework C# 编译器。
 
-在 Windows 上构建需要：
+完整渲染需要 `assets/vanilla` 和 `assets/builtin`，可从已有便携包复制资源目录。快速检查无需这些资源。
 
-- JDK 21 或更新版本，包含 `javac` 和打包所需的 `jlink`。
-- Node.js / npm，用于安装 Electron；已有 `tools/node` 时，安装脚本会优先使用它。
-- PowerShell 7（`pwsh`），用于执行下面的构建命令。
-- Windows 自带的 .NET Framework C# 编译器，用于编译启动器。
-- 完整的 `assets/vanilla` 与运行所需的 `assets/builtin` 资源。可从对应 Release 的便携包复制 `assets` 目录到项目根，保留相同结构。
+## 检查入口
 
-在项目根运行：
+在项目根目录运行：
 
 ```powershell
-.\install.bat
-pwsh -ExecutionPolicy Bypass -File .\verify.ps1 -JdkHome "C:\path\to\jdk" -Schematic "C:\path\to\example.litematic"
-pwsh -ExecutionPolicy Bypass -File .\package.ps1 -JdkHome "C:\path\to\jdk"
+# 编译引擎，并检查模型、时序、编辑、保存与导出队列
+./verify.ps1 -JdkHome 'C:/path/to/jdk'
+
+# 加上真实资源下的编辑、容器和活塞引擎回归
+./verify.ps1 -Profile Full -JdkHome 'C:/path/to/jdk'
+
+# 额外执行隐藏浏览器界面回归
+./verify.ps1 -Ui -JdkHome 'C:/path/to/jdk'
+
+# 额外从四个角度导出指定投影
+./verify.ps1 -Schematic 'C:/models/example.litematic' -JdkHome 'C:/path/to/jdk'
 ```
 
-`install.bat` 安装 Electron 依赖；`verify.ps1` 编译引擎，并从多个角度渲染指定投影进行检查。请显式传入自己的测试文件，避免自动选中工作区里最大的投影。
+界面回归依赖 Playwright。在 `tools/verify` 运行 `npm install`；默认使用本机 Edge。已有公共安装可通过 `PLAYWRIGHT_MODULE_PATH` 指定模块目录。
 
-`package.ps1` 编译 Java 引擎和启动器，准备精简 Java 运行时与 Electron，生成 `dist/投影预览/` 和 `dist/投影预览-<版本>.zip`，并打印校验值。常用开关包括 `-ReuseRuntime`、`-SkipElectron`、`-SkipRootLauncherCopy`、`-Version` 和 `-PackageName`。
+完整加载回归使用真实桌面应用，在运行完整引擎回归生成测试投影后执行 `./tools/verify/RunHiddenElectron.ps1 -Script tools/verify/direct-preview-ui.cjs`。可用 `LITEMATIC_DIRECT_SCHEMATIC` 指定其他投影，用 `LITEMATIC_TEST_HOME` 指定含资源的独立引擎目录；检查完整加载不调用分块生成、LOD 不影响加载方式，以及切换到相同加载方式时复用模型。
 
-构建后双击项目根的 `投影预览.exe`。单独构建启动器可运行 `tools/launcher/build-launcher.ps1`。
+验证产物位于 `tools/verify/verification-output`。完整引擎回归先复制资源，在独立目录中生成投影和编辑副本。无目录链接权限时，缓存测试明确跳过链接防护子项；设置 `LITEMATIC_RENDER_TEST_LINKS=1` 可要求该项必须成功。持续集成执行默认快速检查。
 
-## 命令行导出
-
-便携包的启动器支持不打开界面的 PNG 导出。在 PowerShell 中运行：
+## 打包
 
 ```powershell
-& ".\投影预览.exe" --cli "C:\models\example.litematic" "C:\renders\example.png" 1024 1024 45 30
+./package.ps1 -JdkHome 'C:/path/to/jdk'
 ```
 
-最后四个参数依次为宽、高、水平旋转和俯仰角，均可省略，默认 `1024 1024 45 30`。
+打包会编译引擎和启动器，准备 Java/Electron 运行时，并输出到 `dist`。参数见脚本开头。README 存在时随包复制，缺失时不会阻止打包。
 
-也可以在已编译的源码目录中直接调用引擎：
+发布前同步 `webapp/package.json`、锁文件、`package.ps1` 和 `tools/launcher/Launcher.cs` 的版本。发布工具读取[二维功能范围](二维微时序测试版说明.md)作为说明附件。
 
-```text
-java "-Dlitematicrender.home=." -cp bin io.github.litematicrender.Main --render "example.litematic" "out.png" 1024 1024 45 30
-java "-Dlitematicrender.home=." -cp bin io.github.litematicrender.Main --anim "example.litematic" "out.gif" 512 480
-java "-Dlitematicrender.home=." -cp bin io.github.litematicrender.Main --serve
-```
+## 代码入口
 
-`--anim` 默认输出 `animation.gif`，尺寸 512、480 帧、每帧 2 厘秒，即 50 FPS、9.6 秒一周。`--serve` 启动供桌面界面使用的行式 JSON-RPC 服务，协议实现见 `src/io/github/litematicrender/serve/JsonRpcServer.java`。
-
-底部输入行中的 `//select` 是桌面界面的交互指令，与这里的启动参数分开使用。
-
-## 设置与数据目录
-
-以下路径均相对于程序所在目录。
-
-| 路径 | 内容 |
+| 位置 | 职责 |
 | --- | --- |
-| `settings/ui.json` | 按键绑定、预览方式、光照、背景、面板、视距、缓存选项与欢迎弹窗设置 |
-| `settings/background.img` | 用户导入的背景图片 |
-| `renders/packs.json` | 导入材质包的路径与优先级 |
-| `settings/removed-builtins.json` | 取消自动加载的内置外观包 |
-| `skins/settings.json` | 皮肤联网开关 |
-| `skins/textures`、`skins/profiles`、`skins/local` | 皮肤贴图、资料缓存和本地覆盖 |
-| `cache/scenes`、`cache/previews`、`renders/.gpu` | 自动生成的场景与预览缓存 |
-| `logs/app.log`、`logs/launcher.log` | 应用与启动器日志 |
+| `src/.../serve/RenderEngine.java` | 资源、投影、场景缓存和编辑会话 |
+| `src/.../schematic/ProjectionEdits.java` | 保留 NBT 的修改、联动历史和原子写入 |
+| `webapp/main.js`、`preload.js` | 桌面窗口和受限界面接口 |
+| `webapp/renderer/renderer.js`、`gpu-view.js`、`lod-stream.js` | 预览、漫游和分块上传 |
+| `webapp/renderer/projection-edit.js` | 三维编辑交互 |
+| `webapp/renderer/board-loader.js` | 二维模块按需加载及失败重试 |
+| `webapp/renderer/board-session.js` | 二维延迟保存和历史容量限制 |
+| `board-fluids.js`、`board-explosions.js`、`board-tnt.js` | 二维流体、爆炸和 TNT；行为与边界见[实现说明](二维TNT与流体实现.md) |
+| `tools/verify` | 逻辑、引擎和界面回归 |
 
-旋转、俯仰、缩放、输出分辨率、漫游位置与当前选区不会在重启后恢复。导出位置由保存对话框指定。
+## 实现约束
 
-Java 堆上限默认根据机器总内存与启动时可用内存选择。可通过环境变量 `LITEMATIC_RENDER_HEAP_MB` 设置 512–32768 MB；它与界面中的预览几何缓存预算是不同的限制。
+- 拾取、邻居查询和提交修改属于同一操作；异步返回后核对编辑会话，切换文件前等待当前编辑收尾。
+- 三维局部预览超过 8192 个邻域单元时提交并重建基础模型。重建清理预览范围，保留历史；后台导出提交快照时保留当前画面依赖的范围。
+- 二维缩放和平移复用世界快照。世界变化使快照失效，关闭画布前即时保存。撤销与重做合计最多 60 条、32 MiB JSON 字符数据。
+- 分块传输保留场景归属、页校验、已发布长度、取消和内存预算，不增加无预算的模型页常驻副本。
+- 完整加载不生成分块模型。较大的完整模型仍分批传输以限制临时内存，这与分块生成、按视角补充细节不同；界面状态和日志需明确区分。
+- 加载阶段由引擎的实际步骤触发，通过 `previewProgress` 事件传递 `progressId`，界面只更新当前任务。缓存命中跳过光照和模型生成提示，关闭光照时不显示光照计算；显卡上传前让界面绘制一次，后台等待有时间上限。
+- 模型、光照和动画变化应检查实际画面。总览出现或无报错不能替代完整材质和近景验证。
 
-## 项目结构与验证
-
-| 目录 / 文件 | 作用 |
-| --- | --- |
-| `src/io/github/litematicrender/` | Java 引擎：NBT、投影、资源、模型、光照、渲染和 RPC |
-| `webapp/` | Electron 主进程、后台导出、设置与桌面界面 |
-| `webapp/renderer/` | GPU 预览、漫游、选择工具、按键和指令界面 |
-| `assets/` | 原版、模型、字体和材质资源 |
-| `tools/launcher/` | Windows 启动器源码与构建脚本 |
-| `tools/verify/` | 各功能的回归、界面验证和性能研究脚本 |
-| `bin/`、`runtime/`、`dist/` | 编译结果、Java 运行时和分发包，不纳入源码版本管理 |
-| `评估与测评/` | 更新记录、架构、调查和待办 |
-
-界面测试入口为 `tools/verify/RunHiddenElectron.ps1`，可通过 `-Script` 选择脚本。部分验证需要先生成对应投影夹具，具体依赖见脚本；验证产物留在忽略的输出目录中。
-
-大投影可用 `LargeOpenBenchmark.java` 分阶段测量。`-Dlitematicrender.mesh.workers=1` 强制串行，默认依据 CPU / 可用堆最多四个区块工作线程。`large-open-ui.cjs` 的参数依次为 `baseline` / `current`、输出标签和可选基线类目录；脚本使用独立设置与缓存。并行边界、字节一致性和取消测试见 `ParallelMeshRegression.java`，索引兼容及损坏检查见 `MeshIndexRegression.java`。
-
-`LITEMATIC_RENDER_TEST_HEAP_MB=7936` 可让 `large-open-ui.cjs` 覆盖大内存分支。测试必须验证生成期间近景、缓存近景和关闭 LOD 后存在真实材质的 LOD0 区块，不能仅凭远景总览、完整场景计数或无错误日志判定成功。大型分块光照的算法选择同时受固定工作量和内存预算约束，不能只在受限堆下测量。
-
-资源加载返回 `timings` 与 `imageCacheHit`。`-Dlitematicrender.resources.cache=false` 禁用基础图片缓存；`-Dlitematicrender.resources.cache.directory=...` 可指定软件目录内的隔离缓存，`ResourceImageCacheRegression.java` 覆盖完整动画像素和资源失效。缓存格式或读取语义变化时更新 `resource-images-v1`，引擎内容变化也会使缓存失效。保留退出清理开关的原有语义。
-
-`warm-open-ui.cjs` 在真实界面按逐页 / 批次 / 逐页 / 批次交错测试，比较像素及近景几何；`batch-transfer-regression.cjs` 覆盖 CRC、归属、关闭与受损未来页隔离。批次最多 128 页 / 2 MiB，CPU 页数据只在正在执行的上传期间暂存，不能扩展为无预算的常驻缓存。`window.__resourcesReady` 用于启动时资源初始化与打开投影的先后顺序。
-
-发布前同步 `package.ps1`、`webapp/package.json`、`webapp/package-lock.json`、`tools/launcher/Launcher.cs` 中的版本，并更新 README 和更新记录。文档修改不需要重编译程序或改写已发布的版本标签。
-
-当前测试版对外名称为 `1.2.0test-v1`；npm/Electron包的语义版本为 `1.2.0-test-v1`，`displayVersion`、窗口标题和启动器ProductVersion保持对外名称，Windows数值文件版本为 `1.2.0.0`。
-
-渲染和大投影技术细节见 [LOD_STREAMING.md](../评估与测评/LOD_STREAMING.md)、[RESEARCH_NOTES.md](../评估与测评/RESEARCH_NOTES.md) 和 [综合评估](../评估与测评/投影渲染与区块缓存综合评估.md)。
-
-## 更改投影模式（1.1.4）
-
-`projection-edit.js` 在主 GPU 视图中复用工具箱外观，`projection-edit-model.js` 处理调试棒的属性记忆和正反循环。`debug-stick-properties.js` 从本地原版 `StateDefinition` 属性与枚举声明生成；更新客户端版本时运行 `tools/generate-debug-stick-properties.py`，无需重建二维图集。
-
-`editPick` 返回体素、进入面法向及保存的完整状态，可按当前部分渲染范围跳过外围。`editBlock` 在 `renders/.edit/current.litematic` 中维护工作副本，使用 `ProjectionEdits` 的 NBT 路径复制和不可变方块页保存最多 40 步历史；新增调色板状态跨越位宽时重新编码该区域。原来的非编辑 NBT 数据保持原样，同类型状态修改保留方块实体，更换类型或删除清理该位置的数据。导出写入作者 LiteKinda。模型更新后复用 `buildView({preserveCamera:true})` 重建完整 / 分块模型和独立选区；编辑期间不并行提交其他编辑。
-
-新增回归：`ProjectionEditRegression.java`（编译到 `tools/verify/projection-edit-output`）、`projection-edit-model.cjs`、`projection-edit-ui.cjs`。界面检查使用现有 `RunHiddenElectron.ps1`，覆盖 G 与自定义快捷键、普通视角 / 漫游、部分渲染、调试棒、历史、原文件不变与导出重开；截图保存在 `tools/verify/projection-edit-output/editor-ui.png`。
-
-### 编辑预览与容器
-
-`editBlock` 只修改内存 NBT 并重新物化调色板，`editPatch` 通过 `SceneBuilder.buildEditing` 烘焙被编辑单元的 3³ 邻域，不执行 `prepareStreaming`、全投影光照或区块枚举。GPU 用稀疏位置纹理屏蔽基础模型中的旧单元，并叠加完整 / 选区的局部模型。局部照明沿用基础场景。`commitEdits` 仅在脏状态写入工作副本；退出更改模式后调用一次原有模型构建。显式重新渲染、切换文件及导出图片前也先提交；正常退出保存副本。
-
-`BlockInspector.container.slotItems` 提供不跨槽合并的物品与原始数量，保留 `items` 的旧聚合结果供兼容调用。容器 UI 只使用 `slotItems` 与 `slots`，物品数据不再截断。大箱右半槽位在 0–26，左半在 27–53。新放置的容器带保存为空的物品列表；同类型状态变化保留原有 NBT。
-
-检查入口：`PlacementInventoryRegression.java`、`placement-inventory-model.cjs`、`placement-inventory-ui.cjs`；最后一个使用 `RunHiddenElectron.ps1`，输出在 `tools/verify/placement-inventory-output`，包含槽位截图与一次退出重建的计数。
-
-### 编辑背包与快捷栏
-
-`editor-inventory.js` 管理固定单页的 36 槽（27＋9），schema v2 以空槽初始化并保存个人物品数组；旧自动填充目录页不迁移。`projection-edit.js` 为工具栏和已占用槽位启用 HTML 拖放，工具栏复制、背包内部交换，验证来源类型与当前槽位内容，取消不会删除源物品。槽位可右键清空，点击交换 / 点选 / 吸取沿用统一入口。键盘和滚轮通过现有按键配置分发，保留数字键和调试棒，删除旧背包分页操作；Alt＋滚轮缩放。背包经显式 IPC 存入 `UiSettings`，与投影数据分开。空槽不放置方块；异步拾取开始时固定本次物品与工具。
-
-### 漫游物品栏与版本
-
-`projectionFlyHotbar` 是预览内的 9＋1 格透明浮层，复用同一个背包模型和快捷键分发；背包 DOM 将快捷栏置于第一行，内部 schema v2 的物品索引保持兼容。`updateFlyMouseHint()` 在鼠标锁定 / 释放时调用编辑器的 `refreshVisibility()`，活动漫游或正在锁定时隐藏完整工具箱并显示浮层，暂停后恢复；查看容器、指令和弹窗沿用原有暂停入口。浮层按钮阻止指针事件传入三维编辑，避免选物品时误放置。应用、启动器、打包脚本统一使用 1.1.4，后续版本为 1.1.x。
+设置位于 `settings`，缓存位于 `cache` 和 `renders/.gpu`，编辑副本位于 `renders/.edit`，日志位于 `logs`。这些目录不纳入源码管理。

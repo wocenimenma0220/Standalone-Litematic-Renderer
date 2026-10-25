@@ -1,6 +1,5 @@
 'use strict';
-/* Planar port of 26.3 PistonBaseBlock/PistonStructureResolver and b36 tick.
- * Only blocks in the selected 2D plane move; board-entities supplies entity displacement. */
+/** 活塞按 26.3 底座、结构解析和移动方块刻逻辑执行，仅移动当前平面内方块。 */
 (function(root){
   const B=typeof module!=='undefined'?require('./board-physics.js'):root.BoardTiming;
   const {TimingWorld,DIR,OPP,NC}=B,P=TimingWorld.prototype,key=p=>p.join(','),copy=x=>JSON.parse(JSON.stringify(x));
@@ -48,7 +47,7 @@
   };
   P.completeMoving=function(p,instant=false){this.ensurePistons();const m=this.moving.get(key(p));if(!m)return;this.moving.delete(key(p));this.tickers=this.tickers.filter(t=>t.token!==m.token);if(this.get(p)?.id!=='moving_piston')return;
     let cell=instant&&m.source?null:copy(m.movedState);if(!instant&&cell?.states.waterlogged==='true')cell.states.waterlogged='false';
-    // updateFromNeighbourShapes calls the moved observer's updateShape before placement.
+    // 原版放置前的邻居形状更新会先调用移动侦测器的 updateShape。
     if(cell?.id==='observer'&&cell.states.powered!=='true')this.schedule(p,'observer',2);
     this.record(instant?'移动方块强制到位':'移动方块到位',{pos:p,cell,direction:m.direction});this.push([{kind:'set',pos:p,cell,flags:instant?3:67},{kind:'NC',pos:p,source:p}]);
   };

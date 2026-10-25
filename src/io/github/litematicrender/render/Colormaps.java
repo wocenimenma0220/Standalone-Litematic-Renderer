@@ -4,17 +4,15 @@ import io.github.litematicrender.resource.ResourceManager;
 
 import java.util.Optional;
 
-/**
- * Grass/foliage colormap loader + sampler (GrassColor/FoliageColor/ColorMapColorUtil equivalent).
- */
+/** 草和树叶色图的加载与采样，对应原版颜色工具的数据逻辑。 */
 public final class Colormaps {
     private int[] grass = new int[256 * 256];
     private int[] foliage = new int[256 * 256];
     private int[] dryFoliage = new int[256 * 256];
 
-    public static final int GRASS_DEFAULT = 0x947050 & 0xFFFFFF; // plains default fallback
+    public static final int GRASS_DEFAULT = 0x947050 & 0xFFFFFF;
     public static final int FOLIAGE_DEFAULT = 0x48B518;
-    /** Vanilla {@code BiomeColors} plains water colour, from {@code plains.json}. */
+
     public static final int WATER_DEFAULT = 0x3F76E4;
 
     public void load(ResourceManager resources) {
@@ -48,7 +46,7 @@ public final class Colormaps {
         }
     }
 
-    /** ColorMapColorUtil.get: u = (1-temp), v = (1-downfall*temp); biome colors are sampled. */
+    /** 按温度和降雨量映射色图坐标。 */
     private static int get(double temp, double rain, int[] map, int def) {
         int i = (int) ((1.0 - temp) * 255.0);
         int j = (int) ((1.0 - rain * temp) * 255.0);
@@ -56,7 +54,7 @@ public final class Colormaps {
         return k >= map.length ? def : map[k];
     }
 
-    /** Plains-like biome (temp 0.8, rain 0.4). */
+    /** 使用接近平原的温度 0.8、降雨量 0.4。 */
     public int grassColor() {
         return get(0.8, 0.4, this.grass, 0x91BD59);
     }

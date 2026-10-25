@@ -5,7 +5,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Reopens a completed mesh without rebuilding light, generated sprites or section geometry. */
+/** 从已完成的索引恢复场景，不重新生成光照、贴图或区段几何。 */
 public final class StreamMeshIndex {
     private StreamMeshIndex(){}
     private static void require(boolean valid)throws IOException{if(!valid)throw new IOException("场景缓存索引损坏");}
@@ -16,7 +16,7 @@ public final class StreamMeshIndex {
             require(count>=0&&count<=200000&&length>=4&&length<=128*1024*1024&&catalog>=64&&catalog<=size-length&&catalog+length==size&&quads>=0);
             float[] bounds=new float[6];for(int i=0;i<6;i++)bounds[i]=file.readFloat();bounds(bounds);
             file.seek(catalog);
-            // available() is exact for this bounded source, including buffered but unread bytes.
+            // 此有界输入源的 available 包含已缓冲但尚未消费的字节。
             var source=new InputStream(){
                 int remaining=length;
                 @Override public int available(){return remaining;}

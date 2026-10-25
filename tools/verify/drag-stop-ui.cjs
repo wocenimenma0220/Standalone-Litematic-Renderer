@@ -1,5 +1,5 @@
 'use strict';
-// Exercise real main/preload/renderer IPC, native file drops and actual Java process interruption.
+// 检查真实主进程、预加载、文件拖入和 Java 进程中断。
 const {app,BrowserWindow}=require('electron');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'../..'),out=path.join(__dirname,'drag-stop-output');
@@ -49,7 +49,7 @@ app.once('browser-window-created',(_event,win)=>{
     };
     try{
       win.webContents.debugger.attach('1.3');
-      // Native Chromium File objects must cross contextBridge and resolve through Electron webUtils.
+
       await nativeDrag([small]);
       const hint=await evaluate('({hidden:els.fileDropHint.classList.contains("hidden"),rect:els.fileDropHint.getBoundingClientRect().toJSON(),radius:getComputedStyle(els.fileDropHint).borderRadius})');
       assert.equal(hint.hidden,false);assert.ok(hint.rect.left<30&&hint.rect.top<70);assert.equal(hint.radius,'16px');
@@ -61,7 +61,7 @@ app.once('browser-window-created',(_event,win)=>{
       await drop([small]);await ready();
       assert.equal(path.resolve((await viewState()).file),path.resolve(small));
       assert.ok(await evaluate('state.view.quadCount>0&&state.view.gl.getError()===0'));
-      // Repeat after readiness to capture the drop card over the user's actual schematic.
+
       await nativeDrag([small]);await wait(180);
       assert.equal(await evaluate('els.fileDropHint.classList.contains("hidden")'),false,'drop card disappeared during drag');
       fs.writeFileSync(path.join(out,'drop-hint.png'),(await win.webContents.capturePage()).toPNG());
@@ -69,11 +69,11 @@ app.once('browser-window-created',(_event,win)=>{
       await evaluate('window.dispatchEvent(new DragEvent("dragend"))');
       report.checks.push('native .litematic drop, startup readiness, rounded top-left card and drag exit');
       const generation=await evaluate('fileOpenGeneration');
-      await drop([path.join(root,'README.md')]);await drop([small,large]);
+      await drop([path.join(root,'webapp/package.json')]);await drop([small,large]);
       assert.equal(await evaluate('fileOpenGeneration'),generation,'invalid drop interrupted preview');
       report.checks.push('invalid and multiple files leave the preview running');
 
-      // Start an independent background export before killing only the preview engine.
+
       const exportPath=path.join(out,'uninterrupted.png');
       const job=await evaluate(`window.exportsApi.start('png',{...renderParams(96,96),out:${JSON.stringify(exportPath)}})`);
       report.manualStopMillis=await stop();
@@ -82,7 +82,7 @@ app.once('browser-window-created',(_event,win)=>{
       assert.ok(fs.statSync(exportPath).size>100);
       report.checks.push('manual stop kills Java, rerender restores resources, background PNG completes');
 
-      // Stop a synchronous full-mesh RPC: a queued Java cancel cannot pass this case.
+      // 同步网格 RPC 不能依赖排队的取消请求，必须能够在协议外终止。
       let at=calls.length;
       await evaluate(`state.projectionMode='full';window.replacing=loadFile(${JSON.stringify(large)});void 0`);
       await until(()=>calls.slice(at).some(c=>c.method==='exportScene'&&!c.done),'blocked full mesh',60000);
@@ -90,7 +90,7 @@ app.once('browser-window-created',(_event,win)=>{
       await wait(150);assert.equal((await viewState()).stopped,true,'late full mesh revived stopped UI');
       report.checks.push('blocked synchronous full-mesh generation really stops');
 
-      // CPU rendering uses a different queue and must not publish its old image after cancellation.
+      // CPU 预览取消后不得发布旧图片。
       at=calls.length;
       await evaluate('state.previewBackend="cpu";els.previewBackend.value="cpu";window.cpuLoading=rebuildPreview();void 0');
       await until(()=>calls.slice(at).some(c=>c.method==='renderPreview'&&!c.done),'blocked CPU preview',60000);
@@ -98,7 +98,7 @@ app.once('browser-window-created',(_event,win)=>{
       await wait(150);assert.equal((await viewState()).cpu,false,'old CPU image was restored');
       report.checks.push('CPU render is interrupted without publishing a stale image');
 
-      // A new native drop must stop the asynchronous progressive lighting/mesh worker as well.
+
       await evaluate('state.previewBackend="gpu";els.previewBackend.value="gpu";state.projectionMode="streaming";window.progressiveLoading=rebuildPreview();void 0');
       await until(async()=>evaluate('state.scenePreparing'),'progressive preparation',60000);
       const previewClient=clients.findLast(client=>client.proc&&client.isRunning()&&!client.stopping);
@@ -119,7 +119,7 @@ app.once('browser-window-created',(_event,win)=>{
       assert.equal(path.resolve((await viewState()).file),path.resolve(small));
       report.checks.push('native replacement interrupts progressive preparation and removes only its unfinished files');
 
-      // Two rapid replacements, including one during engine recovery: last file wins.
+      // 连续替换文件时，包括引擎恢复期间，始终以最后一个文件为准。
       await evaluate('els.viewport.requestPointerLock=()=>Promise.reject(Error("hidden test"));setFly(true)');
       await drop([large]);await drop([small]);await ready();
       assert.equal(path.resolve((await viewState()).file),path.resolve(small));

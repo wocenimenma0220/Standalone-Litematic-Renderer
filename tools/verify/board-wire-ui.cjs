@@ -1,5 +1,5 @@
 'use strict';
-const {chromium}=require('C:/Users/roy/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const {chromium}=require('./browser-runtime.cjs');
 const path=require('node:path'),fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{const browser=await chromium.launch({headless:true,channel:'msedge',args:['--allow-file-access-from-files']});try{
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],out=path.resolve(__dirname,'board-wire-output');fs.mkdirSync(out,{recursive:true});page.on('pageerror',e=>{if(/board[^/]*\.js/.test(e.stack||''))errors.push(e.message);});
@@ -9,7 +9,7 @@ const path=require('node:path'),fs=require('node:fs'),assert=require('node:asser
   const choose=async id=>{await page.locator('#boardTabs button').filter({hasText:'全部',exact:true}).click();await page.locator('#boardSearch').fill(id);await page.locator(`#boardPalette [data-block="${id}"]`).click();};
   const click=async(x,y,options={})=>{await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));const data=await save(),r=await page.locator('#boardCanvas').boundingBox();await page.mouse.click(r.x+data.pan.x+(x+.5)*data.zoom,r.y+data.pan.y+(y+.5)*data.zoom,options);};
   const get=(data,k)=>new Map(data.timing.cells).get(k);
-  // Every fresh board stays at 0gt with no panel intercepting canvas clicks.
+
   for(const view of ['side','top']){
     await page.locator('#menuBoard').click();await page.locator(view==='side'?'#boardViewSide':'#boardViewTop').click();assert.equal(await page.locator('#boardPause').getAttribute('aria-pressed'),'true');assert(await page.locator('#boardTimingBar').isHidden());assert(await page.locator('#boardTimingPanel').isHidden());assert.equal((await save()).timing.time,0);
     await load(view,[]);await choose('observer');for(const [i,d]of ['east','west','north','south','up','down'].entries()){await page.getByRole('button',{name:'facing='+d,exact:true}).click();await click(i,0);assert.equal(get(await save(),view==='top'?`${i},0,0`:`${i},0,0`).states.facing,d);}
@@ -19,7 +19,7 @@ const path=require('node:path'),fs=require('node:fs'),assert=require('node:asser
   await click(0,0,{button:'right'});data=await save();assert(['north','south','east','west'].every(d=>get(data,'0,0,0').states[d]==='none'));await click(0,0,{button:'right'});data=await save();assert(['north','south','east','west'].every(d=>get(data,'0,0,0').states[d]==='side'));
   for(let x=1;x<6;x++)await click(x,0);await choose('redstone_lamp');await click(6,0);await choose('redstone_block');await click(-1,0);data=await save();for(let x=0;x<6;x++)assert.equal(get(data,`${x},0,0`).states.power,String(15-x));assert.equal(get(data,'6,0,0').states.lit,'true');assert.equal(data.timing.time,0,'immediate NC power does not advance scheduled ticks');await page.screenshot({path:path.join(out,'top-wire.png')});
   await page.locator('#boardEraser').click();await click(-1,0);data=await save();for(let x=0;x<6;x++)assert.equal(get(data,`${x},0,0`).states.power,'0');assert.equal(get(data,'6,0,0').states.lit,'true');await page.locator('#boardTimingToggle').click();for(let i=0;i<4;i++)await page.locator('#boardTickStep').click();assert.equal(get(await save(),'6,0,0').states.lit,'false');
-  // Fresh crafter: normal left clicks toggle empty slots without modifiers.
+
   await load('top',[['0,0',{id:'crafter'}],['1,0',{id:'comparator',states:{facing:'west',mode:'compare',powered:'false'}}]]);await click(0,0,{button:'right'});const slot=i=>page.locator(`#boardContainerSlots [data-slot-index="${i}"]`);assert.equal(await slot(0).getAttribute('aria-pressed'),'false');await slot(0).click();assert.equal(await slot(0).getAttribute('aria-pressed'),'true');data=await save();let c=new Map(data.timing.components.containers).get('0,0,0');assert.deepEqual(c.disabled,[0]);assert.equal(c.slots[0],null);assert.match(await page.locator('#boardContainerInfo').innerText(),/信号 1/);
   await slot(0).click();assert.equal(await slot(0).getAttribute('aria-pressed'),'false');await slot(0).click();assert.equal(await slot(0).getAttribute('aria-pressed'),'true');await page.keyboard.press('Control+z');assert.equal(await slot(0).getAttribute('aria-pressed'),'false');await page.keyboard.press('Control+Shift+z');assert.equal(await slot(0).getAttribute('aria-pressed'),'true');
   await page.locator('#boardContainerSearch').fill('stone');await page.locator('#boardContainerPalette [data-block="stone"]').click();await slot(0).click();data=await save();c=new Map(data.timing.components.containers).get('0,0,0');assert.equal(c.slots[0].count,64);assert(!c.disabled.includes(0),'holding an item unlocks the target before placing');

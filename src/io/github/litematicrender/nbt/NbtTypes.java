@@ -1,9 +1,6 @@
 package io.github.litematicrender.nbt;
 
-/**
- * NBT tag type constants (vanilla-compatible), plus shared helpers.
- * Ported from fi.dy.masa.malilib.util.data.Constants (pure Java, no MC deps).
- */
+/** 与原版兼容的 NBT 类型常量，源自 malilib Constants，无 Minecraft 运行时依赖。 */
 public final class NbtTypes {
     public static final int TAG_END = 0;
     public static final int TAG_BYTE = 1;
@@ -18,7 +15,7 @@ public final class NbtTypes {
     public static final int TAG_COMPOUND = 10;
     public static final int TAG_INT_ARRAY = 11;
     public static final int TAG_LONG_ARRAY = 12;
-    /** pseudo-type for any numeric tag */
+    /** 匹配任意数值标签的内部类型标记。 */
     public static final int TAG_ANY_NUMERIC = 99;
 
     private NbtTypes() {}

@@ -6,7 +6,7 @@ import io.github.litematicrender.schematic.LitematicaSchematic;
 import io.github.litematicrender.world.BlockState;
 import java.util.*;
 
-/** Sparse color occupancy aligned to ownership sections for atomic detail replacement. */
+/** 稀疏纯色总览按归属区段对齐，便于完整细节原子替换。 */
 public final class OverviewMesh implements StreamMeshExporter.Source {
     private static final int[][] DIRECTIONS={{0,-1,0},{0,1,0},{0,0,-1},{0,0,1},{-1,0,0},{1,0,0}};
     private static final int[][][] CORNERS={{{0,0,1},{0,0,0},{1,0,0},{1,0,1}},{{0,1,0},{0,1,1},{1,1,1},{1,1,0}},{{1,1,0},{1,0,0},{0,0,0},{0,1,0}},{{0,1,1},{0,0,1},{1,0,1},{1,1,1}},{{0,1,0},{0,0,0},{0,0,1},{0,1,1}},{{1,1,1},{1,0,1},{1,0,0},{1,1,0}}};

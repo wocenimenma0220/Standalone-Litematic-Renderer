@@ -5,14 +5,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Immutable block state: block id + per-property value indices.
- * Mirrors the semantics of net.minecraft.world.level.block.state.BlockState but is a pure data object.
- */
+/** 不可变方块状态：方块标识及各属性值索引，遵循原版状态语义。 */
 public final class BlockState {
-    public final String blockId;                       // "minecraft:oak_planks"
-    public final BlockProperty[] properties;           // parallel to propertyValues
-    public final int[] propertyValues;                 // index into each BlockProperty
+    public final String blockId;
+    public final BlockProperty[] properties;
+    public final int[] propertyValues;
 
     private static final BlockState AIR = new BlockState("minecraft:air", new BlockProperty[0], new int[0]);
 
@@ -30,7 +27,7 @@ public final class BlockState {
             || this.blockId.equals("minecraft:void_air");
     }
 
-    /** Returns value string of a property, or null if the state doesn't have it. */
+
     public String getValue(String propertyName) {
         for (int i = 0; i < this.properties.length; i++) {
             if (this.properties[i].name().equals(propertyName)) {
@@ -40,7 +37,7 @@ public final class BlockState {
         return null;
     }
 
-    /** Returns a new state with one property replaced; throws if unknown property/value. */
+    /** 替换单个属性得到新状态；未知属性或值抛出异常。 */
     public BlockState with(String propertyName, String value) {
         for (int i = 0; i < this.properties.length; i++) {
             if (this.properties[i].name().equals(propertyName)) {
@@ -54,7 +51,7 @@ public final class BlockState {
         throw new IllegalArgumentException("Unknown property " + propertyName + " on " + this.blockId);
     }
 
-    /** Like {@link #with} but silently ignores unknown property/value (used by data-driven rotation code). */
+    /** 宽松替换忽略未知属性和值，供数据驱动的方向修正使用。 */
     public BlockState tryWith(String propertyName, String value) {
         try {
             return this.with(propertyName, value);
@@ -63,7 +60,7 @@ public final class BlockState {
         }
     }
 
-    /** "[facing=north,lit=true]" part, without the block id. */
+
     public String propertyString() {
         if (this.properties.length == 0) return "";
         StringBuilder sb = new StringBuilder("[");

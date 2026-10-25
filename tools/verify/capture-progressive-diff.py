@@ -1,4 +1,4 @@
-"""Use Git to review this change independently of the pre-existing dirty working tree."""
+"""使用 Git 独立检查本轮修改，避免与已有工作区修改混淆。"""
 from pathlib import Path
 import re
 import subprocess

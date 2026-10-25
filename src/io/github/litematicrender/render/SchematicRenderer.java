@@ -12,19 +12,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/**
- * Schematic → Image pipeline: scene build + camera fit + rasterize.
- */
+/** 投影渲染流程：构建场景、适配相机、光栅化输出。 */
 public final class SchematicRenderer {
     private SchematicRenderer() {}
 
-    /**
-     * Renders a scene that has already been built.
-     *
-     * <p>Building is camera-independent, so dragging should call this with a cached mesh: quickcraft
-     * does the same by keeping static geometry resident and only changing the model-view matrix per
-     * frame (its {@code drawMesh} fits drags without touching the mesh).
-     */
+    /** 相机变化复用已经构建的场景，避免重复遍历方块和计算光照。 */
     public static Image render(LitematicaSchematic schematic, SceneMesh mesh,
                                Colormaps colormaps, SpriteAtlas atlas, RenderSettings settings) {
         Camera cam = new Camera();
@@ -65,17 +57,7 @@ public final class SchematicRenderer {
         return builder.build();
     }
 
-    /**
-     * Scales a preview down while the user is dragging, so feedback keeps up with the cursor.
-     *
-     * <p>quickcraft gets a responsive drag by keeping geometry resident on the GPU and changing
-     * only the model-view matrix — its {@code drawMesh} fits drags without ever rebuilding. With a
-     * CPU rasteriser the cheapest equivalent knob is pixel count, because rasterize cost is
-     * dominated by fill: a half-size render is roughly four times cheaper. The full-resolution
-     * render replaces it once the drag stops.
-     *
-     * @param maxEdge longest edge allowed while interacting; {@code <= 0} means full size
-     */
+    /** 拖动过程中降低预览分辨率，使交互能够及时反馈。 */
     public static RenderSettings interactiveScale(RenderSettings settings, int maxEdge) {
         if (maxEdge <= 0) return settings;
         int edge = Math.max(settings.width, settings.height);
@@ -99,11 +81,11 @@ public final class SchematicRenderer {
         return s;
     }
 
-    /** Renders with an already fitted camera, without changing its center, scale or offsets. */
+    /** 使用已适配的相机渲染，不改变中心、缩放或偏移。 */
     public static Image renderWithCamera(SceneMesh mesh, SpriteAtlas atlas,
                                          RenderSettings settings, Camera cam) {
-        // Animated textures (water, lava, fire, portal, …) live in the atlas, so pick the frame for
-        // the requested tick before rasterizing. Geometry and UVs are unaffected — only pixels move.
+        // 动态纹理只更新图集像素，网格和 UV 保持不变。
+
         atlas.rebakeAtTick(settings.animationTick);
 
         Rasterizer raster = new Rasterizer(settings.width, settings.height, cam, atlas);
@@ -111,8 +93,8 @@ public final class SchematicRenderer {
         RenderBackground.fill(raster.color, settings);
         raster.selectionMin=settings.selectionMin;raster.selectionMax=settings.selectionMax;raster.selectionPass=settings.selectionMin==null?0:1;
 
-        // Opaque passes first (depth-tested, order independent). Cutout writes depth for its opaque
-        // texels, which is what hides translucent geometry behind a solid wall.
+        // 先绘制写入深度的不透明和裁剪层，正确遮挡后方半透明几何。
+
         SceneMesh foreground=settings.selectionMesh!=null?settings.selectionMesh:mesh;
         for (SceneMesh.MeshQuad q : foreground.solid) draw(raster, q, settings, false);
         for (SceneMesh.MeshQuad q : foreground.cutout) draw(raster, q, settings, false);
@@ -120,7 +102,7 @@ public final class SchematicRenderer {
         for(SceneMesh.MeshQuad q:foreground.waterMask)draw(raster,q,settings,false);
         raster.writeColor=true;
 
-        // Sort all blending materials together; fixed material passes reverse the order at some angles.
+        // 玻璃、水和传送门统一按深度排序，避免固定材质顺序造成穿插。
         if(foreground.translucentBsp!=null) {
             double[] origin=new double[3],point=new double[3],towardEye=new double[3];cam.toView(0,0,0,origin);
             for(int axis=0;axis<3;axis++){cam.toView(axis==0?1:0,axis==1?1:0,axis==2?1:0,point);towardEye[axis]=point[2]-origin[2];}
@@ -140,13 +122,7 @@ public final class SchematicRenderer {
         return raster.color;
     }
 
-    /**
-     * Sorts one translucent bucket back-to-front and rasterizes it.
-     *
-     * <p>The list arrives pre-subdivided from {@link SceneBuilder}, so this only reorders it — the
-     * sort is the one part genuinely tied to the camera. A copy is taken because sorting the cached
-     * list in place is fine but the comparator reads the camera, and concurrent frames would race.
-     */
+    /** 半透明面已在构建时细分，这里只按相机重排副本，防止污染缓存场景。 */
     private static void drawSorted(Rasterizer raster, List<SceneMesh.MeshQuad> quads,
                                    Camera cam, RenderSettings settings) {
         if (quads.isEmpty()) return;
@@ -164,7 +140,7 @@ public final class SchematicRenderer {
             q.shade * s.ambientShadeScale, q.ao, translucent, q.doubleSided, colors);
     }
 
-    /** Fits every yaw at once, so a full orbit has one fixed center and orthographic scale. */
+    /** 一次适配整周旋转，保持相机中心和正交缩放固定。 */
     public static Camera fitRotationCamera(SceneMesh mesh, RenderSettings settings) {
         Camera cam = new Camera();
         cam.rotationDeg = settings.rotationDeg;
@@ -212,7 +188,7 @@ public final class SchematicRenderer {
         return minXw == Double.MAX_VALUE ? null : new double[]{minXw, minYw, minZw, maxXw, maxYw, maxZw};
     }
 
-    /** Positions the camera so the mesh bounding box fits the viewport. */
+    /** 按模型真实包围盒适配视口。 */
     public static void fitCameraToMesh(Camera cam, SceneMesh mesh, int width, int height) {
         double[] bounds = meshBounds(mesh);
         if (bounds == null) {

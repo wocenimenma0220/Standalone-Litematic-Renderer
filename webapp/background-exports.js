@@ -2,7 +2,7 @@
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),{randomUUID}=require('node:crypto');
 const {EngineClient}=require('./engine-client');
 
-/** One isolated worker at a time; previews keep their own engine and open schematic. */
+/** 后台导出每次只运行一个独立引擎，预览继续使用自己的引擎和投影。 */
 class BackgroundExports {
   constructor({home,runtime,onUpdate=()=>{},Client=EngineClient}){
     this.home=home;this.runtime=runtime;this.onUpdate=onUpdate;this.Client=Client;this.jobs=[];this.running=null;this.closed=false;
@@ -22,7 +22,7 @@ class BackgroundExports {
       if(this.closed)throw Error('应用正在退出');
       const job={id:randomUUID(),kind,out,directory,input,params,resources,state:'queued',stage:'queued'};
       this.jobs.push(job);this.publish(job);
-      // Keep recent results, together with every pending export.
+      // 保留最近完成结果，以及全部尚未结束的导出任务。
       const finished=this.jobs.filter(j=>['completed','failed','cancelled'].includes(j.state));
       for(const old of finished.slice(0,-8))this.jobs.splice(this.jobs.indexOf(old),1);
       this.pump();return this.status(job);
@@ -41,7 +41,7 @@ class BackgroundExports {
     }});
     try{
       await worker.start();alive();
-      try{os.setPriority(worker.proc.pid,os.constants.priority.PRIORITY_BELOW_NORMAL);}catch{/* Optional on restricted hosts. */}
+      try{os.setPriority(worker.proc.pid,os.constants.priority.PRIORITY_BELOW_NORMAL);}catch{ }
       await worker.call('loadResources',job.resources);alive();
       job.stage='opening';this.publish(job);await worker.call('open',{path:job.input});alive();
       job.stage='building';this.publish(job);
@@ -53,7 +53,7 @@ class BackgroundExports {
     }catch(error){job.state=job.cancelled||this.closed?'cancelled':'failed';job.stage=job.state;if(job.state==='failed')job.error=error.message;}
     finally{
       await worker.stop();job.worker=null;
-      try{await fs.rm(job.directory,{recursive:true,force:true});}catch{/* A locked temp directory must not change a successful result. */}
+      try{await fs.rm(job.directory,{recursive:true,force:true});}catch{/** 临时目录被占用不能把已成功的导出改为失败。 */}
       this.publish(job);
     }
   }

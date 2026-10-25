@@ -16,7 +16,7 @@ import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.DispenserBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
-/** Real 26.3 runtime fixtures, independent of the JavaScript implementation. */
+/** 使用真实 26.3 运行时夹具，作为独立于 JavaScript 实现的对照。 */
 public class VanillaDeviceReference {
     private static Map<String, String> states(BlockState s) {
         Map<String, String> result = new TreeMap<>();

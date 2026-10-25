@@ -3,12 +3,12 @@ import java.nio.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Completed legacy catalogs and adversarial catalog boundaries must survive buffered reading. */
+
 public final class MeshIndexRegression {
     static byte[] fixture(char version){
         var data=ByteBuffer.allocate(64+574);data.put(new byte[]{'L','M','E','S','H',(byte)version,0,0});
         data.putInt(1).putInt(1).putLong(64).putInt(574).putInt(4).putLong(0);
-        for(int i=0;i<6;i++)data.putFloat(0);data.putInt(1); // one empty ownership section
+        for(int i=0;i<6;i++)data.putFloat(0);data.putInt(1);
         return data.array();
     }
     static void invalid(Path file,byte[] bytes)throws Exception{

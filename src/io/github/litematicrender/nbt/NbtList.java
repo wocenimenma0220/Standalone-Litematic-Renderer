@@ -8,10 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/**
- * NBT list container. Vanilla writes an element-type byte + length prefix;
- * element types are usually homogeneous. Ported from malilib ListData.
- */
+/** NBT 列表保存元素类型和长度，通常要求同类型元素；实现源自 malilib ListData。 */
 public final class NbtList extends NbtElement {
     private final List<NbtElement> elements = new ArrayList<>();
     private int elementType = NbtTypes.TAG_END;

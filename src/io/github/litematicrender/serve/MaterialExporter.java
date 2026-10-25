@@ -6,7 +6,7 @@ import java.util.*;
 import java.util.zip.*;
 import java.io.*;
 
-/** Dependency-free application exporter: typed OOXML values and UTF-8 BOM CSV. */
+/** 无外部依赖的材料清单导出：带类型的 OOXML 单元格和含 UTF-8 BOM 的 CSV。 */
 final class MaterialExporter {
     @SuppressWarnings("unchecked")
     static void write(Path file,Map<String,Object> report,String scope,String source)throws IOException {

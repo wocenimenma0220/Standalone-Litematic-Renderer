@@ -7,7 +7,7 @@ import io.github.litematicrender.world.*;
 import java.nio.file.*;
 import java.util.*;
 
-/** Measures the proposed GIF scene-cache path without changing the application's renderer. */
+
 public class SceneCacheBenchmark {
     static SceneMesh build(LitematicaSchematic schematic,BlockRegistry registry,ModelBaker baker,Colormaps colors,SpriteAtlas atlas) {
         var builder=new SceneBuilder(registry,baker,colors,atlas);

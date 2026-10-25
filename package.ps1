@@ -1,35 +1,19 @@
-﻿# Builds the distributable "green" (portable) package for Litematic Render.
-#
-#   pwsh -File package.ps1
-#
-# Output: dist/LitematicRender/  — zip it and hand it to anyone; no Java, no Node, no .NET needed.
-#
-# The extracted layout is deliberately flat, with the launcher at the root:
-#
+﻿# 构建包含运行时的 Windows 便携包。
+# 输出目录和 ZIP 位于 dist，解压后无需另装 Java 或 Node.js。
 #   投影预览.exe     <- double-click this
-#   bin/                    compiled Java render engine
-#   runtime/                jlink-trimmed Java runtime, including HTTPS crypto
-#   assets/vanilla/         bundled Minecraft resources
-#   assets/builtin/         built-in resource packs
-#   webapp/                 Electron shell + UI
-#   renders/                default export folder
-#
-# Everything this script needs is inside the project or the workspace: a JDK to compile and to
-# build the trimmed runtime, the Electron payload under webapp/, and the Windows C# compiler for
-# the launcher. Nothing is downloaded.
 
 param(
     [string]$JdkHome = "",
     [string]$ProjectRoot = $PSScriptRoot,
     [switch]$SkipElectron,
     [switch]$ReuseRuntime,
-    # Package a fresh launcher even when the source checkout's EXE is open elsewhere.
+    # 即使源码目录的旧 EXE 正被占用，也为分发包构建新启动器。
     [switch]$SkipRootLauncherCopy,
     [ValidatePattern('^[\p{L}\p{N}_-]+$')]
     [string]$PackageName = '投影预览',
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?(-?[A-Za-z][A-Za-z0-9.-]*)?$')]
-    [string]$Version = '1.2.0test-v1',
-    [string]$ZipName = 'Litematic-Viewer-1.2.0test-v1-win-x64'
+    [string]$Version = '1.2.0tetst-v2',
+    [string]$ZipName = 'Litematic-Viewer-1.2.0tetst-v2-win-x64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,14 +33,13 @@ $distRoot  = Join-Path $ProjectRoot 'dist'
 $stageDir  = Join-Path $distRoot $PackageName
 $webapp    = Join-Path $ProjectRoot 'webapp'
 
-# Finds a JDK that can both compile and build the trimmed runtime.
-#
-# Newer linkable JDK images can run jlink from lib/modules without a separate jmods directory.
-# Both the compiler and linker are required unless an existing runtime is explicitly reused.
+# 查找同时具备编译器和链接器的 JDK。
+# 较新的 JDK 可直接使用 lib/modules 构建精简运行时，不一定含有 jmods 目录。
+
 function Find-Jdk {
     param([string]$Explicit)
-    # The parameter must not be called $home: PowerShell's $HOME is read-only, and a parameter of
-    # that name fails at binding time with "Cannot overwrite variable home".
+    # 参数名不能使用只读的 $HOME，否则 PowerShell 会在绑定参数时失败。
+
     $usable = {
         param($jdkDir)
         $jdkDir -and
@@ -65,8 +48,8 @@ function Find-Jdk {
           ((Test-Path (Join-Path $jdkDir 'jmods')) -or (Test-Path (Join-Path $jdkDir 'lib/modules')))))
     }
     if (& $usable $Explicit) { return $Explicit }
-    # A bundled JDK in the workspace is this project's own toolchain and wins over the ambient
-    # JAVA_HOME, which on a machine with the Minecraft launcher points at a JRE.
+    # 优先使用工作区自带 JDK，避免系统 JAVA_HOME 误指向 Minecraft 的 JRE。
+
     $beside = Get-ChildItem (Join-Path $ProjectRoot '..\..') -Directory -Filter 'jdk*' -ErrorAction SilentlyContinue |
               Sort-Object Name -Descending
     foreach ($d in $beside) {
@@ -84,7 +67,7 @@ $javac = Join-Path $jdk 'bin/javac.exe'
 $jlink = Join-Path $jdk 'bin/jlink.exe'
 Write-Host "JDK: $jdk"
 
-# ---------------------------------------------------------------- 1. compile the engine
+
 Write-Host "`n[1/7] Compiling the render engine..."
 $binDir = Join-Path $ProjectRoot 'bin'
 Remove-BuildDirectory $binDir
@@ -94,19 +77,19 @@ Write-Host "      $($sources.Count) source files"
 & $javac --release 21 -encoding UTF-8 -nowarn -d $binDir $sources
 if ($LASTEXITCODE -ne 0) { throw "javac failed" }
 
-# --------------------------------------------------------------------------- 2. launcher exe
+
 Write-Host "`n[2/7] Building the root launcher (投影预览.exe)..."
 $launcherDir = Join-Path $ProjectRoot 'tools\launcher'
 $launcherExe = Join-Path $launcherDir 'bin\投影预览.exe'
-# Run it in this same shell: the build script is plain PowerShell and needs no child host,
-# which also keeps it working on Windows PowerShell 5.1 where `pwsh` may not exist.
+# 在同一 PowerShell 进程构建启动器，无需另启脚本宿主。
+
 & (Join-Path $launcherDir 'build-launcher.ps1') -OutDir (Join-Path $launcherDir 'bin') | Out-Host
 if (-not (Test-Path $launcherExe)) { throw "launcher build produced no exe" }
 if (-not $SkipRootLauncherCopy) {
     Copy-Item -LiteralPath $launcherExe -Destination (Join-Path $ProjectRoot '投影预览.exe') -Force
 }
 
-# ----------------------------------------------------------------------------- 3. java runtime
+
 Write-Host "`n[3/7] Building the trimmed Java runtime (jlink)..."
 $bundledRuntime = Join-Path $ProjectRoot 'runtime'
 if ($ReuseRuntime) {
@@ -128,7 +111,7 @@ if ($ReuseRuntime) {
     if ($LASTEXITCODE -ne 0) { throw "jlink failed" }
 }
 
-# ----------------------------------------------------------------------------------- 4. stage
+
 Write-Host "`n[4/7] Staging the package..."
 Remove-BuildDirectory $stageDir
 New-Item -ItemType Directory -Path $stageDir | Out-Null
@@ -140,20 +123,20 @@ foreach ($item in @('bin', 'runtime', 'assets')) {
 }
 New-Item -ItemType Directory -Path (Join-Path $stageDir 'renders') -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $stageDir 'logs') -Force | Out-Null
-# The launcher sits at the root, which is the whole point of the package layout.
+
 Copy-Item $launcherExe -Destination $stageDir
-Copy-Item -LiteralPath (Join-Path $ProjectRoot 'README.md') -Destination $stageDir
+if (Test-Path -LiteralPath (Join-Path $ProjectRoot 'README.md')) { Copy-Item -LiteralPath (Join-Path $ProjectRoot 'README.md') -Destination $stageDir }
 Copy-Item -LiteralPath (Join-Path $ProjectRoot 'docs') -Destination $stageDir -Recurse
-# Keep the test scope visible beside the launcher as well as in docs.
+# 将测试范围说明同时放在启动器旁，便于用户查看。
 $scopeText = [IO.File]::ReadAllText((Join-Path $ProjectRoot 'docs/二维微时序测试版说明.md'))
-$scopeText = $scopeText.Replace('](REDSTONE-', '](docs/REDSTONE-').Replace('](examples/', '](docs/examples/')
+$scopeText = $scopeText.Replace('](examples/', '](docs/examples/').Replace('](DEVELOPMENT.md)', '](docs/DEVELOPMENT.md)').Replace('](二维TNT与流体实现.md)', '](docs/二维TNT与流体实现.md)')
 [IO.File]::WriteAllText((Join-Path $stageDir '二维微时序测试版说明.md'), $scopeText, [Text.UTF8Encoding]::new($false))
 $evaluationDocs = Join-Path $ProjectRoot '评估与测评'
 if (Test-Path -LiteralPath $evaluationDocs) {
     Copy-Item -LiteralPath $evaluationDocs -Destination $stageDir -Recurse
 }
-# Public texture/profile caches allow previously viewed heads to render offline.
-# Local PNG overrides and the user's networking preference remain personal to their install.
+# 公共皮肤纹理和资料缓存可以随包保留，以支持离线查看。
+# 本地皮肤覆盖与联网偏好属于个人配置，不复制进分发包。
 foreach ($part in @('textures', 'profiles')) {
     $cached = Join-Path $ProjectRoot ('skins/' + $part)
     if (Test-Path -LiteralPath $cached) {
@@ -163,7 +146,7 @@ foreach ($part in @('textures', 'profiles')) {
     }
 }
 
-# ---------------------------------------------------------------------------------- 5. webapp
+
 Write-Host "`n[5/7] Copying the Electron shell..."
 $stageWebapp = Join-Path $stageDir 'webapp'
 New-Item -ItemType Directory -Path $stageWebapp | Out-Null
@@ -176,18 +159,18 @@ if (-not $SkipElectron) {
     $electronSrc = Join-Path $webapp 'node_modules/electron'
     if (-not (Test-Path $electronSrc)) { throw "electron not installed; run install.bat (needs network once)" }
 
-    # The shell only needs the Electron binary tree plus the electron module's metadata.
+    # 界面只需 Electron 二进制目录及模块元数据。
     $nmElectron = Join-Path $stageWebapp 'node_modules/electron'
     New-Item -ItemType Directory -Path $nmElectron -Force | Out-Null
     Copy-Item (Join-Path $electronSrc 'package.json') -Destination $nmElectron
     Copy-Item (Join-Path $electronSrc 'dist') -Destination $nmElectron -Recurse
 }
 
-# ----------------------------------------------------------------------------------- 6. prune
+
 Write-Host "`n[6/7] Pruning non-Windows and unused payloads..."
 if (-not $SkipElectron) {
     $dist = Join-Path $stageWebapp 'node_modules/electron/dist'
-    # Electron ships every locale and several platform payloads; keep the ones we need.
+    # 只保留需要的语言和平台文件。
     $locales = Join-Path $dist 'locales'
     if (Test-Path $locales) {
         Get-ChildItem $locales -Filter '*.pak' |
@@ -195,13 +178,13 @@ if (-not $SkipElectron) {
             Remove-Item -Force
     }
 }
-# Engine sources, project scripts and diagnostic artifacts never ship.
+# 引擎源码、开发脚本和诊断产物不进入便携包。
 foreach ($junk in @('src', 'tools', 'packs', 'archive', '.dsh-acl-reports')) {
     $p = Join-Path $stageDir $junk
     Remove-BuildDirectory $p
 }
 
-# ---------------------------------------------------------------------------------- 7. report
+
 Write-Host "`n[7/7] Package summary"
 $files = Get-ChildItem $stageDir -Recurse -File
 $total = ($files | Measure-Object Length -Sum).Sum
@@ -223,7 +206,7 @@ if (-not $SkipElectron) {
     $zipPath = Join-Path $distRoot $zipFileName
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
-    # No wrapper folder: the EXE is an entry at the ZIP's root.
+    # ZIP 根目录直接放置启动器，不额外嵌套包装目录。
     [IO.Compression.ZipFile]::CreateFromDirectory($stageDir, $zipPath,
         [IO.Compression.CompressionLevel]::Optimal, $false)
     Write-Host "ZIP: $zipPath"

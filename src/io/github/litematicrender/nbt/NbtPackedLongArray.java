@@ -2,7 +2,7 @@ package io.github.litematicrender.nbt;
 
 import java.io.IOException;
 
-/** Schematic-only long-array tag; generic NBT APIs retain their ordinary dense representation. */
+/** 仅投影方块长数组使用压缩页，普通 NBT 数组继续采用连续存储。 */
 public final class NbtPackedLongArray extends NbtElement {
     public final PackedLongArray value;
     public NbtPackedLongArray(PackedLongArray value){this.value=value;}
