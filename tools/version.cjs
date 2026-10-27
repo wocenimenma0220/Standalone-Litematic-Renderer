@@ -17,7 +17,7 @@ function sync(root,{write=false,version}={}){
   const target=path.join(root,'webapp/renderer/app-version.js');
   const source="'use strict';\n// 由 tools/version.cjs 生成；修改 webapp/package.json 后运行 node tools/version.cjs --write。\nwindow.AppVersion="+JSON.stringify(info)+";\n";
   if(write){lock.version=info.version;lock.packages[''].version=info.version;fs.writeFileSync(lockFile,JSON.stringify(lock,null,2)+'\n');fs.writeFileSync(target,source);}
-  else if(pkg.displayVersion!==undefined||lock.version!==info.version||lock.packages[''].version!==info.version||!fs.existsSync(target)||fs.readFileSync(target,'utf8')!==source)throw Error('版本信息不同步，请运行 node tools/version.cjs --write');
+  else if(pkg.displayVersion!==undefined||lock.version!==info.version||lock.packages[''].version!==info.version||!fs.existsSync(target)||fs.readFileSync(target,'utf8').replace(/\r\n/g,'\n')!==source)throw Error('版本信息不同步，请运行 node tools/version.cjs --write');
   return info;
 }
 module.exports={versionInfo,sync};

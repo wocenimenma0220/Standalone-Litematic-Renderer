@@ -10,6 +10,7 @@ assert.equal(sync(root,{write:true,version:'1.3.0-test-v1'}).zipName,'Litematic-
 assert.equal(sync(root,{write:true,version:'1.2.0'}).display,'1.2.0');assert.equal(sync(root).zipName,'Litematic-Viewer-1.2.0-win-x64');assert.equal(sync(root).assembly,'1.2.0.0');
 const original=fs.readFileSync(path.join(root,'webapp/package.json'),'utf8');assert.throws(()=>sync(root,{write:true,version:'1.3.0-tetst-v1'}));assert.equal(fs.readFileSync(path.join(root,'webapp/package.json'),'utf8'),original);
 assert.equal(JSON.parse(fs.readFileSync(path.join(root,'webapp/package-lock.json'))).packages['node_modules/example'].version,'9.0.0');
+const generated=path.join(root,'webapp/renderer/app-version.js');fs.writeFileSync(generated,fs.readFileSync(generated,'utf8').replace(/\n/g,'\r\n'));assert.equal(sync(root).version,'1.2.0');
 fs.appendFileSync(path.join(root,'webapp/renderer/app-version.js'),'drift');assert.throws(()=>sync(root),/不同步/);
 for(const file of ['C:/模型/城堡.LITEMATIC','模型.NBT','world.schem'])assert(formats.accepts(file));for(const file of ['world.schematic','world.snbt',null,'world.nbt.zip'])assert(!formats.accepts(file));assert.equal(formats.stem('city.NBT'),'city');
-console.log('PASS: 统一版本派生、漂移检测、非法版本回滚、依赖版本保留和文件入口格式');
+console.log('PASS: 统一版本派生、Windows 换行兼容、漂移检测、非法版本回滚、依赖版本保留和文件入口格式');
