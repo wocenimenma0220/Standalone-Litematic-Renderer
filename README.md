@@ -13,6 +13,11 @@
   <p>Windows x64 · Java 渲染引擎 · Electron 桌面界面 · 作者 LiteKinda</p>
 </div>
 
+- 作者 **LiteKinda**：[B站主页](https://space.bilibili.com/107835436?spm_id_from=333.788.0.0)
+- **XeKr 红显材质包**来自 **XeKr**：[B站主页](https://space.bilibili.com/5930630?spm_id_from=333.788.upinfo.head.click)
+- [XeKr红显下载](https://modrinth.com/resourcepack/xk-redstone-display/versions)
+- **护眼大补丸**来自 **黑山大叔**：[B站主页](https://space.bilibili.com/19428259?spm_id_from=333.788.upinfo.detail.click)
+
 投影预览是一款独立运行的 Minecraft Java 版结构查看与导出工具。打开 `.litematic`、Java 结构 `.nbt` 或 Sponge `.schem`，即可旋转查看模型、自由漫游、按层观察、统计材料，并导出图片或编辑后的投影。便携包包含所需运行时，无需先启动 Minecraft，也无需安装 Litematica 模组。
 
 此外，软件提供侧视与俯视的二维搭建画布，用于局部红石、容器、矿车、TNT 与流体实验，并可逐刻检查执行过程。二维实验与三维投影编辑的功能范围不同，详见[当前限制](#limitations)。
