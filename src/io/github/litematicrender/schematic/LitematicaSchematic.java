@@ -203,7 +203,7 @@ public final class LitematicaSchematic {
 
     public static LitematicaSchematic load(Path file) throws IOException {
         if (!Files.isRegularFile(file)) throw new IOException("Not a file: " + file);
-        NbtCompound root = NbtFileUtils.readSchematic(file);
+        NbtCompound root = SchematicFormats.read(file);
         LitematicaSchematic schem = new LitematicaSchematic();
         schem.readFromData(root);
         return schem;

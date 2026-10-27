@@ -13,8 +13,16 @@
     undo(current){return this.transfer(this.past,this.future,current);}
     redo(current){return this.transfer(this.future,this.past,current);}
   }
-  function persistence({capture,view,viewport,write,onError=()=>{},schedule=setTimeout,cancel=clearTimeout}){
+  function persistence({capture,view,viewport,write,read=()=>null,validate=value=>value,onError=()=>{},schedule=setTimeout,cancel=clearTimeout}){
     const sessions=new Map();let timer=null,worldChanged=false;
+    function load(key){
+      if(sessions.has(key))return sessions.get(key);
+      try{
+        const json=read(key);if(!json)return null;
+        if(json.length>20*1024*1024)throw Error('暂存画布超过 20 MB');
+        const packet=validate(JSON.parse(json),key);sessions.set(key,packet);return packet;
+      }catch(error){onError(error,'read');return null;}
+    }
     function flush(){
       cancel(timer);timer=null;const key=view(),previous=sessions.get(key);
       const packet=worldChanged||!previous?capture():{...previous,...viewport()};
@@ -22,7 +30,7 @@
       try{write(key,JSON.stringify(packet));}catch(error){onError(error);}
       return packet;
     }
-    return {sessions,invalidate(){worldChanged=true;},save(immediate=false,viewOnly=false){worldChanged||=!viewOnly;cancel(timer);if(immediate)return flush();timer=schedule(flush,250);},flush};
+    return {sessions,load,invalidate(){worldChanged=true;},save(immediate=false,viewOnly=false){worldChanged||=!viewOnly;cancel(timer);if(immediate)return flush();timer=schedule(flush,250);},flush};
   }
   const api={History,persistence};if(typeof module!=='undefined')module.exports=api;else root.BoardSession=api;
 })(typeof window!=='undefined'?window:globalThis);

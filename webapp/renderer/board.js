@@ -55,7 +55,16 @@
   for(const name of ['pointercancel','lostpointercapture'])toolsHandle.addEventListener(name,event=>{if(toolsDrag?.id!==event.pointerId)return;expandTools(toolsDrag.expanded);toolsDrag=null;suppressToolsClick=true;});
   toolsHandle.addEventListener('click',event=>{if(suppressToolsClick&&event.detail>0){suppressToolsClick=false;return;}expandTools(!toolsExpanded);});
   const capture=()=>({version:3,view:world.view,cells:world.snapshot(),timing:timing?.snapshot()||null,inventory:inventoryState,zoom,pan:{...pan}});
-  const storage=BoardSession.persistence({capture,view:()=>world.view,viewport:()=>({zoom,pan:{...pan}}),write:(view,json)=>localStorage.setItem('litematic-board-v2-'+view,json),onError:()=>status('暂存失败，请保存画布。')});
+  function validatePacket(packet,view){
+    if(!packet||![1,2,3].includes(packet.version))throw Error('不支持的画布格式');
+    if(packet.view&&packet.view!==view)throw Error('画布视图不匹配');
+    const test=new BoardModel.BoardWorld(catalog,view);test.restore(packet.cells);
+    for(const data of [packet.timing,packet.dormantTiming])if(data)new BoardTiming.TimingWorld(view).restore(data);
+    return {...packet,view,cells:test.snapshot()};
+  }
+  let recoveryError=false,lastAutosave=0;
+  const storage=BoardSession.persistence({capture,view:()=>world.view,viewport:()=>({zoom,pan:{...pan}}),read:view=>localStorage.getItem('litematic-board-v2-'+view),validate:validatePacket,write:(view,json)=>localStorage.setItem('litematic-board-v2-'+view,json),onError:(_error,operation)=>{recoveryError=operation==='read';status(recoveryError?'暂存画布无法恢复，请打开手动保存的 JSON。':'暂存失败，请保存画布。');}});
+  window.addEventListener('beforeunload',()=>{if(dialog.open)persist(true,true);});
   function updateHistory(){$('boardUndo').disabled=!history.canUndo;$('boardRedo').disabled=!history.canRedo;}
   function remember(){history.remember(capture());updateHistory();}
   function persist(flush=false,viewOnly=false){return storage.save(flush,viewOnly);}
@@ -153,10 +162,10 @@
       for(const p of parts.length?parts:[hover])ctx.strokeRect(pan.x+p.x*zoom+1,pan.y+p.y*zoom+1,zoom-2,zoom-2);
     }dirty=false;
   }
-  function frame(now){if(!dialog.open)return;const pending=timing&&(timing.tasks.length||timing.phase!=='AT');if(!paused&&!pointer&&(pending||now-lastTick>=(timing?50:150))){if(timing){const complete=timing.runSimulationSlice();syncTiming();renderTiming();if(timing.halted)setPaused(true);if(complete)lastTick=now;}else{world.tick();lastTick=now;}dirty=true;}if(dirty&&atlas.naturalWidth)draw();animation=requestAnimationFrame(frame);}
+  function frame(now){if(!dialog.open)return;const pending=timing&&(timing.tasks.length||timing.phase!=='AT');if(!paused&&!pointer&&(pending||now-lastTick>=(timing?50:150))){if(timing){const complete=timing.runSimulationSlice();syncTiming();renderTiming();if(timing.halted)setPaused(true);if(complete)lastTick=now;}else{world.tick();lastTick=now;}if(now-lastAutosave>=2000){persist(true);lastAutosave=now;}dirty=true;}if(dirty&&atlas.naturalWidth)draw();animation=requestAnimationFrame(frame);}
   function home(){pan={x:Math.round(timing&&timingVisible?(screenWidth-Math.min(420,screenWidth*.45))/2-3*zoom:screenWidth/2),y:Math.round(screenHeight/3)};dirty=true;}
   function enter(view){if(dialog.open)persist(true,true);viewDialog.close();pointer=null;hover=null;timingVisible=false;timing=null;dormantTiming=null;inventoryState=BoardContainerInventory.clean();world.view=view;world.restore([]);enableTiming();lastTimingRevision=-1;renderTiming();dialog.showModal();resize();zoom=40;home();setPaused(true);history.clear();updateHistory();status('默认暂停；点击开始运行。右键操作元件 / 打开容器；Shift＋右键拖动；显示时序可查看更新。');
-    const packet=storage.sessions.get(view);if(packet)restore({...packet,view});
+    recoveryError=false;const packet=storage.load(view);if(packet){restore(packet);status('已恢复上次画布；默认暂停。');}
     updateTitle();drawOptions();drawPalette();canvas.focus();lastTick=performance.now();cancelAnimationFrame(animation);animation=requestAnimationFrame(frame);
   }
   $('menuBoard').onclick=()=>{if(document.pointerLockElement)document.exitPointerLock();viewDialog.showModal();};
@@ -199,7 +208,7 @@
   canvas.addEventListener('wheel',e=>{e.preventDefault();if(pointer)return;const p=location(e),wx=(p.x-pan.x)/zoom,wy=(p.y-pan.y)/zoom;zoom=Math.max(10,Math.min(160,zoom*Math.exp(-e.deltaY*.0015)));pan={x:p.x-wx*zoom,y:p.y-wy*zoom};dirty=true;persist(false,true);},{passive:false});
   dialog.addEventListener('keydown',e=>{if(e.target.closest('input,select'))return;if((e.ctrlKey||e.metaKey)&&e.code==='KeyZ'){e.preventDefault();(e.shiftKey?$('boardRedo'):$('boardUndo')).click();}if((e.ctrlKey||e.metaKey)&&e.code==='KeyS'){e.preventDefault();$('boardSave').click();}});
   $('boardSave').onclick=()=>{const blob=new Blob([JSON.stringify(capture(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='二维搭建.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};
-  $('boardLoad').onclick=()=>$('boardFile').click();$('boardFile').onchange=async()=>{const file=$('boardFile').files[0];if(!file)return;try{if(file.size>20*1024*1024)throw new Error('文件超过 20 MB');const data=JSON.parse(await file.text());if(![1,2,3].includes(data.version))throw new Error('不支持的格式');const test=new BoardModel.BoardWorld(catalog,data.view==='top'?'top':data.view==='side'?'side':world.view);test.restore(data.cells);if(data.timing)new BoardTiming.TimingWorld().restore(data.timing);remember();persist();restore({...data,view:data.view||world.view,cells:test.snapshot()});persist();status('');}catch(error){status('打开失败：'+error.message);}finally{$('boardFile').value='';}};
+  $('boardLoad').onclick=()=>$('boardFile').click();$('boardFile').onchange=async()=>{const file=$('boardFile').files[0];if(!file)return;try{if(file.size>20*1024*1024)throw new Error('文件超过 20 MB');const data=JSON.parse(await file.text()),packet=validatePacket(data,data.view==='top'?'top':data.view==='side'?'side':world.view);remember();persist(true);restore(packet);persist();status('');}catch(error){status('打开失败：'+error.message);}finally{$('boardFile').value='';}};
   new ResizeObserver(()=>{if(dialog.open)resize();}).observe($('boardStage'));
   atlas.onload=()=>{tileCache.clear();drawOptions();drawPalette();dirty=true;};atlas.onerror=()=>status('贴图加载失败。');
   partsAtlas.onload=()=>{tileCache.clear();drawOptions();drawPalette();dirty=true;};partsAtlas.onerror=()=>status('活塞头贴图加载失败。');partsAtlas.src='board-piston-parts.png';

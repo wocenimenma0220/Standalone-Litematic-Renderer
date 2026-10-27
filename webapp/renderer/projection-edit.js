@@ -190,7 +190,7 @@
   function history(action){if(!api.enabled||busy||state.scenePreparing||state.rendering)return;return operation(token=>applyMutation({action},action==='undo'?'已撤销上一步修改。':'已重做上一步修改。',token));}
   async function exportProjection(){
     if(!state.file||busy)return;const token=session;busy=true;update();
-    try{const source=(originalFile||state.file).split(/[\\/]/).pop().replace(/\.litematic$/i,'');const result=await window.engine.exportEdited({suggested:source+'-修改.litematic'});if(result&&token===session)status('已导出：'+result.path+' · 作者 '+result.author);return result;}
+    try{const source=SchematicFormats.stem((originalFile||state.file).split(/[\\/]/).pop());const result=await window.engine.exportEdited({suggested:source+'-修改.litematic'});if(result&&token===session)status('已导出：'+result.path+' · 作者 '+result.author);return result;}
     catch(error){if(token===session)status('导出失败：'+error.message);}
     finally{if(token===session){busy=false;update();}}
   }

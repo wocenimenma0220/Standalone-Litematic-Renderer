@@ -25,7 +25,7 @@ public final class ProjectionEdits {
     public record Checkpoint(NbtCompound root,ArrayDeque<Frame> undo,ArrayDeque<Frame> redo,Set<io.github.litematicrender.world.Vec3i> touched){}
     public Checkpoint checkpoint(){return new Checkpoint(root,new ArrayDeque<>(undo),new ArrayDeque<>(redo),Set.copyOf(touched));}
     public void restore(Checkpoint saved){root=saved.root();undo.clear();undo.addAll(saved.undo());redo.clear();redo.addAll(saved.redo());touched.clear();touched.addAll(saved.touched());}
-    public ProjectionEdits(Path source)throws Exception{this.source=source;root=NbtFileUtils.readSchematic(source);}
+    public ProjectionEdits(Path source)throws Exception{this.source=source;root=SchematicFormats.read(source);}
     private static NbtCompound copy(NbtCompound value){return (NbtCompound)value.copy();}
     private static NbtList listCopy(NbtList list){var out=new NbtList();for(int i=0;i<list.size();i++)out.add(list.get(i));return out;}
     private static NbtCompound pos(int x,int y,int z){return new NbtCompound().putInt("x",x).putInt("y",y).putInt("z",z);}

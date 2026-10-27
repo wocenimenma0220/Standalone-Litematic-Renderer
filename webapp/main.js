@@ -11,6 +11,7 @@ const { UiSettings, AUTHOR_URL } = require('./ui-settings');
 const { SceneTransfer, INLINE_LIMIT } = require('./scene-transfer');
 const { clearRenderingCache,clearInterruptedCache } = require('./cache-cleanup');
 const {BackgroundExports}=require('./background-exports');
+const schematicFormats=require('./schematic-formats');
 
 
 const APP_HOME = path.resolve(__dirname, '..');
@@ -154,7 +155,7 @@ handleEngine('engine:ping', client => client.call('ping', {}));
 handleEngine('engine:selectBlock',(client,_event,ray)=>client.call('selectBlock',ray));
 handleEngine('engine:loadResources', (client, _e, root) => loadEngineResources(client, root));
 handleEngine('engine:open', async (client, _e, file) => {
-  if(typeof file!=='string'||path.extname(file).toLowerCase()!=='.litematic'||!(await fs.promises.stat(file)).isFile())throw Error('请选择 .litematic 投影文件');
+  if(!schematicFormats.accepts(file)||!(await fs.promises.stat(file)).isFile())throw Error('请选择 '+schematicFormats.label+' 结构文件');
   requireCurrentEngine(client);
   if(!client.resourcesLoaded)await loadEngineResources(client,resourceRoot);
   diagnostic('opening schematic: '+file);
@@ -427,9 +428,9 @@ ipcMain.handle('packs:move', async (_e, { path, direction }) => {
 
 ipcMain.handle('dialog:openSchematic', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
-    title: '打开 .litematic 投影文件',
+    title: '打开投影或结构文件',
     filters: [
-      { name: 'Litematica 投影', extensions: ['litematic'] },
+      { name: '投影和 Java 结构', extensions: schematicFormats.extensions },
       { name: '所有文件', extensions: ['*'] },
     ],
     properties: ['openFile'],
@@ -495,7 +496,7 @@ app.whenReady().then(async () => {
 
   // 命令行传入的投影在启动后打开，支持拖到 EXE 和文件关联。
 
-  const cliFile = process.argv.slice(1).find((a) => a.toLowerCase().endsWith('.litematic'));
+  const cliFile = process.argv.slice(1).find((a) => schematicFormats.accepts(a));
   if (cliFile && mainWindow) {
     startupFile = path.resolve(cliFile);
     mainWindow.webContents.once('did-finish-load', () => {

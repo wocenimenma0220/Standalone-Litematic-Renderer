@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; img-src 'self' data: file:; media-src 'self' file:; style-src 'self'; script-src 'self'; connect-src 'self' file:;" />
-  <title>投影预览 1.2.0tetst-v2</title>
+  <title>投影预览</title>
   <link rel="icon" href="../icon.png" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="board.css" />
@@ -14,14 +14,14 @@
 <body>
   <div class="titlebar">
     <img class="brand-icon" src="../icon.png" alt="" />
-    <span class="appname">投影预览 1.2.0tetst-v2</span>
+    <span class="appname">投影预览</span>
     <nav class="menu">
       <button class="menubtn" id="menuFile">文件</button>
       <button class="menubtn" id="menuKeys">按键</button>
       <button class="menubtn" id="menuCommands">指令</button>
       <button class="menubtn" id="menuBoard">二维搭建</button><button class="menubtn" id="menuEditProjection">更改投影 (G)</button>
       <div class="dropdown hidden" id="menuFileDrop">
-        <button id="menuOpenSchematic">打开投影 (.litematic)…</button>
+        <button id="menuOpenSchematic">打开投影 / 结构…</button>
         <button id="menuImportPack">导入材质包…</button>
         <button id="menuImportPackFolder">导入材质包文件夹…</button>
         <div class="menusep"></div>
@@ -52,7 +52,7 @@
 
       <section class="group">
         <h2>投影文件</h2>
-        <button id="btnOpen" class="primary">打开 .litematic…</button>
+        <button id="btnOpen" class="primary">打开投影 / 结构…</button>
         <div id="fileInfo" class="fileinfo hidden"></div>
       </section>
 
@@ -313,7 +313,7 @@
   </dialog>
   <dialog id="shortcutDialog" class="shortcut-dialog"><div class="dialog-title"><h2>自定义按键</h2><button id="closeShortcuts" type="button">关闭</button></div><p class="muted small">点击右侧绑定，再按新键或滚动滚轮。左右 Shift、Ctrl、Alt 视为同一键；鼠标键也可绑定。</p><div id="shortcutRows"></div><p id="shortcutFeedback" class="muted small" aria-live="polite"></p><button id="cancelBinding" class="hidden" type="button">取消本次绑定</button><button id="resetShortcuts" type="button">恢复默认按键</button><p class="muted small">视角：拖动鼠标旋转，滚轮缩放；更改投影中滚轮切换快捷栏物品，Alt＋滚轮缩放。漫游：移动鼠标转向。微调：按住设置的修饰键并滚动滚轮。</p></dialog>
   <dialog id="commandsDialog" class="shortcut-dialog"><div class="dialog-title"><h2>支持的指令</h2><button id="closeCommands" type="button">关闭</button></div><p class="muted small">选择工具开启后可设置角点；坐标按投影自身坐标输入，支持负数。省略坐标时选取准星所指方块，漫游中未指向方块时使用当前位置。</p><div id="commandRows"></div><button id="commandsInput" type="button">打开指令输入</button></dialog>
-  <dialog id="boardViewDialog" class="board-view-dialog" aria-label="选择视角"><div class="dialog-title"><h2>二维搭建</h2><button id="boardViewCancel">取消</button></div><div class="board-view-choices"><button id="boardViewSide">侧视</button><button id="boardViewTop">俯视</button></div></dialog>
+  <dialog id="boardViewDialog" class="board-view-dialog" aria-label="选择视角"><div class="dialog-title"><h2>二维搭建</h2><button id="boardViewCancel">取消</button></div><p class="muted small">只模拟当前平面，适合局部红石与微时序实验。面外更新、随机刻、区块加载和三维投影联动尚未接入；复杂机器请在游戏中复核。</p><p class="muted small">熔炉、合成器、酿造台仅保存库存；生物和船没有 AI。上次画布会自动恢复，重要设计可另存 JSON。</p><div class="board-view-choices"><button id="boardViewSide">侧视</button><button id="boardViewTop">俯视</button></div></dialog>
   <dialog id="boardDialog" class="board-dialog" aria-label="二维方块搭建">
     <header class="board-header"><button id="boardClose">← 返回</button><h2 id="boardTitle">二维搭建</h2><span class="board-spacer"></span><button id="boardUndo">撤销</button><button id="boardRedo">重做</button><button id="boardPause" aria-pressed="true">开始运行</button><button id="boardTimingToggle" aria-expanded="false" aria-controls="boardTimingBar boardTimingPanel">显示时序</button><button id="boardHome">归位</button><button id="boardSave">保存</button><button id="boardLoad">打开</button><input id="boardFile" type="file" accept=".json" hidden /></header>
     <div id="boardTimingBar" class="board-timing-bar" hidden><span>二维 MC 时序</span><button id="boardTickStep">推进 1gt</button><button id="boardPhaseStep">下一阶段</button><button id="boardEventStep">下一事件</button><button id="boardFinishTick">完成本刻</button><button id="boardTraceExport">导出时序</button><output id="boardClock"></output></div>
@@ -322,6 +322,8 @@
   </dialog>
   <dialog id="boardContainerDialog" class="board-container-dialog" aria-label="二维容器"><div class="dialog-title"><h2 id="boardContainerTitle">容器</h2><button id="boardContainerClose">关闭</button></div><p id="boardContainerInfo"></p><div class="board-container-layout"><section class="board-backpack"><strong id="boardContainerLabel">容器</strong><div id="boardContainerSlots" class="board-inventory-grid" aria-label="容器槽位"></div><strong>背包</strong><div id="boardPlayerSlots" class="board-inventory-grid" aria-label="玩家背包"></div><div id="boardPlayerHotbar" class="board-inventory-grid board-inventory-hotbar" aria-label="快捷栏"></div><p class="board-inventory-hint">左键拿取 / 合并 · 右键取半 / 放一个<br />Shift＋点击快捷转移 · 拖动均分 · 双击收集 · 1–9 交换快捷栏</p><button id="boardContainerTrash" class="board-inventory-trash" title="丢弃鼠标手持物品">丢弃手持物品</button><p id="boardContainerError" role="status"></p></section><section class="board-container-catalog"><label for="boardContainerSearch">方块工具栏</label><input id="boardContainerSearch" type="search" placeholder="搜索方块名称 / ID" /><div id="boardContainerPalette" class="board-container-palette" aria-label="可拖入容器的方块"></div><p>从工具栏拖入物品，或左键取一组、右键取一个。</p></section></div><div id="boardCarriedItem" class="board-carried-item" hidden></div></dialog>
   <dialog id="boardPressureDialog" class="board-container-dialog" aria-label="模拟踩压"><div class="dialog-title"><h2>模拟踩压</h2><button id="boardPressureClose">关闭</button></div><p>提供压力板检测框内的接触数量。减少数量后，压力板会等原版计划刻复查再释放。</p><label>接触类型<select id="boardPressureKind"><option value="living">生物</option><option value="item">物品</option></select></label><label>数量<input id="boardPressureCount" type="number" min="0" max="10000" value="1" /></label><button id="boardPressureApply">应用踩压</button><p id="boardPressureInfo" role="status"></p></dialog>
+  <script src="app-version.js"></script>
+  <script src="../schematic-formats.js"></script>
   <script src="board-catalog.js"></script>
   <script src="board-sounds.js"></script>
   <script src="board-audio.js"></script>
@@ -330,6 +332,7 @@
   <script src="render-selection.js"></script>
   <script src="gpu-view.js"></script>
   <script src="lod-stream.js"></script>
+  <script src="materials-panel.js"></script>
   <script src="renderer.js"></script>
   <script src="selection-tools.js"></script>
   <script src="shortcuts-ui.js"></script>

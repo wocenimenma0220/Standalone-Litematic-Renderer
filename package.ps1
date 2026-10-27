@@ -12,13 +12,23 @@ param(
     [ValidatePattern('^[\p{L}\p{N}_-]+$')]
     [string]$PackageName = '投影预览',
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?(-?[A-Za-z][A-Za-z0-9.-]*)?$')]
-    [string]$Version = '1.2.0tetst-v2',
-    [string]$ZipName = 'Litematic-Viewer-1.2.0tetst-v2-win-x64'
+    [string]$Version = '',
+    [string]$ZipName = '',
+    [string]$ClientJar = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot)
 Set-Location $ProjectRoot
+$versionNode=if(Test-Path -LiteralPath 'tools/node/node.exe'){(Resolve-Path 'tools/node/node.exe').Path}else{(Get-Command node -ErrorAction Stop).Source}
+$versionJson=& $versionNode tools/version.cjs --json
+if($LASTEXITCODE -ne 0){throw '版本不同步，请先运行 node tools/version.cjs --write'}
+$versionInfo=$versionJson | ConvertFrom-Json
+if($Version -and $Version -ne $versionInfo.display){throw '请在 webapp/package.json 修改版本并运行 node tools/version.cjs --write'}
+$Version=$versionInfo.display
+if(-not $ZipName){$ZipName=$versionInfo.zipName}
+if($ClientJar){& ./tools/prepare-resources.ps1 -ClientJar $ClientJar}
+if(-not(Test-Path 'assets/vanilla/assets/minecraft/blockstates')){throw '缺少游戏资源；可传入 -ClientJar 指定本地 Minecraft Java 客户端 JAR'}
 
 function Remove-BuildDirectory {
     param([string]$Path)
@@ -107,7 +117,7 @@ if ($ReuseRuntime) {
 } else {
     Remove-BuildDirectory $bundledRuntime
     & $jlink --add-modules java.base,java.desktop,jdk.crypto.ec --strip-debug --no-header-files --no-man-pages `
-             --compress=zip-6 --output $bundledRuntime
+             --compress=zip-9 --output $bundledRuntime
     if ($LASTEXITCODE -ne 0) { throw "jlink failed" }
 }
 
@@ -150,7 +160,7 @@ foreach ($part in @('textures', 'profiles')) {
 Write-Host "`n[5/7] Copying the Electron shell..."
 $stageWebapp = Join-Path $stageDir 'webapp'
 New-Item -ItemType Directory -Path $stageWebapp | Out-Null
-foreach ($f in @('main.js', 'preload.js', 'engine-client.js', 'background-exports.js', 'runtime.js', 'performance-policy.js', 'ui-settings.js', 'scene-transfer.js', 'cache-cleanup.js', 'package.json', 'app.ico', 'icon.png')) {
+foreach ($f in @('main.js', 'preload.js', 'engine-client.js', 'background-exports.js', 'runtime.js', 'performance-policy.js', 'ui-settings.js', 'scene-transfer.js', 'cache-cleanup.js', 'schematic-formats.js', 'package.json', 'app.ico', 'icon.png')) {
     Copy-Item (Join-Path $webapp $f) -Destination $stageWebapp
 }
 Copy-Item (Join-Path $webapp 'renderer') -Destination $stageWebapp -Recurse
@@ -207,8 +217,14 @@ if (-not $SkipElectron) {
     if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     # ZIP 根目录直接放置启动器，不额外嵌套包装目录。
-    [IO.Compression.ZipFile]::CreateFromDirectory($stageDir, $zipPath,
-        [IO.Compression.CompressionLevel]::Optimal, $false)
+    $compression=if([Enum]::GetNames([IO.Compression.CompressionLevel]) -contains 'SmallestSize'){[IO.Compression.CompressionLevel]::SmallestSize}else{[IO.Compression.CompressionLevel]::Optimal}
+    [IO.Compression.ZipFile]::CreateFromDirectory($stageDir, $zipPath,$compression,$false)
     Write-Host "ZIP: $zipPath"
-    Write-Host ("SHA256: {0}" -f (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash)
+    $zipHash=(Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    [IO.File]::WriteAllText($zipPath+'.sha256',"$zipHash  $zipFileName`n",[Text.UTF8Encoding]::new($false))
+    $changesPath=Join-Path $ProjectRoot 'docs/修复记录.md'
+    $sums="$zipHash  $zipFileName`n"
+    if(Test-Path -LiteralPath $changesPath){$changesHash=(Get-FileHash -LiteralPath $changesPath -Algorithm SHA256).Hash.ToLowerInvariant();$sums+="$changesHash  Changes.md`n"}
+    [IO.File]::WriteAllText((Join-Path $distRoot "SHA256SUMS-$Version.txt"),$sums,[Text.UTF8Encoding]::new($false))
+    Write-Host "SHA256: $zipHash"
 }

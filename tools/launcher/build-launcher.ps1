@@ -24,6 +24,13 @@ if (-not (Test-Path $src)) { throw "Missing $src" }
 if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
 
 $exe = Join-Path $OutDir '投影预览.exe'
+$versionNode=if(Test-Path -LiteralPath (Join-Path $PSScriptRoot '../node/node.exe')){Join-Path $PSScriptRoot '../node/node.exe'}else{(Get-Command node -ErrorAction Stop).Source}
+$versionJson=& $versionNode (Join-Path $PSScriptRoot '../version.cjs') --json
+if($LASTEXITCODE -ne 0){throw 'Version metadata is out of sync'}
+$versionInfo=$versionJson | ConvertFrom-Json
+$versionSource=Join-Path $OutDir 'Version.g.cs'
+$versionAttributes="using System.Reflection;`n[assembly: AssemblyVersion(`"$($versionInfo.assembly)`")]`n[assembly: AssemblyFileVersion(`"$($versionInfo.assembly)`")]`n[assembly: AssemblyInformationalVersion(`"$($versionInfo.display)`")]`n"
+[IO.File]::WriteAllText([IO.Path]::GetFullPath($versionSource),$versionAttributes,[Text.UTF8Encoding]::new($false))
 
 # 使用图形子系统，双击启动时不闪现控制台。
 # 目标平台与随包 Electron 和 Java 一致，使用 x64。
@@ -37,6 +44,7 @@ $cscArgs = @(
     '/codepage:65001'
     "/out:$exe"
     $src
+    $versionSource
 )
 if (Test-Path $Icon) { $cscArgs = @('/win32icon:' + $Icon) + $cscArgs }
 else { Write-Warning "Icon not found at $Icon; building without one." }

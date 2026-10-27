@@ -31,6 +31,8 @@ public final class StreamMeshExporter {
             var result=new LinkedHashMap<SectionVisibility.Position,SceneMesh>();for(var position:positions)result.put(position,buildSection(position));return result;
         }
         default boolean fixedLevels(){return false;}
+        /** 场景级统计包括没有可绘制模型的实体，不依赖可见区段。 */
+        default Map<String,Object> entityReport(){return null;}
         default SceneMesh coarseSection(SectionVisibility.Position position){return null;}
     }
     public interface Progress {
@@ -93,7 +95,7 @@ public final class StreamMeshExporter {
                 try{prepared=ready.take();}catch(InterruptedException stopped){Thread.currentThread().interrupt();throw new IOException("分块导出已中断",stopped);}
                 if(prepared.error()!=null)throw new IOException("区块模型生成失败",prepared.error());
                 var position=prepared.position();SceneMesh full=prepared.mesh();skins=full.skinReport;
-                if(full.entityReport.get("rendered") instanceof Number n&&n.intValue()>0)entities=mergeEntities(entities,full.entityReport);
+                if(full.entityReport.get("saved") instanceof Number n&&n.intValue()>0)entities=mergeEntities(entities,full.entityReport);
                 var blends=full.translucentBsp==null?new ArrayList<MeshQuad>():full.translucentBsp.faces;
                 if(full.translucentBsp==null){blends.addAll(full.portalSorted);blends.addAll(full.fluidSorted);blends.addAll(full.translucentSorted);}
                 List<Page> common=new ArrayList<>();writePages(file,atlas,position,blends,4,common);writePages(file,atlas,position,full.waterMask,5,common);
@@ -140,6 +142,7 @@ public final class StreamMeshExporter {
         } catch(Throwable failure){Files.deleteIfExists(temporary);throw failure;}
         finally{producer.interrupt();boolean interrupted=Thread.interrupted();while(producer.isAlive())try{producer.join(50);}catch(InterruptedException stopped){interrupted=true;}if(interrupted)Thread.currentThread().interrupt();}
         if(progress==null)Files.move(temporary,destination,StandardCopyOption.REPLACE_EXISTING);
+        var report=builder.entityReport();if(report!=null)entities=report;
         return new Index(List.copyOf(entries),bounds,total,maximum,Files.size(destination),skins,entities);
     }
     private static List<PreparedSection> buildBatch(Source source,List<SectionVisibility.Position> batch) {

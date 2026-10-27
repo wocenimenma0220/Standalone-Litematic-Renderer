@@ -1,6 +1,6 @@
 {
   "name": "litematic-render-shell",
-  "version": "1.2.0-tetst-v2",
+  "version": "1.2.0",
   "productName": "投影预览",
   "private": true,
   "description": "投影预览 — Minecraft Litematica 投影查看与导出",
@@ -14,6 +14,5 @@
   "license": "ISC",
   "dependencies": {
     "electron": "^44.7.0"
-  },
-  "displayVersion": "1.2.0tetst-v2"
+  }
 }

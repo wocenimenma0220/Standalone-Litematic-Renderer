@@ -16,5 +16,15 @@ try{
   const count=loaded.filter(url=>url.endsWith('/board-physics-data.js')).length;
   await page.locator('#menuBoard').click();await page.locator('#boardViewSide').click();assert.equal(loaded.filter(url=>url.endsWith('/board-physics-data.js')).length,count);
   assert(await page.locator('#boardUndo').isDisabled());assert.deepEqual(errors,[]);
-  console.log('PASS UI: 二维首次打开才加载、连续缩放不复制时序、关闭即时保存及再次打开复用模块');
+  await page.locator('#boardClose').click();
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('litematic-board-v2-side')));assert(saved.cells.length>0);
+  await page.reload();await page.locator('#menuBoard').click();await page.locator('#boardViewSide').click();
+  assert((await page.locator('#boardStatus').textContent()).includes('已恢复'));
+  await page.locator('#boardClose').click();
+  const restored=await page.evaluate(()=>JSON.parse(localStorage.getItem('litematic-board-v2-side')));
+  assert.deepEqual(restored.cells,saved.cells);assert.deepEqual(restored.timing.entities,saved.timing.entities);assert.equal(restored.timing.time,saved.timing.time);assert.equal(restored.zoom,saved.zoom);
+  await page.evaluate(()=>localStorage.setItem('litematic-board-v2-side','{broken'));
+  await page.reload();await page.locator('#menuBoard').click();await page.locator('#boardViewSide').click();
+  assert((await page.locator('#boardStatus').textContent()).includes('无法恢复'));assert.deepEqual(errors,[]);
+  console.log('PASS UI: 按需加载、缩放复用、关闭保存、页面重启恢复与损坏暂存提示');
 }finally{await browser.close();}})().catch(error=>{console.error(error);process.exitCode=1;});

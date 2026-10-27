@@ -209,6 +209,17 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         }
         occupiedSections=java.util.List.copyOf(keys);return occupiedSections;
     }
+    @Override public java.util.Map<String,Object> entityReport(){
+        int saved=0,rendered=0,invisible=0,unsupported=0,duplicates=0;var identities=new java.util.HashSet<String>();
+        for(var region:regions)for(var entity:region.entities){
+            saved++;String identity=io.github.litematicrender.schematic.SchematicEntity.identity(entity.data());
+            if(!identity.isEmpty()&&!identities.add(identity)){duplicates++;continue;}
+            if(!EntityGeometry.supported(entity)){unsupported++;continue;}
+            if(entity.data().getBooleanOrDefault("Invisible",false)&&!EntityGeometry.frame(entity)){invisible++;continue;}
+            rendered++;
+        }
+        return java.util.Map.of("saved",saved,"rendered",rendered,"invisible",invisible,"unsupported",unsupported,"duplicates",duplicates);
+    }
     /** 写入图集 UV 前注册所有生成贴图，临时模型受内存预算限制。 */
     public void prepareStreaming() {
         streaming=true;prepare();

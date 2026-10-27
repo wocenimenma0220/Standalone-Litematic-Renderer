@@ -16,6 +16,8 @@ public final class EntityGeometry {
     private final BlockRegistry registry;
     private final Map<String,Image> generated;
     private final Map<String,Image> images=new HashMap<>();
+    private final Map<String,SceneMesh.Layer> blockLayers=new HashMap<>();
+    private boolean classifyBlockLayers;
     private boolean lightingEnabled=true;
     public EntityGeometry lightingEnabled(boolean enabled){this.lightingEnabled=enabled;return this;}
     private SceneMesh.Layer layer=SceneMesh.Layer.CUTOUT;
@@ -30,7 +32,7 @@ public final class EntityGeometry {
         return WOODS.contains(wood)?wood:"";
     }
     public static boolean boat(SchematicEntity entity){String id=kind(entity);return (id.endsWith("boat")||id.endsWith("raft"))&&!boatWood(entity).isEmpty();}
-    public static boolean supported(SchematicEntity entity){String id=kind(entity);return CARTS.contains(id)||Set.of("snow_golem","iron_golem","piglin").contains(id)||boat(entity)||frame(entity);}
+    public static boolean supported(SchematicEntity entity){String id=kind(entity);return CARTS.contains(id)||Set.of("snow_golem","iron_golem","piglin","tnt","falling_block","item").contains(id)||boat(entity)||frame(entity);}
     public static boolean frame(SchematicEntity entity){return Set.of("item_frame","glow_item_frame").contains(kind(entity));}
     public static boolean minecart(SchematicEntity entity){return CARTS.contains(kind(entity));}
     public static boolean baby(SchematicEntity entity){return entity.data().getBooleanOrDefault("IsBaby",entity.data().getBooleanOrDefault("is_baby",false));}
@@ -48,6 +50,16 @@ public final class EntityGeometry {
     }
     public void emit(SceneMesh mesh,SchematicEntity entity,double x,double y,double z,float[] light,boolean submerged,float cartYaw,float cartPitch) {
         String id=kind(entity);Mat world=Mat.identity().translate(x,y,z);
+        if(id.equals("tnt")||id.equals("falling_block")){
+            var tag=entity.data().getCompound(id.equals("tnt")?"block_state":"BlockState").orElse(new NbtCompound().putString("Name",id.equals("tnt")?"minecraft:tnt":"minecraft:sand"));
+            var raw=io.github.litematicrender.schematic.LitematicaSchematic.readBlockState(tag);var state=registry.getOrMissing(raw.blockId()).state(raw.properties());
+            double scale=1;if(id.equals("tnt")){double fuse=SchematicEntity.number(entity.data(),"fuse",SchematicEntity.number(entity.data(),"Fuse",80));scale+=Math.pow(Math.max(0,Math.min(1,1-fuse/10)),4)*.3;}
+            classifyBlockLayers=true;try{block(mesh,state,world.translate(0,.5,0).scale(scale,scale,scale).translate(-.5,-.5,-.5),light);}finally{classifyBlockLayers=false;}return;
+        }
+        if(id.equals("item")){
+            var stack=entity.data().getCompound("Item").orElseGet(()->entity.data().getCompound("item").orElse(null));
+            if(!empty(stack))item(mesh,stack,world.translate(0,.25,0).rotateY(Math.toRadians(entity.yaw())).scale(.5,.5,.5),"ground",light);return;
+        }
         if(CARTS.contains(id)){cart(mesh,entity,world,light,cartYaw,cartPitch);return;}
         if(boat(entity)){boat(mesh,entity,world,light,submerged);return;}
         if(frame(entity)){frame(mesh,entity,world,light);return;}
@@ -318,7 +330,13 @@ public final class EntityGeometry {
         double nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx,length=Math.abs(nx)+Math.abs(ny)+Math.abs(nz);if(length<1e-10)return;
         float shade=(float)((Math.abs(nx)*.6+Math.abs(nz)*.8+Math.abs(ny)*(ny>0?1:.5))/length);
         if(!lightingEnabled)shade=1;
-        (layer==SceneMesh.Layer.WATER_MASK?mesh.waterMask:mesh.cutout).add(new SceneMesh.MeshQuad(x,y,z,u[0],v[0],u[1],v[1],u[2],v[2],u[3],v[3],texture,-1,generated.get(texture),light[0],light[1],light[2],shade,null,layer,false));
+        var selected=classifyBlockLayers?blockLayers.computeIfAbsent(texture,key->{
+            var pixels=image(key);if(pixels==null)return SceneMesh.Layer.CUTOUT;boolean cutout=false;
+            for(int pixel:pixels.pixels()){int alpha=pixel>>>24;if(alpha>0&&alpha<255)return SceneMesh.Layer.TRANSLUCENT;if(alpha==0)cutout=true;}
+            return cutout?SceneMesh.Layer.CUTOUT:SceneMesh.Layer.SOLID;
+        }):layer;
+        var target=switch(selected){case WATER_MASK->mesh.waterMask;case SOLID->mesh.solid;case TRANSLUCENT->mesh.translucent;default->mesh.cutout;};
+        target.add(new SceneMesh.MeshQuad(x,y,z,u[0],v[0],u[1],v[1],u[2],v[2],u[3],v[3],texture,-1,generated.get(texture),light[0],light[1],light[2],shade,null,selected,false));
     }
     private record Box(double u,double v,double x,double y,double z,double w,double h,double d,double grow,boolean mirror){}
     static final class Part {

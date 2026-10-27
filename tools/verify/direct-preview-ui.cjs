@@ -11,8 +11,8 @@ fs.writeFileSync(path.join(out,'settings/ui.json'),JSON.stringify({projectionMod
 settings.UiSettings=class extends OriginalSettings{constructor(){super(out);}};
 const engine=require(path.join(root,'webapp/engine-client')),OriginalEngine=engine.EngineClient,calls=[],progress=[];
 engine.EngineClient=class extends OriginalEngine{
-  constructor(options){super({...options,home:process.env.LITEMATIC_TEST_HOME||options.home,onEvent:event=>{if(event.event==='previewProgress')progress.push({...event,at:Date.now()});options.onEvent?.(event);}});}
-  call(method,params={}){const record={method,streaming:params.streaming,progressId:params.progressId};calls.push(record);return super.call(method,params).then(result=>{if(method==='exportScene')Object.assign(record,{quads:result.quads,exportMillis:result.exportMillis,sceneBuildMillis:result.sceneBuildMillis});return result;});}
+  constructor(options){super({...options,home:process.env.LITEMATIC_TEST_HOME||options.home,classpath:process.env.LITEMATIC_TEST_CLASSPATH||options.classpath,onEvent:event=>{if(event.event==='previewProgress')progress.push({...event,at:Date.now()});options.onEvent?.(event);}});}
+  call(method,params={}){if(method==='loadResources'&&process.env.LITEMATIC_TEST_HOME)params={...params,root:path.join(process.env.LITEMATIC_TEST_HOME,'assets/vanilla'),imports:[]};const record={method,streaming:params.streaming,progressId:params.progressId};calls.push(record);return super.call(method,params).then(result=>{if(method==='exportScene')Object.assign(record,{quads:result.quads,exportMillis:result.exportMillis,sceneBuildMillis:result.sceneBuildMillis});return result;});}
 };
 const fixture=process.env.LITEMATIC_DIRECT_SCHEMATIC||path.join(__dirname,'projection-edit-output/original.litematic');
 let failed=false;
@@ -34,6 +34,21 @@ app.once('browser-window-created',(_event,win)=>{
         directCheck();return{quads:state.view.quadCount,messages:directBusyMessages.slice(),info:state.info,stages:directStages.slice()};
       })()`);
       assert(initial.quads>0);assert(!initial.messages.some(text=>text.includes('分块')));
+      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>{drawView();requestAnimationFrame(resolve);}))');
+      win.webContents.invalidate();
+      // 隐藏窗口需要先触发一次捕获，等待合成器发布新画面。
+      await win.webContents.capturePage(undefined,{stayHidden:true,stayAwake:true});
+      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+      const area=await evaluate('(()=>{const r=els.gl.getBoundingClientRect();return{x:Math.round(r.x),y:Math.round(r.y),width:Math.floor(r.width),height:Math.floor(r.height)};})()');
+      const screenshot=await win.webContents.capturePage(area,{stayHidden:true,stayAwake:true});
+      assert(!screenshot.isEmpty(),'GPU screenshot is empty');
+      const pixels=screenshot.toBitmap(),colors=new Set();for(let i=0;i<pixels.length;i+=4)colors.add(pixels.readUInt32LE(i));
+      assert(colors.size>32,'GPU screenshot lacks rendered detail');fs.writeFileSync(path.join(out,'gpu-preview.png'),screenshot.toPNG());
+      if(path.basename(fixture)==='pipeline.litematic'){
+        let missing=0,fixtureColor=0;for(let i=0;i<pixels.length;i+=4){const b=pixels[i],g=pixels[i+1],r=pixels[i+2];if(r>150&&b>150&&g<80)missing++;if(r>100&&g>60&&b<150)fixtureColor++;}
+        assert(missing<10,'GPU fixture contains missing-texture magenta');assert(fixtureColor>100,'GPU fixture colors are missing');
+        assert((await evaluate('els.stats.textContent')).includes('1 个实体暂未显示'),'unsupported entity is not visible in statistics');
+      }
       const required=['lighting','geometry','optimizing','encoding','transfer','decoding','upload'];
       let last=-1;for(const stage of required){const index=initial.stages.findIndex(s=>s.stage===stage);assert(index>last,'阶段缺失或顺序不正确：'+stage);last=index;}
       await evaluate(`(()=>{
@@ -79,6 +94,15 @@ app.once('browser-window-created',(_event,win)=>{
         directCheck();
       })()`);
       assert.equal((await new OriginalSettings(out).settings()).projectionMode,'full','手动加载方式未保存');
+      if(path.basename(fixture)==='pipeline.litematic'){
+        const formatRoot=process.env.LITEMATIC_FORMAT_FIXTURES||path.join(root,'tools/verify/verification-output/formats');
+        for(const [name,position]of [['valid-structure.nbt',[1,0,1]],['valid-sponge-2.schem',[-2,2,5]],['valid-sponge-3.schem',[-2,2,5]]]){
+          const file=path.join(formatRoot,name);assert(fs.existsSync(file),'format fixture missing: '+name);
+          await evaluate(`loadFile(${JSON.stringify(file)})`);
+          const imported=await evaluate(`(async()=>({ready:state.viewReady,quads:state.view.quadCount,blocks:state.info.totalBlocks,container:await window.engine.inspectPosition(${JSON.stringify(position)})}))()`);
+          assert(imported.ready&&imported.quads>0&&imported.blocks===2,'format did not render imported blocks: '+name);assert.equal(imported.container.id,'minecraft:chest');
+        }
+      }
       const result={pass:true,fixture,quads:initial.quads,reusedOnEquivalentMode:true,streamingRoundTrip:initial.quads<10000,exports:calls.filter(c=>c.method==='exportScene'),stages:initial.stages,cachedStages,...forced};
       fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
     }catch(error){failed=true;fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({pass:false,error:error.stack,calls,progress},null,2));console.error(error.stack);}

@@ -3,6 +3,11 @@
 /** 预览界面通过预加载桥调用 Java；相机变化留在 GPU，导出按所选分辨率重新渲染。拖动旋转参考 quickcraft，俯仰限制为 ±85 度，缩放采用指数变化。 */
 
 const $ = (id) => document.getElementById(id);
+document.title=AppVersion.title;document.querySelector('.appname').textContent=AppVersion.title;
+function entitySummary(report){
+  if(!report?.saved)return '';
+  return ` · 实体 ${report.rendered} / ${report.saved}`+(report.unsupported?` · ${report.unsupported} 个实体暂未显示`:'');
+}
 
 const els = {
   materials:$('btnMaterials'), menuMaterials:$('menuMaterials'),
@@ -349,7 +354,7 @@ async function buildView(options = {}) {
           if(status.hasFull&&sequence===status.total){
             const result=await window.engine.previewComplete(job.id);if(generation!==gpuBuildGeneration)return;
             state.view.stream.finishProgressive(result);
-            els.stats.textContent=`${result.quads.toLocaleString()} 面 · ${(result.meshBytes/1048576).toFixed(1)} MB · 完整模型已生成`+(result.entities?.saved?` · 实体 ${result.entities.rendered}`:'');
+            els.stats.textContent=`${result.quads.toLocaleString()} 面 · ${(result.meshBytes/1048576).toFixed(1)} MB · 完整模型已生成`+entitySummary(result.entities);
             log(`完整模型已生成：${result.quads.toLocaleString()} 面，准备 ${result.exportMillis} ms；保留已载入区块，继续补充当前视角。`,'ok');
             window.engine.previewDiagnostic(`detail generation complete: ${result.quads} faces, ${result.exportMillis} ms; GPU residents retained`).catch(()=>{});
             drawView();return;
@@ -471,7 +476,7 @@ async function applyGpuScene(res,options={}) {
     if(!res.overview&&state.preloadMode!=='streaming')startPreload();else updatePreloadInfo();
     const mib = (res.meshBytes / 1048576).toFixed(1);
     const v = state.view;
-    els.stats.textContent = (res.overview?'总览 · 完整材质准备中 · ':'')+`${stats.quads.toLocaleString()} 面 · ${(stats.totalVertices / 1000).toFixed(0)}k 顶点 · ${mib} MB`+(res.entities?.saved?` · 实体 ${res.entities.rendered}`:'');
+    els.stats.textContent = (res.overview?'总览 · 完整材质准备中 · ':'')+`${stats.quads.toLocaleString()} 面 · ${(stats.totalVertices / 1000).toFixed(0)}k 顶点 · ${mib} MB`+entitySummary(res.entities);
     els.stats.title=res.entities?.saved?`已显示 ${res.entities.rendered} 个指定类型实体；其他类型 ${res.entities.unsupported} 个，隐形 ${res.entities.invisible} 个。`:'';
     reportFraming();
     log(`${res.overview?'简化总览已生成':'模型数据已载入'}：${stats.quads.toLocaleString()} 面，${mib} MB，准备 ${res.exportMillis} ms`, 'ok');
@@ -1172,8 +1177,8 @@ window.addEventListener('dragenter',event=>{
   if(!isFileDrag(event))return;
   event.preventDefault();fileDragDepth++;
   els.fileDropMessage.textContent=hasActiveRender()||state.stopping
-    ?'将停止当前渲染，并打开新的 .litematic 投影'
-    :'拖入一个 .litematic 文件，即可开始预览';
+    ?'将停止当前渲染，并打开新的投影或结构'
+    :'拖入一个 '+SchematicFormats.label+' 文件，即可开始预览';
   els.fileDropHint.classList.remove('hidden');
 });
 window.addEventListener('dragover',event=>{
@@ -1190,8 +1195,8 @@ window.addEventListener('drop',event=>{
   event.preventDefault();hideFileDropHint();
   const files=Array.from(event.dataTransfer?.files||[]);
   if(!files.length)return;
-  if(files.length!==1||!files[0].name.toLowerCase().endsWith('.litematic')){
-    log('请每次拖入一个 .litematic 投影文件。','err');return;
+  if(files.length!==1||!SchematicFormats.accepts(files[0].name)){
+    log('请每次拖入一个 '+SchematicFormats.label+' 文件。','err');return;
   }
   try{
     const file=window.shellApi.droppedFilePath(files[0]);
@@ -1502,6 +1507,7 @@ function showFileInfo(info) {
     ['区域', String(info.regionCount)],
     ['方块数', String(info.totalBlocks)],
   ];
+  if(info.description)rows.push(['说明',info.description]);
   els.fileInfo.innerHTML = rows
     .map(([k, v]) => `<div class="row"><span>${escapeHtml(k)}</span><span>${escapeHtml(String(v))}</span></div>`)
     .join('');
@@ -1725,49 +1731,7 @@ $('clearCacheOnExit').addEventListener('change',async()=>{
 });
 window.__uiReady?.then(()=>refreshSceneCacheInfo().catch(()=>{}));
 
-// 材料清单只使用解析后的投影，不请求场景几何。
-let materialReport=null,materialWaterAsIce=false,materialSourceFile=null;
-function drawMaterials() {
-  const query=$('materialSearch').value.trim().toLowerCase();
-  for(const [key,id] of [['building','buildingMaterials'],['contents','containerMaterials']]) {
-    const panel=$(id);panel.replaceChildren();const table=document.createElement('table'),head=document.createElement('thead'),header=document.createElement('tr');
-    for(const label of ['','物品名','数量','需盒']){const th=document.createElement('th');th.textContent=label;header.append(th);}head.append(header);table.append(head);
-    const body=document.createElement('tbody');const rows=materialReport?.[key]||[];
-    for(const row of rows.filter(r=>!query||(r.name+' '+r.id).toLowerCase().includes(query))) {
-      const tr=document.createElement('tr'),icon=document.createElement('td'),name=document.createElement('td'),count=document.createElement('td'),boxes=document.createElement('td');tr.dataset.itemId=row.id;icon.className='material-icon';
-      if(row.icon){const img=document.createElement('img');img.src=row.icon;img.alt='';img.width=img.height=40;img.loading='lazy';icon.append(img);}else{const missing=document.createElement('span');missing.className='material-icon-empty';missing.textContent='?';missing.title='暂无对应贴图';icon.append(missing);}
-      name.textContent=row.name;const detail=document.createElement('small');detail.textContent=row.id;name.append(detail);count.textContent=Number(row.count).toLocaleString('zh-CN');
-      const stacks=document.createElement('small');stacks.textContent=row.maxStack?(row.stacks+' 组 '+row.remainder+' 个'):'堆叠上限未知';count.append(stacks);boxes.textContent=row.boxes===undefined?'':row.boxes+' 盒';tr.append(icon,name,count,boxes);body.append(tr);
-    }
-    table.append(body);panel.append(table);if(!body.children.length){const empty=document.createElement('p');empty.className='muted small';empty.textContent=query?'没有匹配的物品':'没有已知材料';panel.append(empty);}
-  }
-  if(materialReport){$('materialSummary').textContent='建材 '+materialReport.building.length+' 种 · 容器内容物 '+materialReport.contents.length+' 种；潜影盒 27 格，达到半盒才显示需盒数。';$('materialWarnings').textContent=materialReport.warnings.join(' ');$('materialConvertWater').textContent=materialWaterAsIce?'恢复水桶统计':'水桶换算为冰';$('materialConvertWater').disabled=!materialReport.waterBucketCount;$('materialConversion').hidden=!materialWaterAsIce;$('materialConversion').textContent='已将建材中的 '+Number(materialReport.waterBucketCount).toLocaleString('zh-CN')+' 桶水按 1:1 换算为普通冰，并合并已有冰；导出采用当前结果。容器内物品保持原样。';}
-}
-async function showMaterials() {
-  if(!state.file||state.rendering||state.scenePreparing)return;
-  if(materialSourceFile!==state.file){materialSourceFile=state.file;materialWaterAsIce=false;}
-  $('materialStatus').textContent='正在统计材料…';$('materialExport').disabled=true;$('materialConvertWater').disabled=true;$('materialDialog').showModal();
-  try{materialReport=await window.engine.materials({waterAsIce:materialWaterAsIce});drawMaterials();$('materialStatus').textContent='';$('materialExport').disabled=false;}
-  catch(error){$('materialStatus').textContent='统计失败：'+error.message;}
-}
-els.materials.addEventListener('click',showMaterials);els.menuMaterials.addEventListener('click',()=>{toggleFileMenu(false);showMaterials();});
-$('materialClose').addEventListener('click',()=>$('materialDialog').close());$('materialSearch').addEventListener('input',drawMaterials);
-$('materialConvertWater').addEventListener('click',async()=>{
-  $('materialConvertWater').disabled=true;$('materialExport').disabled=true;$('materialStatus').textContent='正在换算…';
-  try{materialReport=await window.engine.materials({waterAsIce:!materialWaterAsIce});materialWaterAsIce=materialReport.waterAsIce;drawMaterials();$('materialStatus').textContent='';}
-  catch(error){$('materialStatus').textContent='换算失败：'+error.message;}
-  finally{$('materialConvertWater').disabled=!materialReport?.waterBucketCount;$('materialExport').disabled=!materialReport;}
-});
-$('materialExport').addEventListener('click',async()=>{
-  const format=$('materialFormat').value,scope=$('materialScope').value;
-  $('materialExport').disabled=true;$('materialStatus').textContent='请选择保存位置…';
-  try {
-    const file=await window.shellApi.saveMaterials({suggested:((state.info?.name&&state.info.name!=='?'?state.info.name:state.file.split(/[\\/]/).pop().replace(/\.litematic$/i,'')).replace(/[<>:"\\/|?*\x00-\x1f]/g,'_').slice(0,120))+'-材料清单.'+format,format,scope});
-    if(!file){$('materialStatus').textContent='已取消导出';return;}
-    $('materialStatus').textContent='正在导出…';
-    const result=await window.engine.exportMaterials({out:file,scope,waterAsIce:materialWaterAsIce});$('materialStatus').textContent='已导出：'+result.files.join('；');log('材料表已导出：'+result.files.join('；'));
-  }catch(error){$('materialStatus').textContent='导出失败：'+error.message;}finally{$('materialExport').disabled=false;}
-});
+installMaterialsPanel({$,els,state,log,toggleFileMenu});
 
 function setConsoleHidden(hidden,persist=true){
   $('debugConsole').classList.toggle('hidden',hidden);$('btnToggleConsole').textContent=hidden?'显示调试信息':'隐藏调试信息';$('btnToggleConsole').setAttribute('aria-expanded',String(!hidden));

@@ -15,7 +15,7 @@ echo Installing Electron into webapp\ ...
 pushd "%DIR%webapp"
 set "ELECTRON_MIRROR=https://cdn.npmmirror.com/binaries/electron/"
 set "npm_config_registry=https://registry.npmmirror.com/"
-call "%NPM%" install --no-audit --no-fund
+call "%NPM%" ci --no-audit --no-fund
 set "RC=%ERRORLEVEL%"
 popd
 
@@ -24,6 +24,6 @@ if not "%RC%"=="0" (
     pause
     exit /b 1
 )
-echo Done. Double-click LitematicRender.exe in the project root to start the app.
+echo Done. Double-click 投影预览.exe in the project root to start the app.
 pause
 endlocal
