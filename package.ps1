@@ -167,7 +167,7 @@ Copy-Item (Join-Path $webapp 'renderer') -Destination $stageWebapp -Recurse
 
 if (-not $SkipElectron) {
     $electronSrc = Join-Path $webapp 'node_modules/electron'
-    if (-not (Test-Path $electronSrc)) { throw "electron not installed; run install.bat (needs network once)" }
+    if (-not (Test-Path -LiteralPath (Join-Path $electronSrc 'dist/electron.exe'))) { throw "Electron runtime not installed; run install.bat (needs network once)" }
 
     # 界面只需 Electron 二进制目录及模块元数据。
     $nmElectron = Join-Path $stageWebapp 'node_modules/electron'

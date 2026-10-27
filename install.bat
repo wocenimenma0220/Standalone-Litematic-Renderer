@@ -24,6 +24,13 @@ if not "%RC%"=="0" (
     pause
     exit /b 1
 )
+rem Electron 44 的 npm 包需要显式准备桌面运行时。
+"%NODE%" "%DIR%webapp\node_modules\electron\install.js"
+if errorlevel 1 (
+    echo [ERROR] Electron runtime installation failed.
+    pause
+    exit /b 1
+)
 echo Done. Double-click 投影预览.exe in the project root to start the app.
 pause
 endlocal

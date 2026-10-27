@@ -19,7 +19,11 @@ jobs:
         shell: pwsh
         run: |
           npm ci --prefix tools/verify
+          if ($LASTEXITCODE -ne 0) { throw '界面验证依赖安装失败' }
           npm ci --prefix webapp
+          if ($LASTEXITCODE -ne 0) { throw '桌面界面依赖安装失败' }
+          node webapp/node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path webapp/node_modules/electron/dist/electron.exe)) { throw 'Electron 运行时安装失败' }
       - name: 二维界面与真实桌面三维回归
         shell: pwsh
         run: ./verify.ps1 -Ui -DesktopUi -JdkHome $env:JAVA_HOME
