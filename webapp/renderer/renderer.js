@@ -321,6 +321,8 @@ async function buildView(options = {}) {
       const job=await window.engine.beginPreview({force:options.force===true,realLighting:els.realLighting.checked,lightingEnabled:els.lightingEnabled.checked});
       if(generation!==gpuBuildGeneration)return;
       state.scenePreparing=true;state.previewJobId=job.id;updateButtons();let shown=false,live=false,sequence=0,lastPriority='',lastPriorityAt=0;
+      previewPushWaiter={id:job.id,latest:null,wake:null};
+      try{
       while(generation===gpuBuildGeneration) {
         const query={after:sequence},priority=previewViewPriority(),priorityKey=JSON.stringify(priority);
         if(priorityKey!==lastPriority&&performance.now()-lastPriorityAt>=300){query.view=priority;lastPriority=priorityKey;lastPriorityAt=performance.now();}
@@ -340,7 +342,7 @@ async function buildView(options = {}) {
         }
         if(status.hasLive&&shown&&!live){
           const detail=await window.engine.previewLive(job.id);
-          const bitmap=await createImageBitmap(base64ToBlob(detail.atlasDataUrl),{premultiplyAlpha:'none',colorSpaceConversion:'none'});
+          const bitmap=await createImageBitmap(atlasBlobFromPayload(detail),{premultiplyAlpha:'none',colorSpaceConversion:'none'});
           if(generation!==gpuBuildGeneration){bitmap.close();return;}
           state.view.uploadAtlas(bitmap);bitmap.close();state.view.stream.beginProgressive(detail.meshTransfer.id,detail.sections);
           if(detail.skins){const s=detail.skins;els.skinInfo.textContent=`皮肤：缓存 ${s.cached} · 新下载 ${s.downloaded} · 本地 ${s.local} · 默认 ${s.fallback}`;}
@@ -363,8 +365,12 @@ async function buildView(options = {}) {
         if(shown&&!live){const labels={skins:'准备玩家皮肤',indexing:'整理区块',lighting:'计算全局光照',sprites:'准备特殊方块贴图'};setStatus('总览已显示，'+(labels[status.stage]||'正在准备光照与贴图')+'…','');}
         if(status.stage==='failed')throw Error(status.error||'完整场景准备失败');
         if(status.stage==='cancelled')return;
-        await new Promise(resolve=>setTimeout(resolve,status.next<status.published?0:150));
+        const pushed=previewPushWaiter?.latest;
+        const hasPendingWork=status.next<status.published||(pushed&&((pushed.hasOverview&&!shown)||(pushed.hasLive&&!live)||pushed.published>sequence||pushed.hasFull||pushed.stage!==status.stage));
+        if(hasPendingWork){await new Promise(resolve=>setTimeout(resolve,0));}
+        else{await waitForPreviewPush(job.id,shown&&!live?350:500);}
       }
+      }finally{if(previewPushWaiter?.id===job.id)previewPushWaiter=null;}
       return;
     }
     const res = await window.engine.exportScene({force:options.force===true,realLighting:els.realLighting.checked,lightingEnabled:els.lightingEnabled.checked,streaming:false,progressId:String(generation)});
@@ -408,7 +414,7 @@ async function applyGpuScene(res,options={}) {
     // 图集解码禁用预乘透明度，保持与 SRC_ALPHA 混合及 CPU PNG 原始像素一致，防止玻璃变灰。
 
 
-    const atlasImage = await createImageBitmap(base64ToBlob(res.atlasDataUrl), {
+    const atlasImage = await createImageBitmap(atlasBlobFromPayload(res), {
       premultiplyAlpha: 'none',
       colorSpaceConversion: 'none',
     });
@@ -484,6 +490,33 @@ async function applyGpuScene(res,options={}) {
     window.engine.previewDiagnostic(`preview ready: ${stats.quads} faces; sectioned=${!!state.view.stream}; chunkedTransfer=${streamed}`).catch(()=>{});
 }
 
+
+function atlasBlobFromPayload(payload) {
+  if (payload?.atlasArrayBuffer) return new Blob([payload.atlasArrayBuffer], { type: 'image/png' });
+  return base64ToBlob(payload.atlasDataUrl);
+}
+
+let previewPushWaiter = null;
+function wakePreviewWaiter(evt) {
+  if (!previewPushWaiter || evt.id !== previewPushWaiter.id) return;
+  previewPushWaiter.latest = evt;
+  if (previewPushWaiter.wake) {
+    const fn = previewPushWaiter.wake;
+    previewPushWaiter.wake = null;
+    fn();
+  }
+}
+function waitForPreviewPush(id, timeoutMs) {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => {
+      if (previewPushWaiter && previewPushWaiter.id === id) previewPushWaiter.wake = null;
+      resolve();
+    }, timeoutMs);
+    if (previewPushWaiter && previewPushWaiter.id === id) {
+      previewPushWaiter.wake = () => { clearTimeout(timer); resolve(); };
+    }
+  });
+}
 
 function base64ToBlob(dataUrl) {
   const comma = dataUrl.indexOf(',');
@@ -1645,6 +1678,7 @@ function renderPackList() {
 
 window.engine.onEvent((evt) => {
   if(evt.event==='previewProgress'){handlePreviewProgress(evt);return;}
+  if(evt.event==='previewStatus'){wakePreviewWaiter(evt);return;}
   if (evt.event === 'stderr' && evt.message && evt.message.trim()) {
     const text = evt.message.trim();
     if (/unresolved|error|exception|failed/i.test(text)) log(text, 'err');

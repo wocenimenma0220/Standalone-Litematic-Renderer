@@ -58,7 +58,16 @@ final class SceneCache {
         if(!Files.exists(path))return;
         List<Path> files;try(var walk=Files.walk(path)){files=walk.sorted(Comparator.reverseOrder()).toList();}
         for(Path file:files)if(!file.toRealPath().startsWith(root.toRealPath()))throw new IOException("缓存目录包含外部链接，未清理");
-        for(Path file:files)Files.deleteIfExists(file);
+        for(Path file:files)deleteWithRetry(file);
+    }
+    private static void deleteWithRetry(Path file)throws IOException {
+        for(int attempt=0;;attempt++){
+            try{Files.deleteIfExists(file);return;}
+            catch(AccessDeniedException|DirectoryNotEmptyException error){
+                if(attempt>=4)throw error;
+                try{Thread.sleep(15L*(attempt+1));}catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw error;}
+            }
+        }
     }
     private long size(Path directory){try(var files=Files.walk(directory)){return files.filter(Files::isRegularFile).mapToLong(p->{try{return Files.size(p);}catch(IOException e){return 0;}}).sum();}catch(IOException e){return 0;}}
     private List<Path> entries()throws IOException {try(var list=Files.list(root)){return list.filter(p->Files.isDirectory(p)&&p.getFileName().toString().matches("[a-f0-9]{64}")).toList();}}

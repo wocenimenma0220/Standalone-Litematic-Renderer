@@ -23,8 +23,10 @@ public final class ResourcePack implements AutoCloseable {
     public final String id;
     public final PackSource source;
     public final boolean imported;
+    private static final long MAX_CACHE_BYTES = 32L * 1024 * 1024;
     private final Set<String> namespaces = new HashSet<>();
-    private final Map<String, byte[]> cache = new HashMap<>();
+    private final Map<String, byte[]> cache = new LinkedHashMap<>(256, 0.75f, true);
+    private long cachedBytes;
     private boolean closed;
 
     private ResourcePack(String id, PackSource source, boolean imported) throws IOException {
@@ -77,8 +79,20 @@ public final class ResourcePack implements AutoCloseable {
         String full = "assets/" + namespace + "/" + path;
         byte[] data = this.source.read(full);
         if (data != null) {
-            // 大文件不进入内存缓存。
-            if (data.length <= 4 * 1024 * 1024) this.cache.put(key, data);
+            // 大文件不进入内存缓存；有界 LRU 限制总缓存体积防止内存膨胀。
+            if (data.length <= 4 * 1024 * 1024) {
+                byte[] previous = this.cache.put(key, data);
+                if (previous != null) this.cachedBytes -= previous.length;
+                this.cachedBytes += data.length;
+                var iterator = this.cache.entrySet().iterator();
+                while (this.cachedBytes > MAX_CACHE_BYTES && iterator.hasNext()) {
+                    var eldest = iterator.next();
+                    if (iterator.hasNext() || this.cache.size() > 1) {
+                        this.cachedBytes -= eldest.getValue().length;
+                        iterator.remove();
+                    } else break;
+                }
+            }
         }
         return data;
     }
@@ -132,6 +146,7 @@ public final class ResourcePack implements AutoCloseable {
     public synchronized void close() {
         this.closed = true;
         this.cache.clear();
+        this.cachedBytes = 0;
         try {
             this.source.close();
         } catch (IOException ignored) {}
@@ -164,8 +179,12 @@ public final class ResourcePack implements AutoCloseable {
         @Override
         public List<String> listEntries(String prefix) {
             // 资源包是会话快照；重新加载时重新验证内容指纹，包括新增文件和同元数据修改。
-
-            if(assetEntries!=null&&prefix.equals("assets/"))return assetEntries;
+            if (assetEntries != null && prefix.startsWith("assets/")) {
+                if (prefix.equals("assets/")) return assetEntries;
+                List<String> filtered = new ArrayList<>();
+                for (String entry : assetEntries) if (entry.startsWith(prefix)) filtered.add(entry);
+                return filtered;
+            }
             List<String> result = new ArrayList<>();
             Path base = this.root.resolve(prefix);
             if (!Files.isDirectory(base)) return result;
@@ -188,6 +207,7 @@ public final class ResourcePack implements AutoCloseable {
     private static final class ZipSource implements PackSource {
         private final Path zipPath;
         private ZipFile zipFile;
+        private List<String> allEntries;
         private boolean failed;
 
         ZipSource(Path zipPath) { this.zipPath = zipPath; }
@@ -205,8 +225,21 @@ public final class ResourcePack implements AutoCloseable {
             return this.zipFile;
         }
 
+        private List<String> entries() throws IOException {
+            if (this.allEntries != null) return this.allEntries;
+            ZipFile zf = this.zip();
+            List<String> list = new ArrayList<>();
+            Enumeration<? extends ZipEntry> entries = zf.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (!entry.isDirectory()) list.add(entry.getName().replace('\\', '/'));
+            }
+            this.allEntries = List.copyOf(list);
+            return this.allEntries;
+        }
+
         @Override
-        public byte[] read(String path) {
+        public synchronized byte[] read(String path) {
             try {
                 ZipEntry entry = this.zip().getEntry(path);
                 if (entry == null) return null;
@@ -219,15 +252,10 @@ public final class ResourcePack implements AutoCloseable {
         }
 
         @Override
-        public List<String> listEntries(String prefix) {
+        public synchronized List<String> listEntries(String prefix) {
             List<String> result = new ArrayList<>();
             try {
-                ZipFile zf = this.zip();
-                Enumeration<? extends ZipEntry> entries = zf.entries();
-                while (entries.hasMoreElements()) {
-                    ZipEntry entry = entries.nextElement();
-                    if (entry.isDirectory()) continue;
-                    String name = entry.getName().replace('\\', '/');
+                for (String name : this.entries()) {
                     if (name.startsWith(prefix)) result.add(name);
                 }
             } catch (IOException ignored) {}
@@ -235,7 +263,8 @@ public final class ResourcePack implements AutoCloseable {
         }
 
         @Override
-        public void close() throws IOException {
+        public synchronized void close() throws IOException {
+            this.allEntries = null;
             if (this.zipFile != null) {
                 this.zipFile.close();
                 this.zipFile = null;

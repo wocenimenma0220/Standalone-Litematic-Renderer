@@ -24,7 +24,7 @@ async function cacheValidator(home) {
 /** 引擎和场景读取停止后，仅清理生成的渲染缓存。 */
 async function clearRenderingCache(home) {
   const {base,inside,validate}=await cacheValidator(home);
-  for (const parts of [['cache','scenes'], ['cache','previews'], ['cache','resources'], ['renders','.gpu']]) {
+  for (const parts of [['cache','scenes'], ['cache','previews'], ['cache','resources'], ['cache','exports'], ['renders','.gpu']]) {
     const directory = path.resolve(base, ...parts);
     if (!inside(directory)) throw new Error('无效缓存清理路径');
     try {

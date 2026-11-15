@@ -1,4 +1,4 @@
-# 默认执行无需资源包的快速检查；Full 增加独立目录中的引擎回归，Ui 增加界面回归。
+﻿# 默认执行无需资源包的快速检查；Full 增加独立目录中的引擎回归，Ui 增加界面回归。
 param(
     [ValidateSet('Fast','Full')][string]$Profile='Fast',
     [switch]$Ui,
@@ -31,16 +31,22 @@ function Invoke-Check {
     $result | Select-Object -Last 2 | Write-Output
 }
 
-$checks=@('board-regression','board-timing-regression','board-components-regression','board-wire-regression','board-devices-regression','board-piston-regression','board-entities-regression','board-world-features-regression','board-tnt-regression','board-inventory-regression','board-support-regression','board-audio-regression','projection-edit-model','projection-edit-session','placement-inventory-model','editor-inventory-model','board-session-regression','background-exports','cache-cleanup-regression')
-foreach($check in $checks){Invoke-Check -Name $check -Executable $node -Arguments @("tools/verify/$check.cjs")}
+$checks=@(
+    'board/board-regression','board/board-timing-regression','board/board-components-regression','board/board-wire-regression',
+    'board/board-devices-regression','board/board-piston-regression','board/board-entities-regression','board/board-world-features-regression',
+    'board/board-tnt-regression','board/board-inventory-regression','board/board-support-regression','board/board-audio-regression',
+    'editor/projection-edit-model','editor/projection-edit-session','editor/placement-inventory-model','editor/editor-inventory-model',
+    'board/board-session-regression','render/background-exports','render/cache-cleanup-regression'
+)
+foreach($check in $checks){Invoke-Check -Name ([IO.Path]::GetFileNameWithoutExtension($check)) -Executable $node -Arguments @("tools/verify/$check.cjs")}
 Invoke-Check -Name '版本一致性' -Executable $node -Arguments @('tools/version.cjs')
-Invoke-Check -Name '版本与文件入口' -Executable $node -Arguments @('tools/verify/version-regression.cjs')
-& ./tools/verify/resource-preparation-regression.ps1
+Invoke-Check -Name '版本与文件入口' -Executable $node -Arguments @('tools/verify/release/version-regression.cjs')
+& ./tools/verify/release/resource-preparation-regression.ps1
 $sources=@(Get-ChildItem src -Recurse -Filter '*.java' | ForEach-Object FullName)
-$javaChecks=@('PreviewCheckpointRegression','RenderingPipelineRegression','GifTransparencyRegression','SavedEntityDataRegression','SchematicFormatsRegression')
-if($Profile -eq 'Full'){$javaChecks+=@('ProjectionEditRegression','PlacementInventoryRegression','PistonEditRegression','EditPreviewBudgetRegression')}
+$javaChecks=@('render/PreviewCheckpointRegression','render/RenderingPipelineRegression','render/GifTransparencyRegression','render/SavedEntityDataRegression','render/SchematicFormatsRegression')
+if($Profile -eq 'Full'){$javaChecks+=@('editor/ProjectionEditRegression','editor/PlacementInventoryRegression','editor/PistonEditRegression','editor/EditPreviewBudgetRegression')}
 $testSources=@($javaChecks | ForEach-Object {Join-Path $PSScriptRoot "tools/verify/$_.java"})
-Invoke-Check -Name 'Java 编译' -Executable $javac -Arguments (@('--release','21','-encoding','UTF-8','-nowarn','-d',$classes)+$sources+$testSources)
+Invoke-Check -Name 'Java 编译' -Executable $javac -Arguments (@('--release','21','-encoding','UTF-8','-Xlint:all','-d',$classes)+$sources+$testSources)
 Invoke-Check -Name '预览检查点' -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-cp',$classes,'PreviewCheckpointRegression',$output)
 $pipelineHome=Join-Path $output 'pipeline-home'
 if(Test-Path -LiteralPath $pipelineHome){
@@ -62,12 +68,12 @@ if($Profile -eq 'Full'){
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets') -Destination $sandbox -Recurse
     foreach($check in @('ProjectionEditRegression','PlacementInventoryRegression','PistonEditRegression','EditPreviewBudgetRegression')){Invoke-Check -Name $check -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-Xmx2g',"-Dlitematicrender.home=$sandbox",'-Dlitematicrender.skins.offline=true','-cp',$classes,$check,$sandbox)}
 }
-if($Ui){foreach($check in @('board-loading-ui','board-unified-ui','board-entities-ui','board-tnt-ui')){Invoke-Check -Name $check -Executable $node -Arguments @("tools/verify/$check.cjs")}}
+if($Ui){foreach($check in @('board-loading-ui','board-unified-ui','board-entities-ui','board-tnt-ui')){Invoke-Check -Name $check -Executable $node -Arguments @("tools/verify/board/$check.cjs")}}
 if($DesktopUi){
     $previousHome=$env:LITEMATIC_TEST_HOME;$previousClasses=$env:LITEMATIC_TEST_CLASSPATH;$previousFixture=$env:LITEMATIC_DIRECT_SCHEMATIC
     try{
         $env:LITEMATIC_TEST_HOME=$pipelineHome;$env:LITEMATIC_TEST_CLASSPATH=$classes;$env:LITEMATIC_DIRECT_SCHEMATIC=Join-Path $pipelineHome 'pipeline.litematic'
-        & ./tools/verify/RunHiddenElectron.ps1 -Script tools/verify/direct-preview-ui.cjs
+        & ./tools/verify/RunHiddenElectron.ps1 -Script tools/verify/editor/direct-preview-ui.cjs
     }finally{$env:LITEMATIC_TEST_HOME=$previousHome;$env:LITEMATIC_TEST_CLASSPATH=$previousClasses;$env:LITEMATIC_DIRECT_SCHEMATIC=$previousFixture}
 }
 if($Schematic){

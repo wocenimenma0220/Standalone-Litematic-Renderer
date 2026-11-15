@@ -55,18 +55,31 @@ public final class Image {
 
 
     public void blitFrom(Image src, int srcX, int srcY, int dstX, int dstY, int w, int h) {
-        for (int y = 0; y < h; y++) {
-            int dy = dstY + y;
-            if (dy < 0 || dy >= this.height) continue;
-            int sy = srcY + y;
-            if (sy < 0 || sy >= src.height) continue;
-            for (int x = 0; x < w; x++) {
-                int dx = dstX + x;
-                if (dx < 0 || dx >= this.width) continue;
-                int sx = srcX + x;
-                if (sx < 0 || sx >= src.width) continue;
-                this.setPixel(dx, dy, src.pixel(sx, sy));
-            }
+        if (w <= 0 || h <= 0) return;
+        int startX = 0;
+        if (dstX < 0) startX = Math.max(startX, -dstX);
+        if (srcX < 0) startX = Math.max(startX, -srcX);
+        int endX = w;
+        if (dstX + endX > this.width) endX = this.width - dstX;
+        if (srcX + endX > src.width) endX = src.width - srcX;
+        int copyW = endX - startX;
+        if (copyW <= 0) return;
+
+        int startY = 0;
+        if (dstY < 0) startY = Math.max(startY, -dstY);
+        if (srcY < 0) startY = Math.max(startY, -srcY);
+        int endY = h;
+        if (dstY + endY > this.height) endY = this.height - dstY;
+        if (srcY + endY > src.height) endY = src.height - srcY;
+        if (endY <= startY) return;
+
+        int sStride = src.width, dStride = this.width;
+        int sOff = (srcY + startY) * sStride + (srcX + startX);
+        int dOff = (dstY + startY) * dStride + (dstX + startX);
+        for (int y = startY; y < endY; y++) {
+            System.arraycopy(src.pixels, sOff, this.pixels, dOff, copyW);
+            sOff += sStride;
+            dOff += dStride;
         }
     }
 

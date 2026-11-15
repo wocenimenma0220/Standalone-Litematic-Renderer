@@ -29,8 +29,41 @@ public final class SkinResolver {
     private final AtomicInteger downloads = new AtomicInteger(), cacheHits = new AtomicInteger(), localHits = new AtomicInteger();
     private int unidentified;
     private static final int IMAGE_LIMIT = 2 * 1024 * 1024;
+    private static final long NEGATIVE_TTL_MS = 5L * 60L * 1000L;
+    private static final int NEGATIVE_CACHE_MAX = 1024;
+    private static final Fetcher DEFAULT_FETCHER = SkinResolver::download;
+    private static final ConcurrentHashMap<String, Long> NEGATIVE_CACHE = new ConcurrentHashMap<>();
+    private static final ExecutorService DOWNLOAD_POOL = createDownloadPool();
 
-    public SkinResolver(Path home) { this(home, onlineEnabled(home), SkinResolver::download); }
+    private static ExecutorService createDownloadPool() {
+        var pool = new ThreadPoolExecutor(4, 4, 30L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), task -> {
+            Thread t = new Thread(task, "minecraft-skin-loader");
+            t.setDaemon(true);
+            return t;
+        });
+        pool.allowCoreThreadTimeOut(true);
+        return pool;
+    }
+
+    private static boolean isNegativeCached(String key) {
+        Long ts = NEGATIVE_CACHE.get(key);
+        if (ts == null) return false;
+        if (System.currentTimeMillis() - ts < NEGATIVE_TTL_MS) return true;
+        NEGATIVE_CACHE.remove(key, ts);
+        return false;
+    }
+
+    private static void putNegativeCache(String key) {
+        if (Thread.currentThread().isInterrupted()) return;
+        long now = System.currentTimeMillis();
+        if (NEGATIVE_CACHE.size() >= NEGATIVE_CACHE_MAX) {
+            NEGATIVE_CACHE.entrySet().removeIf(e -> now - e.getValue() >= NEGATIVE_TTL_MS);
+            if (NEGATIVE_CACHE.size() >= NEGATIVE_CACHE_MAX) NEGATIVE_CACHE.clear();
+        }
+        NEGATIVE_CACHE.put(key, now);
+    }
+
+    public SkinResolver(Path home) { this(home, onlineEnabled(home), DEFAULT_FETCHER); }
     public SkinResolver(Path home, boolean online, Fetcher fetcher) {
         this.cache = home.toAbsolutePath().normalize().resolve("skins");
         this.online = online && !Boolean.getBoolean("litematicrender.skins.offline");
@@ -46,6 +79,7 @@ public final class SkinResolver {
         return true;
     }
     public static void setOnline(Path home, boolean online) throws IOException {
+        NEGATIVE_CACHE.clear();
         atomicWrite(home.resolve("skins/settings.json"), ("{\"online\":" + online + "}\n").getBytes(StandardCharsets.UTF_8));
     }
     public static void importLocal(Path home, String identity, Path png) throws IOException {
@@ -62,15 +96,14 @@ public final class SkinResolver {
 
     /** 不同皮肤资料并行获取，但整个场景共享网络等待上限。 */
     public void prepare(List<NbtCompound> heads) {
-        var pool = Executors.newFixedThreadPool(4, task -> {
-            Thread t = new Thread(task, "minecraft-skin-loader"); t.setDaemon(true); return t;
-        });
+        if (heads == null || heads.isEmpty()) return;
         try {
             for (NbtCompound head : heads) {
                 Request request = readRequest(head);
                 if (request.empty()) { unidentified++; continue; }
-                requests.computeIfAbsent(request, key -> CompletableFuture.supplyAsync(() -> loadSafely(key), pool));
+                requests.computeIfAbsent(request, key -> CompletableFuture.supplyAsync(() -> loadSafely(key), DOWNLOAD_POOL));
             }
+            if (requests.isEmpty()) return;
             CompletableFuture.allOf(requests.values().toArray(CompletableFuture[]::new)).get(20, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -78,7 +111,6 @@ public final class SkinResolver {
             // 超出场景等待预算的皮肤，本帧使用 Steve。
         } finally {
             requests.values().forEach(f -> { if (!f.isDone()) f.cancel(true); });
-            pool.shutdownNow();
         }
     }
     public Skin resolved(NbtCompound head) {
@@ -131,8 +163,17 @@ public final class SkinResolver {
                 catch (Exception ignored) { /** 开启联网时允许重新下载损坏纹理。 */ }
             }
             if (!online) return null;
-            byte[] bytes = fetcher.get(uri, IMAGE_LIMIT);
-            Image image = normalizeSkin(bytes);
+            boolean useNegative = fetcher == DEFAULT_FETCHER;
+            String negKey = "t:" + hash;
+            if (useNegative && isNegativeCached(negKey)) return null;
+            Image image;
+            try {
+                byte[] bytes = fetcher.get(uri, IMAGE_LIMIT);
+                image = normalizeSkin(bytes);
+            } catch (IOException | RuntimeException e) {
+                if (useNegative && !(e instanceof InterruptedIOException)) putNegativeCache(negKey);
+                throw e;
+            }
             downloads.incrementAndGet();
             try {
                 Files.createDirectories(png.getParent());
@@ -154,19 +195,30 @@ public final class SkinResolver {
             } catch (Exception ignored) { }
         }
         if (!online) return null;
-        String uuid = request.uuid();
-        if (uuid == null) {
-            var lookup = json(fetcher.get(URI.create("https://api.mojang.com/users/profiles/minecraft/" + request.name()), 65536));
-            uuid = uuid(MiniJson.asString(lookup.get("id"), ""));
-            if (uuid == null) throw new IOException("玩家资料没有 UUID");
+        boolean useNegative = fetcher == DEFAULT_FETCHER;
+        String negKey = "p:" + key;
+        if (useNegative && isNegativeCached(negKey)) return null;
+        try {
+            String uuid = request.uuid();
+            if (uuid == null) {
+                var lookup = json(fetcher.get(URI.create("https://api.mojang.com/users/profiles/minecraft/" + request.name()), 65536));
+                uuid = uuid(MiniJson.asString(lookup.get("id"), ""));
+                if (uuid == null) throw new IOException("玩家资料没有 UUID");
+            }
+            var profile = json(fetcher.get(URI.create("https://sessionserver.mojang.com/session/minecraft/profile/" + uuid + "?unsigned=true"), 262144));
+            String url = textureFromProperties(profile.get("properties"));
+            if (url == null) {
+                if (useNegative) putNegativeCache(negKey);
+                return null;
+            }
+            String normalized = textureUri(url).toString();
+            try { atomicWrite(file, ("{\"url\":\"" + normalized + "\"}\n").getBytes(StandardCharsets.UTF_8)); }
+            catch (IOException e) { System.err.println("[SkinResolver] 无法缓存玩家资料：" + e.getMessage()); }
+            return normalized;
+        } catch (IOException | RuntimeException e) {
+            if (useNegative && !(e instanceof InterruptedIOException)) putNegativeCache(negKey);
+            throw e;
         }
-        var profile = json(fetcher.get(URI.create("https://sessionserver.mojang.com/session/minecraft/profile/" + uuid + "?unsigned=true"), 262144));
-        String url = textureFromProperties(profile.get("properties"));
-        if (url == null) return null;
-        String normalized = textureUri(url).toString();
-        try { atomicWrite(file, ("{\"url\":\"" + normalized + "\"}\n").getBytes(StandardCharsets.UTF_8)); }
-        catch (IOException e) { System.err.println("[SkinResolver] 无法缓存玩家资料：" + e.getMessage()); }
-        return normalized;
     }
 
     public static Request readRequest(NbtCompound head) {

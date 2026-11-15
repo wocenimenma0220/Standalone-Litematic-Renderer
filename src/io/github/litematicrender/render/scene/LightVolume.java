@@ -90,11 +90,11 @@ public final class LightVolume implements LightSampler {
     public void compute() {
         if (this.realLighting) {
             seedRealLight();
-            if(maxEmission==0)spreadReal(this.sky,true);else parallel(() -> spreadReal(this.sky, true), () -> spreadReal(this.block, false));
+            if(maxEmission==0)spread(this.sky,true,true);else parallel(() -> spread(this.sky, true, true), () -> spread(this.block, false, true));
             sky.compact();block.compact();return;
         }
-        this.seedSky();
-        parallel(this::spreadSky, () -> { this.seedBlock();this.spreadBlock(); });
+        this.seedLegacy();
+        if (this.maxEmission > 1) this.spread(this.block, false, false);
         sky.compact();block.compact();
     }
 
@@ -131,27 +131,34 @@ public final class LightVolume implements LightSampler {
     private static final int[][] DIRECTIONS={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
 
     /** 队列中每格最多保留一项，存储量随传播前沿增长。 */
-    private void spreadReal(LightGrid values, boolean skylight) {
+    private void spread(LightGrid values, boolean skylight, boolean real) {
         var queue=new IntQueue(values.length);
         var queued=new java.util.BitSet(values.length);
-        for(int i=0;i<values.length;i++)if(values.get(i)>1) {
-            int x=i%sx,y=i/sx/sz,z=i/sx%sz;
-            if(couldIncrease(values,x,y,z,values.get(i),skylight)){queue.add(i);queued.set(i);}
-        }
-        while(queue.size>0) {
-            if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
-            int position=queue.remove();queued.clear(position);
-            int x=position%sx,y=position/sx/sz,z=position/sx%sz,level=values.get(position);
+        for(int i=0;i<values.length;i++) {
+            int level=values.get(i);
             if(level<=1)continue;
+            int x=i%sx,y=i/sx/sz,z=i/sx%sz;
+            if(couldIncrease(values,x,y,z,level,skylight)){queue.add(i);queued.set(i);}
+        }
+        int steps=0;
+        while(queue.size>0) {
+            if((steps++&4095)==0&&Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
+            int position=queue.remove();queued.clear(position);
+            int level=values.get(position);
+            if(level<=1)continue;
+            int x=position%sx,y=position/sx/sz,z=position/sx%sz;
             for(int d=0;d<6;d++) {
-                int nx=x+DIRECTIONS[d][0],ny=y+DIRECTIONS[d][1],nz=z+DIRECTIONS[d][2];
+                int[] dir=DIRECTIONS[d];
+                int nx=x+dir[0],ny=y+dir[1],nz=z+dir[2];
                 if(!inside(nx,ny,nz))continue;
-                int destination=idx(nx,ny,nz),upper=skylight&&d==3&&level==15?15:level-1;
+                int destination=idx(nx,ny,nz);
+                boolean down=skylight&&d==3&&level==15;
+                int upper=down?15:level-1;
                 if(values.get(destination)>=upper)continue;
                 BlockState target=at(nx,ny,nz);
                 if(!shapes.lightPermeable(target))continue;
-                int opacity=skylight?skyOpacity(target,shapes):blockOpacity(target,shapes);
-                int cost=skylight&&d==3&&level==15&&opacity==0?0:Math.max(1,opacity);
+                int opacity=real?(skylight?skyOpacity(target,shapes):blockOpacity(target,shapes)):0;
+                int cost=down&&opacity==0?0:Math.max(1,opacity);
                 int next=level-cost;
                 if(next>values.get(destination)) {
                     values.set(destination,next);
@@ -184,86 +191,21 @@ public final class LightVolume implements LightSampler {
         int remove(){int result=values[head];head=(head+1)%values.length;size--;return result;}
     }
 
-    /** 为暴露于天空的可透光列设置初始天空光；顶部不透明时不能播种。 */
-    private void seedSky() {
-        for (int z = 0; z < this.sz; z++) {
-            if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
-            for (int x = 0; x < this.sx; x++) {
-                // 保持 1.0.8 的明亮结果，包括被覆盖的可透光格。
-                int y = this.sy - 1;
-                while (y >= 0 && !this.permeable(x, y, z)) y--;
-                for (; y >= 0; y--) if (this.permeable(x, y, z)) this.sky.set(this.idx(x, y, z),15);
-            }
-        }
-    }
-
-    private void spreadSky() {
-        // 原版 15 级天空光向下传播时不衰减，其他方向按正常规则传播。
-
-
-        int[] queue = new int[this.sky.length];
-        int head=0,tail=0;
-        for (int i = 0; i < this.sky.length; i++) {
-            if (this.sky.get(i) > 1) queue[tail++]=i;
-        }
-        int[][] dirs = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-        while (head<tail) {
-            if((head&4095)==0&&Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
-            int position=queue[head++];
-            int x=position%this.sx,y=(position/this.sx)/this.sz,z=(position/this.sx)%this.sz;
-            int level = this.sky.get(this.idx(x, y, z));
-            if (level <= 1) continue;
-            for (int[] d : dirs) {
-                int nx = x + d[0], ny = y + d[1], nz = z + d[2];
-                if (!this.inside(nx, ny, nz) || !this.permeable(nx, ny, nz)) continue;
-                boolean down = d[1] == -1 && level == 15;
-                BlockState target = this.at(nx, ny, nz);
-                int cost = down ? 0 : (target != null && target.blockId.equals("minecraft:water") ? 2 : 1);
-                int next = level - cost;
-                if (next > this.sky.get(this.idx(nx, ny, nz))) {
-                    this.sky.set(this.idx(nx, ny, nz),next);
-                    int destination=this.idx(nx,ny,nz);
-                    if(next>1 && tail<queue.length) queue[tail++]=destination;
-                }
-            }
-        }
-    }
-
-
-    private void seedBlock() {
-        for (int i = 0; i < this.block.length; i++) {
-            BlockState s = source==null?this.cells[i]:source.at(i%sx,(i/sx)/sz,(i/sx)%sz);
-            if (s == null) continue;
-            int emission = this.realLighting ? realEmission(s) : emission(s);
-            if (emission > 0) {
-                this.block.set(i,emission);
-                this.maxEmission = Math.max(this.maxEmission, emission);
-            }
-        }
-    }
-
-    private void spreadBlock() {
-        if (this.maxEmission == 0) return;
-        int[] queue = new int[this.block.length];
-        int head=0,tail=0;
-        for (int i = 0; i < this.block.length; i++) {
-            if (this.block.get(i) > 1) queue[tail++]=i;
-        }
-        int[][] dirs = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
-        while(head<tail) {
-            if((head&4095)==0&&Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
-            int position=queue[head++];
-            int x=position%this.sx,y=(position/this.sx)/this.sz,z=(position/this.sx)%this.sz;
-            int level = this.block.get(this.idx(x, y, z));
-            if (level <= 1) continue;
-            for (int[] d : dirs) {
-                int nx = x + d[0], ny = y + d[1], nz = z + d[2];
-                if (!this.inside(nx, ny, nz) || !this.permeable(nx, ny, nz)) continue;
-                int next = level - 1;
-                if (next > this.block.get(this.idx(nx, ny, nz))) {
-                    this.block.set(this.idx(nx, ny, nz),next);
-                    int destination=this.idx(nx,ny,nz);
-                    if(next>1 && tail<queue.length) queue[tail++]=destination;
+    /** 单遍线性扫描设置传统天空光与方块发光初值；所有可透光格天空光均已满级 15。 */
+    private void seedLegacy() {
+        for (int y = 0, i = 0; y < this.sy; y++) {
+            for (int z = 0; z < this.sz; z++) {
+                if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException();
+                for (int x = 0; x < this.sx; x++, i++) {
+                    BlockState s = source == null ? this.cells[i] : source.at(x, y, z);
+                    if (this.shapes.lightPermeable(s)) this.sky.set(i, 15);
+                    if (s != null) {
+                        int emission = emission(s);
+                        if (emission > 0) {
+                            this.block.set(i, emission);
+                            this.maxEmission = Math.max(this.maxEmission, emission);
+                        }
+                    }
                 }
             }
         }

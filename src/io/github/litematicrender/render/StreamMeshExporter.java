@@ -42,7 +42,9 @@ public final class StreamMeshExporter {
         default long viewRevision(){return 0;}
         default void prioritize(List<SectionVisibility.Position> remaining){}
     }
-    private record PreparedSection(SectionVisibility.Position position,SceneMesh mesh,Throwable error) {}
+    private record EncodedPage(byte[] payload,int rawBytes,int quads,int layer,int codec,long checksum) {}
+    private record EncodedSection(SectionVisibility.Position position,Map<String,Object> skinReport,Map<String,Object> entityReport,List<EncodedPage> pages,int[][] levelPages,float[] bounds,float[] fullBounds,byte[] exits,byte[] solid,int level0Quads) {}
+    private record PreparedSection(EncodedSection section,Throwable error) {}
     public static Index write(SceneBuilder builder,SpriteAtlas atlas,Path destination) throws IOException {
         return write((Source)builder,atlas,destination);
     }
@@ -75,14 +77,14 @@ public final class StreamMeshExporter {
                         if(buildUnit>1){int gx=Math.floorDiv(first.x(),buildUnit),gy=Math.floorDiv(first.y(),buildUnit),gz=Math.floorDiv(first.z(),buildUnit);
                             for(var iterator=ordered.iterator();iterator.hasNext();){var candidate=iterator.next();if(Math.floorDiv(candidate.x(),buildUnit)==gx&&Math.floorDiv(candidate.y(),buildUnit)==gy&&Math.floorDiv(candidate.z(),buildUnit)==gz){batch.add(candidate);iterator.remove();}}
                         }
-                        if(pool==null){for(var section:buildBatch(builder,batch))ready.put(section);}
-                        else pending.addLast(pool.submit(()->buildBatch(workerSource.get(),batch)));
+                        if(pool==null){for(var section:buildAndEncodeBatch(builder,batch,atlas))ready.put(section);}
+                        else pending.addLast(pool.submit(()->buildAndEncodeBatch(workerSource.get(),batch,atlas)));
                     }
                     if(!pending.isEmpty())for(var section:pending.removeFirst().get())ready.put(section);
                 }
             }
             catch(InterruptedException stopped){Thread.currentThread().interrupt();}
-            catch(Throwable error){try{ready.put(new PreparedSection(null,null,error));}catch(InterruptedException stopped){Thread.currentThread().interrupt();}}
+            catch(Throwable error){try{ready.put(new PreparedSection(null,error));}catch(InterruptedException stopped){Thread.currentThread().interrupt();}}
             finally{if(pool!=null){pool.shutdownNow();boolean interrupted=Thread.interrupted();while(!pool.isTerminated())try{pool.awaitTermination(50,java.util.concurrent.TimeUnit.MILLISECONDS);}catch(InterruptedException stopped){interrupted=true;}if(interrupted)Thread.currentThread().interrupt();}}
         });
         try(var file=new RandomAccessFile(temporary.toFile(),"rw")) {
@@ -94,32 +96,26 @@ public final class StreamMeshExporter {
                 PreparedSection prepared;
                 try{prepared=ready.take();}catch(InterruptedException stopped){Thread.currentThread().interrupt();throw new IOException("分块导出已中断",stopped);}
                 if(prepared.error()!=null)throw new IOException("区块模型生成失败",prepared.error());
-                var position=prepared.position();SceneMesh full=prepared.mesh();skins=full.skinReport;
-                if(full.entityReport.get("saved") instanceof Number n&&n.intValue()>0)entities=mergeEntities(entities,full.entityReport);
-                var blends=full.translucentBsp==null?new ArrayList<MeshQuad>():full.translucentBsp.faces;
-                if(full.translucentBsp==null){blends.addAll(full.portalSorted);blends.addAll(full.fluidSorted);blends.addAll(full.translucentSorted);}
-                List<Page> common=new ArrayList<>();writePages(file,atlas,position,blends,4,common);writePages(file,atlas,position,full.waterMask,5,common);
-                if(full.translucentBsp!=null)common.add(writeBsp(file,full.translucentBsp));
-                List<List<Page>> levels=new ArrayList<>();float[] box=bounds(full,position);
+                EncodedSection encoded=prepared.section();
+                var position=encoded.position();skins=encoded.skinReport();
+                if(encoded.entityReport().get("saved") instanceof Number n&&n.intValue()>0)entities=mergeEntities(entities,encoded.entityReport());
+                var written=new ArrayList<Page>(encoded.pages().size());
+                for(var encodedPage:encoded.pages()) {
+                    long offset=file.getFilePointer();
+                    file.write(encodedPage.payload());
+                    written.add(new Page(offset,encodedPage.payload().length,encodedPage.quads(),encodedPage.layer(),encodedPage.rawBytes(),encodedPage.codec(),encodedPage.checksum()));
+                }
+                List<List<Page>> levels=new ArrayList<>(LOD_COUNT);
                 for(int level=0;level<LOD_COUNT;level++) {
-                    if(level>0&&builder.fixedLevels()){levels.add(levels.getFirst());continue;}
-                    SceneMesh coarse=level==3?builder.coarseSection(position):null;
-                    SceneMesh geometry=level==0?full:coarse!=null?coarse:LodMesh.simplify(full,position,1<<level);
-                    if(level>0){var proxy=bounds(geometry,position);for(int axis=0;axis<3;axis++){box[axis]=Math.min(box[axis],proxy[axis]);box[axis+3]=Math.max(box[axis+3],proxy[axis+3]);}}
-                    List<Page> pages=new ArrayList<>();writePages(file,atlas,position,geometry.solid,0,pages);writePages(file,atlas,position,geometry.cutout,1,pages);
-                    if(level<2)pages.addAll(common);
-                    else if(coarse==null) {
-                        writePages(file,atlas,position,geometry.translucentBsp.faces,4,pages);
-                        for(var page:common)if(page.layer==5)pages.add(page);
-                        pages.add(writeBsp(file,geometry.translucentBsp));
-                    }
+                    int[] refs=encoded.levelPages()[level];
+                    var pages=new ArrayList<Page>(refs.length);
+                    for(int index:refs)pages.add(written.get(index));
                     levels.add(List.copyOf(pages));
                 }
-                int count=levels.get(0).stream().filter(p->p.layer<6).mapToInt(Page::quads).sum();total+=count;maximum=Math.max(maximum,count);
-                var fullBox=bounds(full,position,false);for(int axis=0;axis<3;axis++){bounds[axis]=Math.min(bounds[axis],fullBox[axis]);bounds[axis+3]=Math.max(bounds[axis+3],fullBox[axis+3]);}
-                var visibility=full.visibility==null?null:full.visibility.sections.get(position);byte[] exits=new byte[6],solid=new byte[512];Arrays.fill(exits,(byte)63);
-                if(visibility!=null){exits=visibility.exits;solid=visibility.solid;}
-                var entry=new Entry(position,box,exits.clone(),solid.clone(),levels);entries.add(entry);
+                total+=encoded.level0Quads();maximum=Math.max(maximum,encoded.level0Quads());
+                float[] fullBox=encoded.fullBounds();
+                for(int axis=0;axis<3;axis++){bounds[axis]=Math.min(bounds[axis],fullBox[axis]);bounds[axis+3]=Math.max(bounds[axis+3],fullBox[axis+3]);}
+                var entry=new Entry(position,encoded.bounds(),encoded.exits(),encoded.solid(),levels);entries.add(entry);
                 if(progress!=null)progress.section(entry,file.getFilePointer(),entries.size());
             }
             if(entries.isEmpty())Arrays.fill(bounds,0);
@@ -145,10 +141,53 @@ public final class StreamMeshExporter {
         var report=builder.entityReport();if(report!=null)entities=report;
         return new Index(List.copyOf(entries),bounds,total,maximum,Files.size(destination),skins,entities);
     }
-    private static List<PreparedSection> buildBatch(Source source,List<SectionVisibility.Position> batch) {
+    private static List<PreparedSection> buildAndEncodeBatch(Source source,List<SectionVisibility.Position> batch,SpriteAtlas atlas) {
         var meshes=source.buildSections(batch);var result=new ArrayList<PreparedSection>(batch.size());
-        for(var position:batch){var mesh=meshes.get(position);if(mesh==null)throw new IllegalStateException("构建未返回所属区块");result.add(new PreparedSection(position,mesh,null));}
+        var crc=new java.util.zip.CRC32();var deflater=new java.util.zip.Deflater(1);
+        try{
+            for(var position:batch){
+                if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException("分块导出已中断");
+                var mesh=meshes.get(position);if(mesh==null)throw new IllegalStateException("构建未返回所属区块");
+                result.add(new PreparedSection(encodeSection(source,atlas,position,mesh,deflater,crc),null));
+            }
+        }catch(IOException error){throw new UncheckedIOException(error);}
+        finally{deflater.end();}
         return result;
+    }
+    private static EncodedSection encodeSection(Source source,SpriteAtlas atlas,SectionVisibility.Position position,SceneMesh full,java.util.zip.Deflater deflater,java.util.zip.CRC32 crc)throws IOException {
+        var blends=full.translucentBsp==null?new ArrayList<MeshQuad>():full.translucentBsp.faces;
+        if(full.translucentBsp==null){blends.addAll(full.portalSorted);blends.addAll(full.fluidSorted);blends.addAll(full.translucentSorted);}
+        var uniquePages=new ArrayList<EncodedPage>();
+        var commonIndices=new ArrayList<Integer>();
+        encodePages(atlas,position,blends,4,uniquePages,commonIndices,deflater,crc);
+        int maskStart=commonIndices.size();
+        encodePages(atlas,position,full.waterMask,5,uniquePages,commonIndices,deflater,crc);
+        int maskEnd=commonIndices.size();
+        if(full.translucentBsp!=null){uniquePages.add(encodeBsp(full.translucentBsp,deflater,crc));commonIndices.add(uniquePages.size()-1);}
+        int[][] levelPages=new int[LOD_COUNT][];float[] box=bounds(full,position);
+        boolean fixed=source.fixedLevels();
+        for(int level=0;level<LOD_COUNT;level++) {
+            if(level>0&&fixed){levelPages[level]=levelPages[0];continue;}
+            if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException("分块导出已中断");
+            SceneMesh coarse=level==3?source.coarseSection(position):null;
+            SceneMesh geometry=level==0?full:coarse!=null?coarse:LodMesh.simplify(full,position,1<<level);
+            if(level>0){var proxy=bounds(geometry,position);for(int axis=0;axis<3;axis++){box[axis]=Math.min(box[axis],proxy[axis]);box[axis+3]=Math.max(box[axis+3],proxy[axis+3]);}}
+            var indices=new ArrayList<Integer>();
+            encodePages(atlas,position,geometry.solid,0,uniquePages,indices,deflater,crc);
+            encodePages(atlas,position,geometry.cutout,1,uniquePages,indices,deflater,crc);
+            if(level<2)indices.addAll(commonIndices);
+            else if(coarse==null) {
+                encodePages(atlas,position,geometry.translucentBsp.faces,4,uniquePages,indices,deflater,crc);
+                for(int i=maskStart;i<maskEnd;i++)indices.add(commonIndices.get(i));
+                uniquePages.add(encodeBsp(geometry.translucentBsp,deflater,crc));indices.add(uniquePages.size()-1);
+            }
+            int[] refs=new int[indices.size()];for(int i=0;i<refs.length;i++)refs[i]=indices.get(i);levelPages[level]=refs;
+        }
+        int level0Quads=0;for(int index:levelPages[0]){EncodedPage page=uniquePages.get(index);if(page.layer()<6)level0Quads+=page.quads();}
+        float[] fullBox=bounds(full,position,false);
+        var visibility=full.visibility==null?null:full.visibility.sections.get(position);byte[] exits=new byte[6],solid=new byte[512];Arrays.fill(exits,(byte)63);
+        if(visibility!=null){exits=visibility.exits.clone();solid=visibility.solid.clone();}
+        return new EncodedSection(position,full.skinReport,full.entityReport,uniquePages,levelPages,box,fullBox,exits,solid,level0Quads);
     }
     public static Map<String,Object> describe(Entry entry) {
         var result=new LinkedHashMap<String,Object>();var p=entry.position();result.put("position",List.of(p.x(),p.y(),p.z()));
@@ -159,12 +198,12 @@ public final class StreamMeshExporter {
     private static Map<String,Object> mergeEntities(Map<String,Object> a,Map<String,Object> b) {
         var result=new LinkedHashMap<String,Object>(a);b.forEach((key,value)->result.put(key,((Number)result.getOrDefault(key,0)).intValue()+((Number)value).intValue()));return result;
     }
-    private static void writePages(RandomAccessFile file,SpriteAtlas atlas,SectionVisibility.Position position,List<MeshQuad> quads,int layer,List<Page> output)throws IOException {
+    private static void encodePages(SpriteAtlas atlas,SectionVisibility.Position position,List<MeshQuad> quads,int layer,List<EncodedPage> store,List<Integer> refs,java.util.zip.Deflater deflater,java.util.zip.CRC32 crc) {
         var compact=new ArrayList<MeshQuad>();var full=new ArrayList<MeshQuad>();
         boolean enabled=Boolean.parseBoolean(System.getProperty("litematicrender.mesh.compact","true"));
         for(var quad:quads)if(enabled&&layer!=4&&compactDescriptor(quad,position)!=null)compact.add(quad);else full.add(quad);
-        for(int first=0;first<compact.size();first+=PAGE_QUADS){int count=Math.min(PAGE_QUADS,compact.size()-first);var bytes=ByteBuffer.allocate(count*40).order(ByteOrder.LITTLE_ENDIAN);for(int i=first;i<first+count;i++)writeCompact(bytes,compact.get(i),position,atlas);output.add(writePage(file,bytes.array(),count,layer,true));}
-        for(int first=0;first<full.size();first+=PAGE_QUADS){int count=Math.min(PAGE_QUADS,full.size()-first);var bytes=ByteBuffer.allocate(count*4*VERTEX_BYTES).order(ByteOrder.LITTLE_ENDIAN);for(int i=first;i<first+count;i++)writeFull(bytes,full.get(i),atlas);output.add(writePage(file,bytes.array(),count,layer,false));}
+        for(int first=0;first<compact.size();first+=PAGE_QUADS){int count=Math.min(PAGE_QUADS,compact.size()-first);var bytes=ByteBuffer.allocate(count*40).order(ByteOrder.LITTLE_ENDIAN);for(int i=first;i<first+count;i++)writeCompact(bytes,compact.get(i),position,atlas);store.add(encodePage(bytes.array(),count,layer,true,deflater,crc));refs.add(store.size()-1);}
+        for(int first=0;first<full.size();first+=PAGE_QUADS){int count=Math.min(PAGE_QUADS,full.size()-first);var bytes=ByteBuffer.allocate(count*4*VERTEX_BYTES).order(ByteOrder.LITTLE_ENDIAN);for(int i=first;i<first+count;i++)writeFull(bytes,full.get(i),atlas);store.add(encodePage(bytes.array(),count,layer,false,deflater,crc));refs.add(store.size()-1);}
     }
     private record Compact(short x,short y,short z,byte axis,byte permutation){}
     private static Compact compactDescriptor(MeshQuad q,SectionVisibility.Position position) {
@@ -192,17 +231,20 @@ public final class StreamMeshExporter {
     private static void writeAttribute(ByteBuffer bytes,MeshQuad q,SpriteAtlas.Entry sprite,float u,float v,int vertex) {
         bytes.putShort((short)Math.round(Math.max(0,Math.min(1,sprite.u0+(sprite.u1-sprite.u0)*u))*65535));bytes.putShort((short)Math.round(Math.max(0,Math.min(1,sprite.v0+(sprite.v1-sprite.v0)*v))*65535));int color=LodMesh.color(q,vertex);bytes.put((byte)(color>>16)).put((byte)(color>>8)).put((byte)color).put((byte)255);
     }
-    private static Page writeBsp(RandomAccessFile file,TranslucentBsp bsp)throws IOException {
+    private static EncodedPage encodeBsp(TranslucentBsp bsp,java.util.zip.Deflater deflater,java.util.zip.CRC32 crc)throws IOException {
         if(4L+bsp.nodes.size()*48L>MAX_RAW_PAGE)throw new IOException("区块透明排序页过大");
         var buffer=new ByteArrayOutputStream(4+bsp.nodes.size()*48);var data=new DataOutputStream(buffer);data.writeInt(bsp.nodes.size());
         for(var node:bsp.nodes){for(double value:node.plane)data.writeDouble(value);data.writeInt(node.first);data.writeInt(node.count);data.writeInt(node.front);data.writeInt(node.back);}
-        return writePage(file,buffer.toByteArray(),0,6,false);
+        return encodePage(buffer.toByteArray(),0,6,false,deflater,crc);
     }
-    private static Page writePage(RandomAccessFile file,byte[] raw,int quads,int layer,boolean compact)throws IOException {
-        var checksum=new java.util.zip.CRC32();checksum.update(raw);var compressor=new java.util.zip.Deflater(1);byte[] compressed=new byte[raw.length+64];int size;
-        try{compressor.setInput(raw);compressor.finish();size=compressor.deflate(compressed);if(!compressor.finished())size=raw.length;}finally{compressor.end();}
-        boolean deflated=size<raw.length;int codec=(deflated?1:0)|(compact?2:0);long offset=file.getFilePointer();file.write(deflated?compressed:raw,0,deflated?size:raw.length);
-        return new Page(offset,deflated?size:raw.length,quads,layer,raw.length,codec,checksum.getValue());
+    private static EncodedPage encodePage(byte[] raw,int quads,int layer,boolean compact,java.util.zip.Deflater deflater,java.util.zip.CRC32 crc) {
+        crc.reset();crc.update(raw);long checksum=crc.getValue();
+        deflater.reset();deflater.setInput(raw);deflater.finish();
+        byte[] compressed=new byte[raw.length+64];
+        int size=deflater.deflate(compressed);if(!deflater.finished())size=raw.length;
+        boolean deflated=size<raw.length;int codec=(deflated?1:0)|(compact?2:0);
+        byte[] payload=deflated?Arrays.copyOf(compressed,size):raw;
+        return new EncodedPage(payload,raw.length,quads,layer,codec,checksum);
     }
     private static float[] bounds(SceneMesh mesh,SectionVisibility.Position position) {
         return bounds(mesh,position,true);

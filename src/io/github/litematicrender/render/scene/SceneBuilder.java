@@ -27,6 +27,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     };
 
 
+    private final float[] lightTmp=new float[3],entityLightTmp=new float[3],emittedTmp=new float[3],outerTmp=new float[3],xsTmp=new float[4],ysTmp=new float[4],zsTmp=new float[4];
+    private static final float[] FULL_BRIGHT={1f,1f,1f};
+
     private void faceLightColor(int x, int y, int z, int face, float[] out) {
         cachedLightColor(x,y,z,face,out);
     }
@@ -64,12 +67,17 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     private final java.util.Map<BlockState,List<Quad>> redstoneSurfaces=new java.util.HashMap<>();
 
     public SceneBuilder(BlockRegistry registry, ModelBaker baker, Colormaps colormaps, SpriteAtlas atlas) {
+        this(registry, baker, colormaps, atlas, new BlockShape(baker, atlas));
+    }
+
+    public SceneBuilder(BlockRegistry registry, ModelBaker baker, Colormaps colormaps, SpriteAtlas atlas, BlockShape shapes) {
         this.registry = registry;
         this.baker = baker;
         this.colormaps = colormaps;
         this.atlas = atlas;
-        this.shapes = new BlockShape(baker, atlas);
+        this.shapes = shapes != null ? shapes : new BlockShape(baker, atlas);
     }
+    public BlockShape shapes() { return this.shapes; }
 
     public void addRegion(LitematicaSchematic.Region region, int[] worldOffset) {
         occupiedSections=null;spriteSections.clear();redstoneStates.clear();
@@ -88,7 +96,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
     private BlockState lookupBlock(int x,int y,int z) {
         if(selectionMin!=null&&!selectionContains(x,y,z))return BlockState.air();
-        var candidates=this.regionIndex==null?null:this.regionIndex.get(new Section(Math.floorDiv(x,16),Math.floorDiv(y,16),Math.floorDiv(z,16)));
+        var candidates=this.regionIndex==null?null:findRegionCandidates(Math.floorDiv(x,16),Math.floorDiv(y,16),Math.floorDiv(z,16));
         if(this.regionIndex!=null && candidates==null)return BlockState.air();
         int count=candidates==null?this.regions.size():candidates.size();
         for (int candidate = 0; candidate < count; candidate++) {
@@ -119,7 +127,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     /** 邻居完整遮挡，或两个方块应合并表面时，剔除共享面。 */
     private boolean shouldRenderFace(BlockState state, int face, int x, int y, int z) {
         int[] d = FACE_DELTAS[face];
-        BlockState neighbor = this.blockAt(x + d[0], y + d[1], z + d[2]);
+        return shouldRenderNeighbor(state, this.blockAt(x + d[0], y + d[1], z + d[2]));
+    }
+    private boolean shouldRenderNeighbor(BlockState state, BlockState neighbor) {
         if (neighbor.isAir()) return true;
         if (this.shapes.occludes(neighbor)) return false;
         if (MERGING.contains(state.blockId) && neighbor.blockId.equals(state.blockId)) return false;
@@ -181,9 +191,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     }
     @Override public SceneBuilder forkForSections() {
         if(!prepared||!streaming)throw new IllegalStateException("Complete lighting and atlas preparation before forking");
-        var worker=new SceneBuilder(registry,baker.fork(),colormaps,atlas).realLighting(realLighting).lightingEnabled(lightingEnabled);
-        worker.regions.addAll(regions);worker.regionOffsets.addAll(regionOffsets);worker.regionIndex=regionIndex;
-        worker.entitySections.addAll(entitySections);worker.occupiedSections=occupiedSections;
+        var worker=new SceneBuilder(registry,baker.fork(),colormaps,atlas,shapes).realLighting(realLighting).lightingEnabled(lightingEnabled);
+        worker.regions.addAll(regions);worker.regionOffsets.addAll(regionOffsets);worker.regionIndex=regionIndex;worker.regionIndexMask=regionIndexMask;
+        worker.entitySections.addAll(entitySections);worker.occupiedSections=occupiedSections;worker.spriteSections.addAll(spriteSections);
         worker.skins=skins;worker.font=font;worker.generatedSprites.putAll(generatedSprites);worker.redstoneSurfaces.putAll(redstoneSurfaces);
         worker.light=light;worker.lightOrigin=lightOrigin;worker.overview=overview;
         if(light!=null)worker.smoothLighting=new SmoothLighting(light,lightOrigin,worker::blockAt,worker.shapes);
@@ -236,7 +246,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         prepare();range=key;rangeSize=16;
         try {
             cacheSectionBlocks(key);
-            if(light!=null){sectionLight=light.forSection(key.x()*16-lightOrigin[0],key.y()*16-lightOrigin[1],key.z()*16-lightOrigin[2]);if(smoothLighting!=null)smoothLighting.bind(sectionLight);}
+            if(!registeringSprites&&light!=null){sectionLight=light.forSection(key.x()*16-lightOrigin[0],key.y()*16-lightOrigin[1],key.z()*16-lightOrigin[2]);if(smoothLighting!=null)smoothLighting.bind(sectionLight);}
             lightCacheReady=false;return assemble();
         }finally{range=null;rangeSize=16;sectionBlocksReady=false;sectionLight=null;if(smoothLighting!=null)smoothLighting.bind(light);}
     }
@@ -311,7 +321,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             });
 
 
-            this.emitBlockEntities(mesh, region, off, entityGeometry);
+            if(!registeringSprites||range==null||spriteSections.contains(range))this.emitBlockEntities(mesh, region, off, entityGeometry);
             if(editingCells!=null)continue;
             java.util.List<Integer> indices=null;if(range!=null){indices=new java.util.ArrayList<>();for(var entry:entitySections.get(ri).entrySet()){var p=entry.getKey();if(p.x()>=range.x()&&p.y()>=range.y()&&p.z()>=range.z()&&p.x()*16<range.x()*16+rangeSize&&p.y()*16<range.y()*16+rangeSize&&p.z()*16<range.z()*16+rangeSize)indices.addAll(entry.getValue());}}
             for(int ei=0;ei<(indices==null?region.entities.size():indices.size());ei++) {
@@ -324,8 +334,11 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
                 var blockOrigin=region.blockOrigin();
                 double x=off[0]+region.position.x()-blockOrigin.x()+entity.x(),y=off[1]+region.position.y()-blockOrigin.y()+entity.y(),z=off[2]+region.position.z()-blockOrigin.z()+entity.z();
                 if(selectionMin!=null&&!selectionContains((int)Math.floor(x),(int)Math.floor(y),(int)Math.floor(z)))continue;
-                float[] rgb={1,1,1};
-                if(this.light!=null)LightVolume.brightness(activeLight().cellLight((int)Math.floor(x)-this.lightOrigin[0],(int)Math.floor(y+1)-this.lightOrigin[1],(int)Math.floor(z)-this.lightOrigin[2]),rgb);
+                float[] rgb=registeringSprites?FULL_BRIGHT:entityLightTmp;
+                if(!registeringSprites){
+                    if(this.light!=null)LightVolume.brightness(activeLight().cellLight((int)Math.floor(x)-this.lightOrigin[0],(int)Math.floor(y+1)-this.lightOrigin[1],(int)Math.floor(z)-this.lightOrigin[2]),rgb);
+                    else{rgb[0]=1f;rgb[1]=1f;rgb[2]=1f;}
+                }
                 int solid=mesh.solid.size(),cutout=mesh.cutout.size(),portal=mesh.portal.size(),fluid=mesh.fluid.size(),translucent=mesh.translucent.size();
                 int mask=mesh.waterMask.size();
                 int waterX=(int)Math.floor(x),waterY=(int)Math.floor(y+.5625),waterZ=(int)Math.floor(z);
@@ -434,7 +447,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     private BlockState lightBlockAt(int x,int y,int z) {
         if(selectionMin!=null&&!selectionContains(x,y,z))return BlockState.air();
         if(regions.size()==1)return blockAt(x,y,z);
-        var candidates=regionIndex==null?null:regionIndex.get(new Section(Math.floorDiv(x,16),Math.floorDiv(y,16),Math.floorDiv(z,16)));
+        var candidates=regionIndex==null?null:findRegionCandidates(Math.floorDiv(x,16),Math.floorDiv(y,16),Math.floorDiv(z,16));
         if(regionIndex!=null&&candidates==null)return BlockState.air();
         for(int candidate=(candidates==null?regions.size():candidates.size())-1;candidate>=0;candidate--) {
             int i=candidates==null?candidate:candidates.get(candidate);var off=regionOffsets.get(i);var r=regions.get(i);
@@ -443,20 +456,53 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         return BlockState.air();
     }
     private int[] lightOrigin;
-    private record Section(int x,int y,int z) {}
-    private java.util.Map<Section,java.util.List<Integer>> regionIndex;
+    private static final class RegionCell {
+        final int x,y,z;
+        final java.util.List<Integer> indices=new java.util.ArrayList<>(2);
+        RegionCell(int x,int y,int z){this.x=x;this.y=y;this.z=z;}
+    }
+    private RegionCell[] regionIndex;
+    private int regionIndexMask;
+    private static int sectionHash(int x,int y,int z) {
+        int hash=x*0x8da6b343^y*0xd8163841^z*0xcb1ab31f;
+        hash^=hash>>>16;hash*=0x7feb352d;return hash^(hash>>>15);
+    }
+    private java.util.List<Integer> findRegionCandidates(int x,int y,int z) {
+        RegionCell[] table=this.regionIndex;if(table==null)return null;
+        int mask=this.regionIndexMask,slot=sectionHash(x,y,z)&mask;
+        while(true) {
+            RegionCell cell=table[slot];if(cell==null)return null;
+            if(cell.x==x&&cell.y==y&&cell.z==z)return cell.indices;
+            slot=(slot+1)&mask;
+        }
+    }
     private void buildRegionIndex() {
-        if(this.regions.size()<=1){this.regionIndex=null;return;}
-        this.regionIndex=new java.util.HashMap<>();
+        if(this.regions.size()<=1){this.regionIndex=null;this.regionIndexMask=0;return;}
+        RegionCell[] table=new RegionCell[256];int count=0;
         for(int i=0;i<this.regions.size();i++) {
             var region=this.regions.get(i);var off=this.regionOffsets.get(i);
             int x0=Math.floorDiv(off[0],16),y0=Math.floorDiv(off[1],16),z0=Math.floorDiv(off[2],16);
             int x1=Math.floorDiv(Math.addExact(off[0],region.blocks.sizeX-1),16);
             int y1=Math.floorDiv(Math.addExact(off[1],region.blocks.sizeY-1),16);
             int z1=Math.floorDiv(Math.addExact(off[2],region.blocks.sizeZ-1),16);
-            for(int x=x0;x<=x1;x++)for(int y=y0;y<=y1;y++)for(int z=z0;z<=z1;z++)
-                this.regionIndex.computeIfAbsent(new Section(x,y,z),key->new java.util.ArrayList<>()).add(i);
+            for(int x=x0;x<=x1;x++)for(int y=y0;y<=y1;y++)for(int z=z0;z<=z1;z++) {
+                if((count+1)*2>table.length) {
+                    RegionCell[] grown=new RegionCell[table.length*2];int newMask=grown.length-1;
+                    for(RegionCell existing:table) {
+                        if(existing==null)continue;
+                        int slot=sectionHash(existing.x,existing.y,existing.z)&newMask;
+                        while(grown[slot]!=null)slot=(slot+1)&newMask;
+                        grown[slot]=existing;
+                    }
+                    table=grown;
+                }
+                int mask=table.length-1,slot=sectionHash(x,y,z)&mask;
+                while(table[slot]!=null&&(table[slot].x!=x||table[slot].y!=y||table[slot].z!=z))slot=(slot+1)&mask;
+                if(table[slot]==null){table[slot]=new RegionCell(x,y,z);count++;}
+                table[slot].indices.add(i);
+            }
         }
+        this.regionIndex=table;this.regionIndexMask=table.length-1;
     }
 
     // ------------------------------------------------------------------
@@ -659,10 +705,13 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         if (model == null) return;
         boolean ao = model.useAmbientOcclusion;
         for (int face = 0; face < 6; face++) {
-            for (Quad q : model.quadsForFace(face)) {
-                if (!this.shouldRenderFace(state, face, x, y, z)) continue;
-                int[] delta=FACE_DELTAS[face];
-                if(this.shapes.faceOccluded(q,face,this.blockAt(x+delta[0],y+delta[1],z+delta[2])))continue;
+            List<Quad> quads = model.quadsForFace(face);
+            if (quads.isEmpty()) continue;
+            int[] delta = FACE_DELTAS[face];
+            BlockState neighbor = this.blockAt(x + delta[0], y + delta[1], z + delta[2]);
+            if (!this.shouldRenderNeighbor(state, neighbor)) continue;
+            for (Quad q : quads) {
+                if (this.shapes.faceOccluded(q, face, neighbor)) continue;
                 this.emitQuad(mesh, q, face, x, y, z, state, ao);
             }
         }
@@ -677,9 +726,10 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         float shade = q.shadeFaceOverride >= 0 ? CARDINAL[q.shadeFaceOverride] : CARDINAL[effectiveFace];
 
         if(!lightingEnabled)shade=1f;
-        float[] xs = {q.x0 + x, q.x1 + x, q.x2 + x, q.x3 + x};
-        float[] ys = {q.y0 + y, q.y1 + y, q.y2 + y, q.y3 + y};
-        float[] zs = {q.z0 + z, q.z1 + z, q.z2 + z, q.z3 + z};
+        float[] xs = this.xsTmp, ys = this.ysTmp, zs = this.zsTmp;
+        xs[0] = q.x0 + x; xs[1] = q.x1 + x; xs[2] = q.x2 + x; xs[3] = q.x3 + x;
+        ys[0] = q.y0 + y; ys[1] = q.y1 + y; ys[2] = q.y2 + y; ys[3] = q.y3 + y;
+        zs[0] = q.z0 + z; zs[1] = q.z1 + z; zs[2] = q.z2 + z; zs[3] = q.z3 + z;
 
 
         // 原版发光方块关闭 AO，无剔除方向的面采用平面光照。
@@ -703,7 +753,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         // 纹理依次乘以染色、方向光、AO 和光照图，静态乘数可提前合并。
 
 
-        float[] light = new float[3];
+        float[] light = this.lightTmp;
         // 内凹或无剔除方向的几何读取自身格，不读取上方不透明邻居。
         float facePlane = switch (effectiveFace) {
             case Quad.DOWN, Quad.UP -> (q.y0 + q.y1 + q.y2 + q.y3) / 4f;
@@ -715,7 +765,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
         if (this.light != null && (faceDir < 0 || !boundary)) {
             this.cachedLightColor(x,y,z,-1,light);
             if(this.realLighting && faceDir>=0) {
-                float[] outer=new float[3];this.faceLightColor(x,y,z,effectiveFace,outer);
+                float[] outer=this.outerTmp;this.faceLightColor(x,y,z,effectiveFace,outer);
                 float weight=clamp01((effectiveFace&1)==0?1f-facePlane:facePlane);
                 for(int i=0;i<3;i++)light[i]=light[i]*(1f-weight)+outer[i]*weight;
             }
@@ -723,7 +773,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             this.faceLightColor(x, y, z, effectiveFace, light);
         }
         if (emission > 0) {
-            float[] emitted = new float[3];
+            float[] emitted = this.emittedTmp;
             LightVolume.brightness(Math.min(15, emission), emitted);
             for (int i = 0; i < 3; i++) light[i] = Math.max(light[i], emitted[i]);
         }

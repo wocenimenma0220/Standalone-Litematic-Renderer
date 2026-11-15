@@ -22,13 +22,14 @@ public final class BlockShape {
     /** 同时满足完整立方体和完全不透明时才能遮挡邻面。 */
     private final Map<BlockState, Boolean> occluderCache = new ConcurrentHashMap<>();
     private final Map<BlockState,long[][]> faceMasks=new ConcurrentHashMap<>();
-    private final Map<Quad,long[]> quadMasks=new java.util.IdentityHashMap<>();
+    private static final long[] NO_MASK = new long[0];
+    private final Map<Quad,long[]> quadMasks=new ConcurrentHashMap<>();
 
     /** 保守使用 16×16 边界覆盖，裁剪和半透明区域不作为完整遮挡。 */
     public boolean faceOccluded(Quad source,int face,BlockState neighbor) {
         if(neighbor==null||neighbor.isAir()||BlockRegistry.isHead(neighbor.blockId))return false;
-        long[] required=quadMasks.computeIfAbsent(source,q->quadMask(q,face,false));
-        if(required==null)return false;
+        long[] required=quadMasks.computeIfAbsent(source,q->{long[] mask=quadMask(q,face,false);return mask==null?NO_MASK:mask;});
+        if(required==NO_MASK)return false;
         long[] coverage=faceMasks.computeIfAbsent(neighbor,this::buildMasks)[face^1];
         boolean any=false;
         for(int i=0;i<4;i++){any|=required[i]!=0;if((required[i]&~coverage[i])!=0)return false;}

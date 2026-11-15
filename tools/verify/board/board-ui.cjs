@@ -1,0 +1,102 @@
+const {chromium}=require('./browser-runtime.cjs');
+const path=require('node:path'),assert=require('node:assert/strict');
+(async()=>{
+  const browser=await chromium.launch({headless:true,channel:'msedge',args:['--allow-file-access-from-files']});
+  try{
+    const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
+    await page.addInitScript(()=>{window.__placementAudio=[];const play=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){window.__placementAudio.push({src:this.src,rate:this.playbackRate});return play.call(this);};});
+    page.on('pageerror',e=>{if(e.stack?.includes('/board.js'))errors.push(e.message);});
+    await page.goto('file:///'+path.resolve(__dirname,'../../../webapp/renderer/index.html').replaceAll('\\','/'));
+    await page.evaluate(()=>localStorage.setItem('litematic-board-v2-side',JSON.stringify({version:2,view:'side',cells:[['0,0',{id:'stone'}]]})));
+    const choose=async id=>{await page.locator('#boardSearch').fill(id);await page.locator(`#boardPalette button[data-block="${id}"]`).click();};
+    const preview=async(locator,id,states,view)=>{
+      const result=await locator.evaluate(async(canvas,{id,states,view})=>{
+        const block=BoardCatalog.find(b=>b.id===id),values={...block.defaults,...states};
+        const visual=block.visuals.find(v=>Object.entries(v.when).every(([key,value])=>values[key]===value));
+        const atlas=new Image();atlas.src='board-atlas.png';await atlas.decode();
+        const expected=document.createElement('canvas');expected.width=expected.height=32;
+        const index=visual[view];expected.getContext('2d').drawImage(atlas,index%64*32,Math.floor(index/64)*32,32,32,0,0,32,32);
+        const pixels=canvas.getContext('2d').getImageData(0,0,32,32).data,reference=expected.getContext('2d').getImageData(0,0,32,32).data;
+        let left=32,top=32,right=-1,bottom=-1,count=0;
+        for(let y=0;y<32;y++)for(let x=0;x<32;x++)if(pixels[(y*32+x)*4+3]){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);count++;}
+        return{matches:pixels.every((n,i)=>n===reference[i]),width:right-left+1,height:bottom-top+1,count};
+      },{id,states,view});
+      assert(result.matches,`${id} ${JSON.stringify(states)} preview must use ${view} atlas image`);
+      assert(result.count>0,`${id} preview must remain visible`);return result;
+    };
+    const packet=async()=>{const ready=page.waitForEvent('download');await page.locator('#boardSave').click();const download=await ready;assert.equal(download.suggestedFilename(),'二维搭建.json');const stream=await download.createReadStream();let text='';for await(const chunk of stream)text+=chunk;return JSON.parse(text);};
+    const load=async data=>{await page.locator('#boardFile').setInputFiles({name:'test.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});await page.waitForFunction(()=>document.getElementById('boardFile').value==='');};
+    await page.locator('#menuBoard').click();assert(await page.locator('#boardViewDialog').evaluate(d=>d.open));assert.equal(await page.locator('#boardDialog').evaluate(d=>d.open),false);
+    await page.locator('#boardViewSide').click();await page.locator('#boardPalette button').first().waitFor();
+    assert.equal((await packet()).cells.length,0,'initial board does not restore stale local storage');
+    const handle=page.locator('#boardToolsHandle'),toolbar=page.locator('#boardTools');
+    const collapsed=(await toolbar.boundingBox()).height;
+    async function pullToolbar(delta){const r=await handle.boundingBox();await page.mouse.move(r.x+r.width/2,r.y+r.height/2);await page.mouse.down();await page.mouse.move(r.x+r.width/2,r.y+r.height/2+delta,{steps:5});await page.mouse.up();}
+    await pullToolbar(-150);assert.equal(await handle.getAttribute('aria-expanded'),'true');
+    let dialogBox=await page.locator('#boardDialog').boundingBox(),toolsBox=await toolbar.boundingBox();assert(Math.abs(toolsBox.height/dialogBox.height-.618)<.003);assert(toolsBox.height>collapsed+100);
+    const paletteExpanded=await page.locator('#boardPalette').boundingBox();assert(paletteExpanded.height>144,'expanded palette uses added height');
+    await page.setViewportSize({width:1200,height:720});dialogBox=await page.locator('#boardDialog').boundingBox();toolsBox=await toolbar.boundingBox();assert(Math.abs(toolsBox.height/dialogBox.height-.618)<.003);assert((await page.locator('#boardCanvas').boundingBox()).height>=100);
+    await pullToolbar(100);assert.equal(await handle.getAttribute('aria-expanded'),'false');
+    await handle.click();assert.equal(await handle.getAttribute('aria-expanded'),'true');await handle.press('Enter');assert.equal(await handle.getAttribute('aria-expanded'),'false');
+    await page.setViewportSize({width:1440,height:1000});
+    await page.locator('#boardTabs button').filter({hasText:'全部',exact:true}).click();
+    await choose('dispenser');assert.equal(await page.locator('#boardState fieldset').count(),2);
+    assert.equal(await page.locator('[data-property="facing"] button').count(),6);await page.getByRole('button',{name:'facing=east',exact:true}).click();await page.getByRole('button',{name:'triggered=true',exact:true}).click();
+    for(const label of ['方向','东','西','南','北','上','下'])assert((await page.locator('[data-property="facing"]').innerText()).includes(label));
+    await choose('observer');assert.equal(await page.locator('#boardState fieldset').count(),1);
+    await choose('rail');assert.equal(await page.locator('[data-property="shape"] button').count(),10);
+    let projected=await preview(page.locator('#boardPalette [data-block="rail"] canvas'),'rail',{},'icon');assert(projected.width>=24&&projected.height>=24,'palette rail keeps its readable face');
+    projected=await preview(page.getByRole('button',{name:'shape=north_south',exact:true}).locator('canvas'),'rail',{shape:'north_south'},'sprite');assert(projected.width>=24&&projected.height<=3,'side-view flat rail chooser shows a thin line');
+    projected=await preview(page.getByRole('button',{name:'shape=ascending_east',exact:true}).locator('canvas'),'rail',{shape:'ascending_east'},'sprite');assert(projected.width>=24&&projected.height>=24&&projected.count<=256,'side-view ascending rail chooser shows its thin diagonal');
+    await page.getByRole('button',{name:'shape=ascending_east',exact:true}).click();
+    await choose('powered_rail');assert.equal(await page.locator('[data-property="shape"] button').count(),6);assert(await page.locator('[data-property="waterlogged"]').isVisible());assert(await page.locator('[data-property="powered"]').isVisible());
+    await choose('repeater');assert.equal(await page.locator('[data-property="delay"] button').count(),4);assert(await page.locator('[data-property="locked"]').isVisible());
+    await choose('comparator');assert.equal(await page.locator('[data-property="mode"] button').count(),2);
+    await choose('oak_slab');await page.getByRole('button',{name:'type=double',exact:true}).click();assert(await page.getByRole('button',{name:'waterlogged=true',exact:true}).isDisabled());
+    await page.locator('#boardPause').click();
+    const source={id:'oak_stairs',states:{facing:'east',half:'top',shape:'inner_left',waterlogged:'true'}};
+    await load({version:2,view:'side',zoom:40,pan:{x:300,y:100},cells:[['0,0',source],['4,0',{id:'stone'}]]});
+    const r=await page.locator('#boardCanvas').boundingBox();
+    async function drag(x,y,dx,dy){await page.mouse.move(r.x+x,r.y+y);await page.mouse.down({button:'right'});await page.mouse.move(r.x+x+dx,r.y+y+dy,{steps:5});await page.mouse.up({button:'right'});}
+    await drag(320,120,80,40);let data=await packet();assert(!data.cells.some(([k])=>k==='0,0'));const moved=data.cells.find(([k])=>k==='2,1');assert.equal(moved[1].states.shape,'inner_left');assert.equal(moved[1].states.waterlogged,'true');
+    await page.locator('#boardUndo').click();data=await packet();assert(data.cells.some(([k])=>k==='0,0'));await page.locator('#boardRedo').click();
+    await drag(400,160,80,-40);data=await packet();assert(data.cells.some(([k])=>k==='2,1'),'occupied destination cancels move');
+    await drag(100,70,60,40);data=await packet();assert.deepEqual(data.pan,{x:360,y:140});assert.equal(data.cells.length,2,'blank right drag only pans');
+    await page.mouse.move(r.x+600,r.y+250);await page.mouse.wheel(0,-350);data=await packet();assert(data.zoom>40);
+    await page.locator('#boardClose').click();await page.locator('#menuBoard').click();await page.locator('#boardViewTop').click();assert.equal((await packet()).view,'top');
+    await load({version:2,view:'top',zoom:40,pan:{x:500,y:160},cells:[['0,0',{id:'water'}],['3,0',{id:'stone'}],['-2,-1',{id:'powered_rail',states:{shape:'ascending_east',powered:'true',waterlogged:'false'}}]]});
+    await choose('rail');await page.getByRole('button',{name:'shape=ascending_east',exact:true}).click();
+    projected=await preview(page.getByRole('button',{name:'shape=north_south',exact:true}).locator('canvas'),'rail',{shape:'north_south'},'top');assert(projected.width>=24&&projected.height>=24,'top-view rail chooser shows its broad upper face');
+    await preview(page.getByRole('button',{name:'shape=ascending_east',exact:true}).locator('canvas'),'rail',{shape:'ascending_east'},'top');
+    await preview(page.locator('#boardPalette [data-block="rail"] canvas'),'rail',{},'icon');
+    await page.screenshot({path:path.resolve(__dirname,'../board-ui-top.png')});
+    await page.locator('#boardClose').click();await page.locator('#menuBoard').click();await page.locator('#boardViewSide').click();assert.equal((await packet()).cells.length,2,'views keep separate boards');
+    await page.screenshot({path:path.resolve(__dirname,'../board-ui.png')});
+    await load({version:1,cells:[['0,0',{id:'dispenser',facing:'up',active:true}]]});data=await packet();assert.equal(data.cells[0][1].states.facing,'up');assert.equal(data.cells[0][1].states.triggered,'true');
+    await load({version:2,view:'side',zoom:40,pan:{x:300,y:100},cells:[]});
+    for(const [id,index]of [['ice',1],['packed_ice',2],['blue_ice',3],['copper_chest',4]]){await choose(id);await page.mouse.click(r.x+320+(index-1)*40,r.y+120);const last=await page.evaluate(()=>window.__placementAudio.at(-1));assert(last.src.includes(index<=3?`board-audio/${index}.mp3`:'board-audio/sounds/'));if(index<=3)assert.equal(last.rate,1);}
+    const count=await page.evaluate(()=>window.__placementAudio.length);await page.mouse.click(r.x+440,r.y+120);assert.equal(await page.evaluate(()=>window.__placementAudio.length),count,'unchanged cell does not replay audio');
+    const decoded=await page.evaluate(async()=>{const files=['board-audio/1.mp3','board-audio/2.mp3','board-audio/3.mp3',BoardSounds.copper_chest.samples[0].file,BoardSounds.chiseled_cinnabar.samples[0].file];return Promise.all(files.map(file=>new Promise((resolve,reject)=>{const audio=new Audio();audio.addEventListener('loadedmetadata',()=>resolve(audio.duration),{once:true});audio.addEventListener('error',()=>reject(new Error(file)),{once:true});audio.src=file;audio.load();})));});assert(decoded.every(n=>n>0&&Number.isFinite(n)));
+    await choose('rail');await page.screenshot({path:path.resolve(__dirname,'../board-ui-icons.png')});
+    await choose('copper_chest');await page.screenshot({path:path.resolve(__dirname,'../board-ui-chest.png')});
+    const colors=['white','orange','magenta','light_blue','yellow','lime','pink','gray','light_gray','cyan','purple','blue','brown','green','red','black'];
+    const flags=colors.map((color,i)=>[`${i%8},${Math.floor(i/8)}`,{id:color+'_banner',states:{rotation:String(i)}}]);
+    await load({version:2,view:'side',zoom:48,pan:{x:300,y:70},cells:flags});
+    await choose('red_banner');assert.equal(await page.locator('[data-property="rotation"] button').count(),16);
+    projected=await preview(page.locator('#boardPalette [data-block="red_banner"] canvas'),'red_banner',{},'icon');assert(projected.width>=10&&projected.height>=28,'palette banner keeps its broad cloth face');
+    projected=await preview(page.getByRole('button',{name:'rotation=0',exact:true}).locator('canvas'),'red_banner',{rotation:'0'},'sprite');assert(projected.width>=10&&projected.height>=28,'side-view banner rotation 0 shows its cloth');
+    projected=await preview(page.getByRole('button',{name:'rotation=4',exact:true}).locator('canvas'),'red_banner',{rotation:'4'},'sprite');assert(projected.width<=4&&projected.height>=28,'side-view banner rotation 4 shows a thin edge');
+    await page.getByRole('button',{name:'rotation=4',exact:true}).click();
+    await page.mouse.click(r.x+708,r.y+94);data=await packet();
+    assert.equal(data.cells.find(([key])=>key==='8,0')[1].states.rotation,'4');
+    assert.equal(data.cells.find(([key])=>key==='8,0')[1].id,'red_banner');
+    await page.screenshot({path:path.resolve(__dirname,'../board-ui-banners.png')});
+    await page.locator('#boardClose').click();await page.locator('#menuBoard').click();await page.locator('#boardViewTop').click();
+    await load({version:2,view:'top',zoom:48,pan:{x:300,y:70},cells:flags});await choose('blue_banner');
+    projected=await preview(page.getByRole('button',{name:'rotation=0',exact:true}).locator('canvas'),'blue_banner',{rotation:'0'},'top');assert(projected.width>=10&&projected.height<=4,'top-view banner rotation 0 shows its horizontal edge');
+    projected=await preview(page.getByRole('button',{name:'rotation=4',exact:true}).locator('canvas'),'blue_banner',{rotation:'4'},'top');assert(projected.width<=4&&projected.height>=10,'top-view banner edge rotates with its state');
+    await preview(page.locator('#boardPalette [data-block="blue_banner"] canvas'),'blue_banner',{},'icon');
+    await page.screenshot({path:path.resolve(__dirname,'../board-ui-banners-top.png')});
+    assert.deepEqual(errors,[]);console.log('PASS: broad palette icons, actual rail/banner direction previews and placement in both views; toolbar 61.8%, canvas controls, states, save and audio');
+  }finally{await browser.close();}
+})().catch(e=>{console.error(e);process.exitCode=1;});

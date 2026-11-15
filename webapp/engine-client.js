@@ -107,6 +107,10 @@ class EngineClient {
     try {
       msg = JSON.parse(line);
     } catch {
+      const snippet = String(line).slice(0, 300);
+      this.stderrTail.push('invalid json-rpc line: ' + snippet);
+      if (this.stderrTail.length > 200) this.stderrTail.shift();
+      if (this.opts.onEvent) this.opts.onEvent({ event: 'protocolError', message: '无效 JSON-RPC 输出', line: snippet });
       return;
     }
     if (msg.event === 'ready') {
@@ -135,10 +139,19 @@ class EngineClient {
 
   call(method, params) {
     if(this.stopping)return Promise.reject(new Error(this.forced ? '渲染已强制停止' : '应用正在退出'));
+    if (method === 'cancel' || method === 'cancelPreview') {
+      return this.callControl(method, params);
+    }
     return new Promise((resolve, reject) => {
       this.queue.push({ method, params, resolve, reject });
       this._pump();
     });
+  }
+
+  /** 控制指令绕过串行 RPC 队列，立即直达非阻塞后端控制分发器。 */
+  callControl(method, params) {
+    if (this.stopping) return Promise.reject(new Error(this.forced ? '渲染已强制停止' : '应用正在退出'));
+    return this._send(method, params);
   }
 
   _pump() {

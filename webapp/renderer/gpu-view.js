@@ -10,6 +10,7 @@ const VERTICES_PER_QUAD = 4;
 const INDICES_PER_QUAD = 6;
 const QUAD_TRIANGLES = [0,1,2,0,2,3];
 const INDEX16_QUADS = 16384;
+const ZERO_VEC = new Float32Array([0, 0, 0]);
 
 const LAYER_NAMES = ['SOLID', 'CUTOUT', 'PORTAL', 'FLUID', 'TRANSLUCENT'];
 
@@ -63,9 +64,17 @@ uniform float uSearchDim;
 uniform sampler2D uSearchPositions;
 uniform vec2 uSearchSize;
 uniform float uSearchCount;
+uniform vec3 uSearchMin;
+uniform vec3 uSearchMax;
+uniform float uSearchCap;
+uniform float uSearchMaxProbe;
 uniform sampler2D uEditPositions;
 uniform vec2 uEditSize;
 uniform float uEditCount;
+uniform vec3 uEditMin;
+uniform vec3 uEditMax;
+uniform float uEditCap;
+uniform float uEditMaxProbe;
 uniform vec3 uFocusMin;
 uniform vec3 uFocusMax;
 
@@ -73,15 +82,40 @@ varying vec2 vUv;
 varying vec3 vColor;
 varying vec3 vWorld;
 
-bool edited(vec3 cell){
-  float low=0.0,high=uEditCount;
-  for(int i=0;i<20;i++){if(low>=high)break;float mid=floor((low+high)*0.5);vec3 p=texture2D(uEditPositions,(vec2(mod(mid,uEditSize.x),floor(mid/uEditSize.x))+0.5)/uEditSize).xyz;if(all(equal(cell,p)))return true;bool before=cell.x<p.x||(cell.x==p.x&&(cell.y<p.y||(cell.y==p.y&&cell.z<p.z)));if(before)high=mid;else low=mid+1.0;}
+float spatialSlot(vec3 rel, float cap) {
+  float slot = mod(mod(rel.x, cap) * 89.0, cap);
+  slot = mod(slot + mod(rel.y, cap) * 137.0, cap);
+  return mod(slot + mod(rel.z, cap) * 199.0, cap);
+}
+
+bool containsPoint(vec3 cell, sampler2D tex, vec2 size, float count, vec3 minB, vec3 maxB, float cap, float maxProbe) {
+  if (any(lessThan(cell, minB)) || any(greaterThan(cell, maxB))) return false;
+  if (cap > 0.5) {
+    float slot = spatialSlot(cell - minB, cap);
+    for (int i = 0; i < 16; i++) {
+      if (float(i) >= maxProbe) break;
+      vec4 p = texture2D(tex, (vec2(mod(slot, size.x), floor(slot / size.x)) + 0.5) / size);
+      if (p.w < 0.5) return false;
+      if (all(equal(cell, p.xyz))) return true;
+      slot = mod(slot + 1.0, cap);
+    }
+    return false;
+  }
+  float low = 0.0, high = count;
+  for (int i = 0; i < 20; i++) {
+    if (low >= high) break;
+    float mid = floor((low + high) * 0.5);
+    vec3 p = texture2D(tex, (vec2(mod(mid, size.x), floor(mid / size.x)) + 0.5) / size).xyz;
+    if (all(equal(cell, p))) return true;
+    bool before = cell.x < p.x || (cell.x == p.x && (cell.y < p.y || (cell.y == p.y && cell.z < p.z)));
+    if (before) high = mid; else low = mid + 1.0;
+  }
   return false;
 }
 void main() {
   vec3 focusPosition=vWorld;
   /*选区表面偏移*/
-  if(uEditCount>0.0&&edited(floor(focusPosition)))discard;
+  if(uEditCount>0.0&&containsPoint(floor(focusPosition),uEditPositions,uEditSize,uEditCount,uEditMin,uEditMax,uEditCap,uEditMaxProbe))discard;
   bool inside=all(greaterThanEqual(focusPosition,uFocusMin-vec3(0.0001)))&&all(lessThanEqual(focusPosition,uFocusMax+vec3(0.0001)));
   if(uFocusPass>0.5&&((uFocusPass<1.5&&!inside)||(uFocusPass>1.5&&inside)))discard;
   vec4 tex = uColorOnly > 0.5 ? vec4(1.0) : texture2D(uAtlas, vUv);
@@ -91,24 +125,98 @@ void main() {
   vec3 rgb = tex.rgb * vColor;
   bool matched=false;
   if(uSearchDim>0.5&&uSearchCount>0.0){
-    vec3 cell=floor(focusPosition);float low=0.0,high=uSearchCount;
-    for(int i=0;i<15;i++){
-      if(low>=high)break;
-      float mid=floor((low+high)*0.5);
-      vec3 p=texture2D(uSearchPositions,(vec2(mod(mid,uSearchSize.x),floor(mid/uSearchSize.x))+0.5)/uSearchSize).xyz;
-      if(all(equal(cell,p))){matched=true;break;}
-      bool before=cell.x<p.x||(cell.x==p.x&&(cell.y<p.y||(cell.y==p.y&&cell.z<p.z)));
-      if(before)high=mid;else low=mid+1.0;
-    }
+    matched=containsPoint(floor(focusPosition),uSearchPositions,uSearchSize,uSearchCount,uSearchMin,uSearchMax,uSearchCap,uSearchMaxProbe);
   }
   gl_FragColor = vec4(rgb*(uSearchDim>0.5&&!matched?0.1:1.0),tex.a*(uFocusPass>1.5?0.1:1.0));
 }
 `;
 
+function boundsEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.min[0] === b.min[0] && a.min[1] === b.min[1] && a.min[2] === b.min[2]
+    && a.max[0] === b.max[0] && a.max[1] === b.max[1] && a.max[2] === b.max[2];
+}
+
+function buildPointLookupTexture(gl, points, textureUnit) {
+  if (!points?.length || !gl.getExtension('OES_texture_float')) return null;
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    if (p[0] < minX) minX = p[0]; if (p[0] > maxX) maxX = p[0];
+    if (p[1] < minY) minY = p[1]; if (p[1] > maxY) maxY = p[1];
+    if (p[2] < minZ) minZ = p[2]; if (p[2] > maxZ) maxZ = p[2];
+  }
+  const min = [minX, minY, minZ], max = [maxX, maxY, maxZ];
+  const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  let texW = 1024;
+  while (texW > maxTex && texW > 64) texW >>= 1;
+  let cap = 0, maxProbe = 0, width = 1, height = 1, data = null;
+  if (points.length <= 26214) {
+    let targetCap = 64;
+    const minCap = Math.ceil(points.length * 2.5);
+    while (targetCap < minCap) targetCap <<= 1;
+    if (targetCap <= 65536 && Math.ceil(targetCap / texW) <= maxTex) {
+      width = Math.min(texW, targetCap);
+      height = Math.ceil(targetCap / width);
+      const table = new Float32Array(width * height * 4);
+      let worst = 0, overflow = false;
+      for (let i = 0; i < points.length; i++) {
+        const p = points[i];
+        let slot = (((p[0] - minX) % targetCap) * 89) % targetCap;
+        slot = (slot + ((p[1] - minY) % targetCap) * 137) % targetCap;
+        slot = (slot + ((p[2] - minZ) % targetCap) * 199) % targetCap;
+        let step = 0;
+        for (; step < 16; step++) {
+          const base = slot * 4;
+          if (table[base + 3] < 0.5) {
+            table[base] = p[0]; table[base + 1] = p[1]; table[base + 2] = p[2]; table[base + 3] = 1;
+            if (step + 1 > worst) worst = step + 1;
+            break;
+          }
+          if (table[base] === p[0] && table[base + 1] === p[1] && table[base + 2] === p[2]) {
+            if (step + 1 > worst) worst = step + 1;
+            break;
+          }
+          slot = (slot + 1) & (targetCap - 1);
+        }
+        if (step >= 16) { overflow = true; break; }
+      }
+      if (!overflow) {
+        cap = targetCap;
+        maxProbe = Math.max(1, worst);
+        data = table;
+      }
+    }
+  }
+  if (!data) {
+    const sorted = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+    width = Math.min(texW, maxTex);
+    height = Math.ceil(sorted.length / width);
+    if (height > maxTex) return { overflow: true };
+    data = new Float32Array(width * height * 4);
+    for (let i = 0; i < sorted.length; i++) {
+      data.set(sorted[i], i * 4);
+      data[i * 4 + 3] = 1;
+    }
+  }
+  const texture = gl.createTexture();
+  gl.activeTexture(textureUnit);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, data);
+  gl.activeTexture(gl.TEXTURE0);
+  return { texture, width, height, count: points.length, min, max, cap, maxProbe };
+}
+
 class GpuView {
-  constructor(canvas) {
+  constructor(canvas, shared = null) {
     this.canvas = canvas;
-    const gl = canvas.getContext('webgl', {
+    this._sharedShaders = !!(shared && shared.gl && shared.program && shared.compactCorners);
+    const gl = this._sharedShaders ? shared.gl : canvas.getContext('webgl', {
       alpha: true,
       antialias: true,
       depth: true,
@@ -118,30 +226,44 @@ class GpuView {
     });
     if (!gl) throw new Error('WebGL unavailable');
     this.gl = gl;
-    this.instancing=gl.getExtension('ANGLE_instanced_arrays');
-    this.compactGpu=!!this.instancing&&gl.getParameter(gl.MAX_VERTEX_ATTRIBS)>=9;
-    const vertexSource=this.compactGpu?VERTEX_SHADER:'attribute vec3 aPos;attribute vec2 aUv;attribute vec3 aColor;uniform mat4 uViewProj;varying vec2 vUv;varying vec3 vColor;varying vec3 vWorld;void main(){vUv=aUv;vColor=aColor;vWorld=aPos;gl_Position=uViewProj*vec4(aPos,1.0);}';
-    const derivatives=gl.getExtension('OES_standard_derivatives');
-    const fragmentSource=(derivatives?'#extension GL_OES_standard_derivatives : enable\n':'')+FRAGMENT_SHADER.replace('/*选区表面偏移*/',derivatives?'if(uFocusPass>0.5||uSearchDim>0.5||uEditCount>0.0){vec3 normal=cross(dFdx(vWorld),dFdy(vWorld));focusPosition-=normal/max(length(normal),0.000001)*0.001;}':'');
-    this.program = this._program(vertexSource, fragmentSource);
-    this.attr = {
-      pos: gl.getAttribLocation(this.program, 'aPos'),
-      uv: gl.getAttribLocation(this.program, 'aUv'),
-      color: gl.getAttribLocation(this.program, 'aColor'),
-      compactOrigin:gl.getAttribLocation(this.program,'aCompactOrigin'),compactCode:gl.getAttribLocation(this.program,'aCompactCode'),
-      tiles:[0,1,2,3].map(i=>gl.getAttribLocation(this.program,'aTile'+i)),
-    };
-    this.uni = {
-      viewProj: gl.getUniformLocation(this.program, 'uViewProj'),
-      atlas: gl.getUniformLocation(this.program, 'uAtlas'),
-      alphaCutoff: gl.getUniformLocation(this.program, 'uAlphaCutoff'),
-      colorOnly: gl.getUniformLocation(this.program, 'uColorOnly'),
-      compact:gl.getUniformLocation(this.program,'uCompact'),sectionOrigin:gl.getUniformLocation(this.program,'uSectionOrigin'),
-      editPositions:gl.getUniformLocation(this.program,'uEditPositions'),editSize:gl.getUniformLocation(this.program,'uEditSize'),editCount:gl.getUniformLocation(this.program,'uEditCount'),searchPositions:gl.getUniformLocation(this.program,'uSearchPositions'),searchSize:gl.getUniformLocation(this.program,'uSearchSize'),searchCount:gl.getUniformLocation(this.program,'uSearchCount'),searchDim:gl.getUniformLocation(this.program,'uSearchDim'),focusPass:gl.getUniformLocation(this.program,'uFocusPass'),focusMin:gl.getUniformLocation(this.program,'uFocusMin'),focusMax:gl.getUniformLocation(this.program,'uFocusMax'),
-
-    };
+    if (this._sharedShaders) {
+      this.instancing = shared.instancing;
+      this.compactGpu = shared.compactGpu;
+      this.program = shared.program;
+      this.attr = shared.attr;
+      this.uni = shared.uni;
+      this.compactCorners = shared.compactCorners;
+      this.focusProgram = shared.focusProgram || null;
+      this.focusBuffer = shared.focusBuffer || null;
+    } else {
+      this.instancing=gl.getExtension('ANGLE_instanced_arrays');
+      this.compactGpu=!!this.instancing&&gl.getParameter(gl.MAX_VERTEX_ATTRIBS)>=9;
+      const vertexSource=this.compactGpu?VERTEX_SHADER:'attribute vec3 aPos;attribute vec2 aUv;attribute vec3 aColor;uniform mat4 uViewProj;varying vec2 vUv;varying vec3 vColor;varying vec3 vWorld;void main(){vUv=aUv;vColor=aColor;vWorld=aPos;gl_Position=uViewProj*vec4(aPos,1.0);}';
+      const derivatives=gl.getExtension('OES_standard_derivatives');
+      const fragmentSource=(derivatives?'#extension GL_OES_standard_derivatives : enable\n':'')+FRAGMENT_SHADER.replace('/*选区表面偏移*/',derivatives?'if(uFocusPass>0.5||uSearchDim>0.5||uEditCount>0.0){vec3 normal=cross(dFdx(vWorld),dFdy(vWorld));focusPosition-=normal/max(length(normal),0.000001)*0.001;}':'');
+      this.program = this._program(vertexSource, fragmentSource);
+      this.attr = {
+        pos: gl.getAttribLocation(this.program, 'aPos'),
+        uv: gl.getAttribLocation(this.program, 'aUv'),
+        color: gl.getAttribLocation(this.program, 'aColor'),
+        compactOrigin:gl.getAttribLocation(this.program,'aCompactOrigin'),compactCode:gl.getAttribLocation(this.program,'aCompactCode'),
+        tiles:[0,1,2,3].map(i=>gl.getAttribLocation(this.program,'aTile'+i)),
+      };
+      this.uni = {
+        viewProj: gl.getUniformLocation(this.program, 'uViewProj'),
+        atlas: gl.getUniformLocation(this.program, 'uAtlas'),
+        alphaCutoff: gl.getUniformLocation(this.program, 'uAlphaCutoff'),
+        colorOnly: gl.getUniformLocation(this.program, 'uColorOnly'),
+        compact:gl.getUniformLocation(this.program,'uCompact'),sectionOrigin:gl.getUniformLocation(this.program,'uSectionOrigin'),
+        editPositions:gl.getUniformLocation(this.program,'uEditPositions'),editSize:gl.getUniformLocation(this.program,'uEditSize'),editCount:gl.getUniformLocation(this.program,'uEditCount'),
+        editMin:gl.getUniformLocation(this.program,'uEditMin'),editMax:gl.getUniformLocation(this.program,'uEditMax'),editCap:gl.getUniformLocation(this.program,'uEditCap'),editMaxProbe:gl.getUniformLocation(this.program,'uEditMaxProbe'),
+        searchPositions:gl.getUniformLocation(this.program,'uSearchPositions'),searchSize:gl.getUniformLocation(this.program,'uSearchSize'),searchCount:gl.getUniformLocation(this.program,'uSearchCount'),
+        searchMin:gl.getUniformLocation(this.program,'uSearchMin'),searchMax:gl.getUniformLocation(this.program,'uSearchMax'),searchCap:gl.getUniformLocation(this.program,'uSearchCap'),searchMaxProbe:gl.getUniformLocation(this.program,'uSearchMaxProbe'),
+        searchDim:gl.getUniformLocation(this.program,'uSearchDim'),focusPass:gl.getUniformLocation(this.program,'uFocusPass'),focusMin:gl.getUniformLocation(this.program,'uFocusMin'),focusMax:gl.getUniformLocation(this.program,'uFocusMax'),
+      };
+      this.compactCorners=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.compactCorners);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,1,2,3]),gl.STATIC_DRAW);
+    }
     this.buffers = [];
-    this.compactCorners=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.compactCorners);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([0,1,2,3]),gl.STATIC_DRAW);
     this.texture = null;
     this.min = [0, 0, 0];
     this.max = [1, 1, 1];
@@ -613,15 +735,18 @@ class GpuView {
   }
   disposeSelection(){
     if(this.selectionView){this.selectionView.destroy();this.selectionView=null;}
+    this.selectionBounds=null;
     this.selectionBoundsKey=null;
   }
   destroy(){
     if(this.destroyed)return;this.clearEditPreview();this.destroyed=true;this.disposeBuffers();
     if(this.texture)this.gl.deleteTexture(this.texture);
-    this.gl.deleteBuffer(this.compactCorners);this.gl.deleteProgram(this.program);
     if(this.searchWireBuffer)this.gl.deleteBuffer(this.searchWireBuffer);
     if(this.searchTexture)this.gl.deleteTexture(this.searchTexture);
-    if(this.focusBuffer)this.gl.deleteBuffer(this.focusBuffer);if(this.focusProgram)this.gl.deleteProgram(this.focusProgram);
+    if(!this._sharedShaders){
+      this.gl.deleteBuffer(this.compactCorners);this.gl.deleteProgram(this.program);
+      if(this.focusBuffer)this.gl.deleteBuffer(this.focusBuffer);if(this.focusProgram)this.gl.deleteProgram(this.focusProgram);
+    }
   }
   /** 使用实际绘制矩阵构造透视拾取射线。 */
   async uploadLodStream(read,byteLength,options={}) {
@@ -786,20 +911,24 @@ class GpuView {
     this.reachableSections=!cam.focus&&!cam.orbit&&cam.culling!==false&&cam.occlusion!==false
       ? visibleSections(this.sectionGraph,cam.eye,frustum):null;
     this.drawStats={totalQuads:this.quadCount,visibleQuads:0,visibleChunks:0,totalChunks:0,drawCalls:0};
+    this._compactActive=true;
     this.resetCompact();
     const edit=this.editMaskSource||this;
     gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,edit.editMaskTexture||this.texture);gl.uniform1i(this.uni.editPositions,2);gl.uniform2f(this.uni.editSize,edit.editMaskWidth||1,edit.editMaskHeight||1);gl.uniform1f(this.uni.editCount,cam.editOverlay?0:edit.editMaskCount||0);
+    gl.uniform3fv(this.uni.editMin,edit.editMaskMin||ZERO_VEC);gl.uniform3fv(this.uni.editMax,edit.editMaskMax||ZERO_VEC);gl.uniform1f(this.uni.editCap,edit.editMaskCap||0);gl.uniform1f(this.uni.editMaxProbe,edit.editMaskMaxProbe||0);
     const search=this.searchSource||this;
     gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,search.searchTexture||this.texture);gl.uniform1i(this.uni.searchPositions,1);
-    gl.uniform2f(this.uni.searchSize,search.searchWidth||1,search.searchHeight||1);gl.uniform1f(this.uni.searchCount,search.searchCount||0);gl.activeTexture(gl.TEXTURE0);
+    gl.uniform2f(this.uni.searchSize,search.searchWidth||1,search.searchHeight||1);gl.uniform1f(this.uni.searchCount,search.searchCount||0);
+    gl.uniform3fv(this.uni.searchMin,search.searchMin||ZERO_VEC);gl.uniform3fv(this.uni.searchMax,search.searchMax||ZERO_VEC);gl.uniform1f(this.uni.searchCap,search.searchCap||0);gl.uniform1f(this.uni.searchMaxProbe,search.searchMaxProbe||0);
+    gl.activeTexture(gl.TEXTURE0);
     gl.uniform1f(this.uni.searchDim,cam.searchDim?1:0);
     gl.uniform1f(this.uni.focusPass,cam.focus?1:0);
     if(cam.focus){gl.uniform3fv(this.uni.focusMin,cam.focus.min);gl.uniform3fv(this.uni.focusMax,cam.focus.max);}
     let passes=cam.focusPasses||(cam.focus?[1,2]:[0]);
-    if(cam.focus&&this.selectionView&&this.selectionBoundsKey===JSON.stringify(cam.focus)){
+    if(cam.focus&&this.selectionView&&boundsEqual(this.selectionBounds||this.selectionView._boundsObj,cam.focus)){
       const selected=this.selectionView;selected.searchSource=this;selected.editMaskSource=this;selected.setFrameBounds(this.min,this.max);
       selected.draw({...cam,selectionOverlay:true,focusPasses:[1],selectionBox:false});passes=[2];
-      gl.useProgram(this.program);gl.uniformMatrix4fv(this.uni.viewProj,false,viewProj);gl.uniform1f(this.uni.colorOnly,0);this.resetCompact();
+      gl.useProgram(this.program);gl.uniformMatrix4fv(this.uni.viewProj,false,viewProj);gl.uniform1f(this.uni.colorOnly,0);this._compactActive=true;this.resetCompact();
       gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.texture);gl.uniform1i(this.uni.atlas,0);
     }
     if(this.stream){this.stream.draw({...cam,focusPasses:passes},frustum);this.drawEditPreview(cam);this.drawSearchBoxes(viewProj);if(cam.editTarget)this.drawFocusBox(cam.editTarget,viewProj,[1,.85,.25,1]);if(cam.selectionBox!==false)this.drawFocusBox(cam.focus||cam.selectionBox,viewProj);return;}
@@ -856,12 +985,14 @@ class GpuView {
       } else {
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,layer.indexBuffer);
         // 合并相邻可见区段，16 位索引范围不能越过局部顶点地址边界。
+        let prevBase=-1;
         for(const range of layer.drawRanges) {
           let start=range.start,remaining=range.count;
           while(remaining) {
             const batchBase=this.uintIndices?0:Math.floor(start/INDEX16_QUADS)*INDEX16_QUADS;
             const count=this.uintIndices?remaining:Math.min(remaining,INDEX16_QUADS-(start-batchBase));
-            bindVertices(layer.vbo,batchBase*4*stride);
+            const byteBase=batchBase*4*stride;
+            if(byteBase!==prevBase){bindVertices(layer.vbo,byteBase);prevBase=byteBase;}
             gl.drawElements(gl.TRIANGLES,count*6,this.uintIndices?gl.UNSIGNED_INT:gl.UNSIGNED_SHORT,start*6*(this.uintIndices?4:2));
             this.drawStats.drawCalls++;start+=count;remaining-=count;
           }
@@ -876,20 +1007,24 @@ class GpuView {
   }
 
   resetCompact(){
+    if(!this._compactActive)return;
     const gl=this.gl;gl.uniform1f(this.uni.compact,0);
     for(const attr of [this.attr.compactOrigin,this.attr.compactCode,...this.attr.tiles])if(attr>=0){if(this.instancing)this.instancing.vertexAttribDivisorANGLE(attr,0);gl.disableVertexAttribArray(attr);}
+    this._compactActive=false;
   }
   clearEditPreview(){
     this.editPreview?.destroy();this.editSelectionPreview?.destroy();this.editPreview=null;this.editSelectionPreview=null;
-    if(this.editMaskTexture)this.gl.deleteTexture(this.editMaskTexture);this.editMaskTexture=null;this.editMaskCount=0;this.revision++;
+    if(this.editMaskTexture)this.gl.deleteTexture(this.editMaskTexture);this.editMaskTexture=null;this.editMaskCount=0;this.editMaskCap=0;this.editMaskMaxProbe=0;this.editMaskMin=null;this.editMaskMax=null;this.revision++;
   }
   setEditMask(points){
-    const gl=this.gl;if(this.editMaskTexture)gl.deleteTexture(this.editMaskTexture);this.editMaskTexture=null;this.editMaskCount=0;
-    if(!points?.length)return;if(!gl.getExtension('OES_texture_float'))throw Error('当前 GPU 不支持编辑预览纹理');
-    const sorted=points.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]||a[2]-b[2]),width=Math.min(1024,gl.getParameter(gl.MAX_TEXTURE_SIZE)),height=Math.ceil(sorted.length/width);if(height>gl.getParameter(gl.MAX_TEXTURE_SIZE))throw Error('编辑范围过大，请退出更改模式后继续');
-    const data=new Float32Array(width*height*4);for(let i=0;i<sorted.length;i++){data.set(sorted[i],i*4);data[i*4+3]=1;}
-    this.editMaskTexture=gl.createTexture();this.editMaskWidth=width;this.editMaskHeight=height;this.editMaskCount=sorted.length;
-    gl.activeTexture(gl.TEXTURE2);gl.bindTexture(gl.TEXTURE_2D,this.editMaskTexture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.FLOAT,data);gl.activeTexture(gl.TEXTURE0);this.revision++;
+    const gl=this.gl;if(this.editMaskTexture)gl.deleteTexture(this.editMaskTexture);this.editMaskTexture=null;this.editMaskCount=0;this.editMaskCap=0;this.editMaskMaxProbe=0;this.editMaskMin=null;this.editMaskMax=null;
+    if(!points?.length)return;
+    const built=buildPointLookupTexture(gl,points,gl.TEXTURE2);
+    if(!built)throw Error('当前 GPU 不支持编辑预览纹理');
+    if(built.overflow)throw Error('编辑范围过大，请退出更改模式后继续');
+    this.editMaskTexture=built.texture;this.editMaskWidth=built.width;this.editMaskHeight=built.height;this.editMaskCount=built.count;
+    this.editMaskMin=built.min;this.editMaskMax=built.max;this.editMaskCap=built.cap;this.editMaskMaxProbe=built.maxProbe;
+    this.revision++;
   }
   drawEditPreview(cam){
     if(cam.editOverlay||!this.editPreview)return;
@@ -899,13 +1034,12 @@ class GpuView {
     this.gl.useProgram(this.program);
   }
   setSearchMatches(points){
-    const gl=this.gl;if(this.searchTexture)gl.deleteTexture(this.searchTexture);this.searchTexture=null;this.searchCount=0;
-    if(!points?.length||!gl.getExtension('OES_texture_float'))return;
-    const sorted=points.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]||a[2]-b[2]);
-    const width=Math.min(1024,gl.getParameter(gl.MAX_TEXTURE_SIZE)),height=Math.ceil(sorted.length/width),data=new Float32Array(width*height*4);
-    for(let i=0;i<sorted.length;i++){data.set(sorted[i],i*4);data[i*4+3]=1;}
-    this.searchTexture=gl.createTexture();this.searchCount=sorted.length;this.searchWidth=width;this.searchHeight=height;
-    gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,this.searchTexture);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,width,height,0,gl.RGBA,gl.FLOAT,data);gl.activeTexture(gl.TEXTURE0);
+    const gl=this.gl;if(this.searchTexture)gl.deleteTexture(this.searchTexture);this.searchTexture=null;this.searchCount=0;this.searchCap=0;this.searchMaxProbe=0;this.searchMin=null;this.searchMax=null;
+    if(!points?.length)return;
+    const built=buildPointLookupTexture(gl,points,gl.TEXTURE1);
+    if(!built||built.overflow)return;
+    this.searchTexture=built.texture;this.searchCount=built.count;this.searchWidth=built.width;this.searchHeight=built.height;
+    this.searchMin=built.min;this.searchMax=built.max;this.searchCap=built.cap;this.searchMaxProbe=built.maxProbe;
   }
   drawSearchBoxes(matrix){
     if(this.searchBoxes?.length)this.drawFocusBox(this.searchBoxes,matrix);
@@ -1055,9 +1189,9 @@ function visibleSections(graph,eye,frustum) {
   reachable.fill(0);entries.fill(0);inFrustum.fill(2);
   let head=0,tail=1;queue[0]=start*8+6;reachable[start]=1;
   while(head<tail) {
-    // 开放的大型连通图可能得不偿失，达到预算后保留完整视锥结果。
+    // 开放的大型连通图可能得不偿失，达到预算后本帧回退为完整视锥结果（不永久关闭遮挡剔除）。
 
-    if(head>8192){graph.disabled=true;return null;}
+    if(head>8192)return null;
     const item=queue[head++],id=item>>>3,entry=item&7;
     const exits=entry===6?faces:cells[id]?cells[id].exits[entry]:63;
     const x=id%nx,z=Math.floor(id/nx)%nz,y=Math.floor(id/(nx*nz));

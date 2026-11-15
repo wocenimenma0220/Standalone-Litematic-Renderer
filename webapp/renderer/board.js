@@ -70,14 +70,16 @@
   function persist(flush=false,viewOnly=false){return storage.save(flush,viewOnly);}
   function updateTitle(){$('boardTitle').textContent='二维搭建 · '+(world.view==='top'?'俯视':'侧视');$('boardDirections').textContent=world.view==='top'?'俯视：↑ 北  ↓ 南  ← 西  → 东\n上：朝向屏幕外 · 下：朝向屏幕内':'侧视：↑ 上  ↓ 下  ← 西  → 东\n北：朝向屏幕内 · 南：朝向屏幕外';}
   function restore(packet){const restored=packet.timing?new BoardTiming.TimingWorld():null,stored=packet.dormantTiming?new BoardTiming.TimingWorld():null,items=BoardContainerInventory.clean(packet.inventory);if(restored)restored.restore(packet.timing);if(stored)stored.restore(packet.dormantTiming);world.view=packet.view==='top'?'top':'side';world.restore(packet.cells);timing=restored;dormantTiming=stored;inventoryState=items;if(!timing)enableTiming();timing.plane=world.view;for(const k of [...timing.cells.keys()])if(!timing.inPlane(k.split(',').map(Number)))timing.cells.delete(k);syncTiming();setPaused(true);lastTimingRevision=-1;renderTiming();if(Number.isFinite(packet.zoom))zoom=Math.max(10,Math.min(160,packet.zoom));if(Number.isFinite(packet.pan?.x)&&Number.isFinite(packet.pan?.y))pan={...packet.pan};updateTitle();drawOptions();drawPalette();timing.pendingOpenView=$('boardContainerDialog').open&&!entityTarget?containerPanel.pos:null;syncTiming();if($('boardContainerDialog').open)bindContainer();dirty=true;}
-  function choose(block){selected=block;placement=world.normalize({id:block.id,states:{...block.defaults,...(block.id==='observer'&&world.view==='side'?{facing:'east',powered:'false'}:{})}});if(block.id==='redstone_wire')placement=world.normalize(BoardTiming.wireCell(0,'side'));erase=false;updateBrush();drawOptions();drawPalette();dirty=true;}
+  const paletteButtons=new Map();
+  function choose(block){selected=block;placement=world.normalize({id:block.id,states:{...block.defaults,...(block.id==='observer'&&world.view==='side'?{facing:'east',powered:'false'}:{})}});if(block.id==='redstone_wire')placement=world.normalize(BoardTiming.wireCell(0,'side'));erase=false;updateBrush();drawOptions();for(const {button,block:b}of paletteButtons.values())button.setAttribute('aria-pressed',String(b===selected));dirty=true;}
   function matches(condition,states){return Object.entries(condition).every(([k,v])=>k==='OR'?v.some(c=>matches(c,states)):k==='AND'?v.every(c=>matches(c,states)):String(v).split('|').includes(states[k]));}
   function sprites(block,cell,view){
     const index=p=>view==='icon'?(p.icon??p.sprite):view==='top'?p.top:p.sprite;
     if(block.multipart?.length)return block.multipart.filter(p=>matches(p.when,cell.states)).map(index);
     const visual=block.visuals.find(v=>matches(v.when,cell.states))||block.visuals[0];return visual?[index(visual)]:[];
   }
-  function tileImage(raw,view=world.view,baseOnly=false){if(raw.id==='primed_tnt')raw={id:'tnt',states:{unstable:'false'}};if(defs.get(raw.id)?.entity){const c=document.createElement('canvas');c.width=c.height=32;const img=entityImage(raw.id,raw.states?.facing,view==='icon'?'side':view);if(img.complete&&img.naturalWidth)c.getContext('2d').drawImage(img,16,0,96,112,0,0,32,32);return c;}
+  function tileImage(raw,view=world.view,baseOnly=false){if(raw.id==='primed_tnt')raw={id:'tnt',states:{unstable:'false'}};
+    if(defs.get(raw.id)?.entity){const ev=view==='icon'?'side':view,facing=raw.states?.facing||'east',dir={south:0,west:1,north:2,east:3}[facing]??3,ek='entity:'+ev+':'+raw.id+':'+dir;if(tileCache.has(ek))return tileCache.get(ek);const c=document.createElement('canvas');c.width=c.height=32;const img=entityImage(raw.id,facing,ev);if(img.complete&&img.naturalWidth){c.getContext('2d').drawImage(img,16,0,96,112,0,0,32,32);if(tileCache.size>6000)tileCache.clear();tileCache.set(ek,c);}return c;}
     const cell=raw.states?raw:world.normalize(raw),key=view+':'+cell.id+':'+JSON.stringify(cell.states)+':'+baseOnly;
     if(tileCache.has(key))return tileCache.get(key);
     const block=defs.get(cell.id),c=document.createElement('canvas');c.width=c.height=32;const context=c.getContext('2d');context.imageSmoothingEnabled=false;
@@ -93,17 +95,17 @@
     if(tileCache.size>6000)tileCache.clear();tileCache.set(key,c);return c;
   }
   function drawTile(context,cell,x,y,size,alpha=1,baseOnly=false){if(!defs.has(cell?.id)||!atlas.naturalWidth)return;context.save();context.globalAlpha=alpha;context.imageSmoothingEnabled=false;context.drawImage(tileImage(cell,world.view,baseOnly),x,y,size,size);context.restore();}
-  function tile(cell,view='icon'){if(cell.id==='primed_tnt')cell={id:'tnt',states:{unstable:'false'}};
-    const c=document.createElement('canvas');c.width=c.height=32;if(!atlas.naturalWidth)return c;
-    const context=c.getContext('2d');context.imageSmoothingEnabled=false;
-    if(defs.get(cell.id)?.entity){const img=entityImage(cell.id,cell.states?.facing,view==='icon'?'side':view),paint=()=>{if(img.naturalWidth){context.clearRect(0,0,32,32);context.drawImage(img,16,0,96,112,0,0,32,32);}};if(img.complete)paint();else img.addEventListener('load',paint,{once:true});return c;}
-    if(!world.pistonHead(cell)){context.drawImage(tileImage(cell,view),0,0);return c;}
+  function paintTile(c,cell,view='icon'){if(cell.id==='primed_tnt')cell={id:'tnt',states:{unstable:'false'}};
+    if(!atlas.naturalWidth)return;
+    const context=c.getContext('2d');context.imageSmoothingEnabled=false;context.clearRect(0,0,32,32);
+    if(defs.get(cell.id)?.entity){const img=entityImage(cell.id,cell.states?.facing,view==='icon'?'side':view),paint=()=>{if(img.naturalWidth){context.clearRect(0,0,32,32);context.drawImage(img,16,0,96,112,0,0,32,32);}};if(img.complete)paint();else img.addEventListener('load',paint,{once:true});return;}
+    if(!world.pistonHead(cell)){context.drawImage(tileImage(cell,view),0,0);return;}
     const projectedView=view==='icon'?world.view:view,[dx,dy]=BoardModel.pistonOffset(cell,projectedView),size=32/(dx||dy?2:1);
     const x=(32-size*(1+Math.abs(dx)))/2-Math.min(0,dx)*size,y=(32-size*(1+Math.abs(dy)))/2-Math.min(0,dy)*size;
     context.drawImage(tileImage(cell,projectedView),x,y,size,size);
     if(dx||dy)context.drawImage(tileImage(world.pistonHead(cell),projectedView),x+dx*size,y+dy*size,size,size);
-    return c;
   }
+  function tile(cell,view='icon'){const c=document.createElement('canvas');c.width=c.height=32;paintTile(c,cell,view);return c;}
   function drawParts(parts,alpha){for(const p of parts)drawTile(ctx,p.cell,pan.x+p.x*zoom,pan.y+p.y*zoom,zoom,alpha);}
   function setState(property,value){const states={...placement.states,[property]:value};
     if(property==='powered'&&('open' in states))states.open=value;
@@ -129,9 +131,21 @@
     }
     if(selected.id==='observer'){const d=placement.states.facing,p=document.createElement('p');p.id='boardObserverHint';p.textContent=`检测面朝${values[d]}，输出面朝${values[BoardTiming.OPP[d]]}；纹理箭头指向输出面。`;host.append(p);}
   }
-  function drawPalette(){const query=$('boardSearch').value.trim().toLowerCase(),host=$('boardPalette');host.replaceChildren();
-    const shown=catalog.filter(b=>(category==='all'||b.categories.includes(category))&&(!query||b.name.toLowerCase().includes(query)||b.id.includes(query)));
-    for(const block of shown){const button=document.createElement('button');button.type='button';button.title=block.name;button.dataset.block=block.id;button.draggable=true;button.ondragstart=event=>event.dataTransfer.setData('application/x-board-block',block.id);button.setAttribute('aria-label',block.name+' · '+block.id);button.setAttribute('aria-pressed',String(block===selected));button.append(tile({id:block.id}));button.onclick=()=>choose(block);host.append(button);}
+  function ensurePalette(){
+    if(paletteButtons.size)return;
+    for(const block of catalog){
+      const button=document.createElement('button'),canvasIcon=tile({id:block.id});
+      button.type='button';button.title=block.name;button.dataset.block=block.id;button.draggable=true;
+      button.ondragstart=event=>event.dataTransfer.setData('application/x-board-block',block.id);
+      button.setAttribute('aria-label',block.name+' · '+block.id);button.setAttribute('aria-pressed',String(block===selected));
+      button.append(canvasIcon);button.onclick=()=>choose(block);
+      paletteButtons.set(block.id,{button,canvas:canvasIcon,block,search:block.name.toLowerCase()});
+    }
+  }
+  function redrawPaletteIcons(){for(const entry of paletteButtons.values())paintTile(entry.canvas,{id:entry.block.id},'icon');}
+  function drawPalette(){ensurePalette();const query=$('boardSearch').value.trim().toLowerCase(),host=$('boardPalette'),frag=document.createDocumentFragment();
+    for(const entry of paletteButtons.values()){const b=entry.block;if((category==='all'||b.categories.includes(category))&&(!query||entry.search.includes(query)||b.id.includes(query))){entry.button.setAttribute('aria-pressed',String(b===selected));frag.append(entry.button);}}
+    host.replaceChildren(frag);
   }
   function updateBrush(){$('boardBrush').setAttribute('aria-pressed',String(!erase));$('boardEraser').setAttribute('aria-pressed',String(erase));}
   function resize(){const rect=canvas.getBoundingClientRect();screenWidth=rect.width;screenHeight=rect.height;const dpr=window.devicePixelRatio||1;canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);dirty=true;}
@@ -144,14 +158,20 @@
   function draw(){ctx.clearRect(0,0,screenWidth,screenHeight);ctx.imageSmoothingEnabled=false;
     const minX=Math.max(-BoardModel.LIMIT,Math.floor(-pan.x/zoom)),maxX=Math.min(BoardModel.LIMIT,Math.ceil((screenWidth-pan.x)/zoom)),minY=Math.max(-BoardModel.LIMIT,Math.floor(-pan.y/zoom)),maxY=Math.min(BoardModel.LIMIT,Math.ceil((screenHeight-pan.y)/zoom));
     ctx.strokeStyle='rgba(148,163,184,.12)';ctx.lineWidth=1;ctx.beginPath();for(let x=minX;x<=maxX+1;x++){const xx=Math.round(pan.x+x*zoom)+.5;ctx.moveTo(xx,Math.max(0,pan.y+minY*zoom));ctx.lineTo(xx,Math.min(screenHeight,pan.y+(maxY+1)*zoom));}for(let y=minY;y<=maxY+1;y++){const yy=Math.round(pan.y+y*zoom)+.5;ctx.moveTo(Math.max(0,pan.x+minX*zoom),yy);ctx.lineTo(Math.min(screenWidth,pan.x+(maxX+1)*zoom),yy);}ctx.stroke();
+    const movingKeys=pointer?.mode==='move'?new Set(pointer.parts.map(p=>BoardModel.key(p.x,p.y))):null;
+    const hasMoving=!!timing?.moving?.size;
     for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){
-      const cell=world.get(x,y),moving=pointer?.mode==='move'&&pointer.parts.some(p=>p.x===x&&p.y===y);
-      const entity=timing?.moving?.get(BoardTiming.to3(x,y,world.view).join(','));
-      if(cell&&cell.id!=='water'&&!entity){const dir=BoardTiming.DIR[cell.states.facing],p=BoardTiming.to3(x,y,world.view),front=dir&&timing?.moving?.get(p.map((v,i)=>v+dir[i]).join(','));drawTile(ctx,cell,pan.x+x*zoom,pan.y+y*zoom,zoom,moving?.3:1,!!front?.source);}
+      const cell=world.get(x,y),moving=!!movingKeys?.has(BoardModel.key(x,y));
+      const pos3=hasMoving?BoardTiming.to3(x,y,world.view):null;
+      const entity=pos3?timing.moving.get(pos3[0]+','+pos3[1]+','+pos3[2]):null;
+      if(cell&&cell.id!=='water'&&!entity){const dir=hasMoving?BoardTiming.DIR[cell.states.facing]:null,front=dir?timing.moving.get((pos3[0]+dir[0])+','+(pos3[1]+dir[1])+','+(pos3[2]+dir[2])):null;drawTile(ctx,cell,pan.x+x*zoom,pan.y+y*zoom,zoom,moving?.3:1,!!front?.source);}
       const water=world.water.get(BoardModel.key(x,y))||(world.source(x,y)?{level:0,falling:false}:null);if(water){const height=world.view==='top'?1:water.height??(water.falling||water.level===0?1:Math.max(.125,(8-water.level)/8)),left=pan.x+x*zoom,top=pan.y+(y+1-height)*zoom;ctx.save();ctx.beginPath();ctx.rect(left,top,zoom,zoom*height);ctx.clip();drawTile(ctx,{id:'water'},left,pan.y+y*zoom,zoom,moving?.3:world.view==='top'?.55+(8-water.level)*.025:.72);ctx.restore();}
     }
-    if(timing)for(const m of timing.moving.values())for(const part of BoardTiming.pistonRenderParts(m)){const p=BoardTiming.to2(part.pos,world.view),s=world.normalize(part.cell);if(!p||!s)continue;drawTile(ctx,s,pan.x+p[0]*zoom,pan.y+p[1]*zoom,zoom,1,part.baseOnly);}
-    if(timing)for(const e of timing.entities.values()){if(['item','projectile','primed_tnt','falling_block'].includes(e.type)){const xy=world.view==='top'?[e.pos[0],e.pos[2]]:[e.pos[0],1-e.pos[1]],size=zoom*.4,img=itemImages.get(e.item?.id);if(e.block||e.type==='primed_tnt'){const visual=e.type==='primed_tnt'?BoardTiming.tntVisual(e):{scale:1,lit:false},size=zoom*visual.scale,left=pan.x+xy[0]*zoom-size/2,top=pan.y+(xy[1]-.5)*zoom-size/2;drawTile(ctx,e.block||{id:'tnt'},left,top,size);if(visual.lit){ctx.fillStyle='rgba(255,255,255,.55)';ctx.fillRect(left,top,size,size);}if(e.type==='primed_tnt'){ctx.fillStyle='#fff';ctx.font='bold 11px sans-serif';ctx.fillText(e.fuse+'gt',left,top-3);}}else if(defs.has(e.item?.id))drawTile(ctx,{id:e.item.id},pan.x+xy[0]*zoom-size/2,pan.y+xy[1]*zoom-size/2,size);else if(img?.complete)ctx.drawImage(img,pan.x+xy[0]*zoom-size/2,pan.y+xy[1]*zoom-size/2,size,size);continue;}const img=entityImage(e.type,e.facing);if(img.complete&&img.naturalWidth)ctx.drawImage(img,pan.x+(e.pos[0]-2)*zoom,pan.y+(world.view==='top'?e.pos[2]-2:-2-e.pos[1])*zoom,4*zoom,4*zoom);}
+    if(hasMoving)for(const m of timing.moving.values())for(const part of BoardTiming.pistonRenderParts(m)){const p=BoardTiming.to2(part.pos,world.view),s=world.normalize(part.cell);if(!p||!s)continue;drawTile(ctx,s,pan.x+p[0]*zoom,pan.y+p[1]*zoom,zoom,1,part.baseOnly);}
+    if(timing?.entities?.size)for(const e of timing.entities.values()){
+      if(['item','projectile','primed_tnt','falling_block'].includes(e.type)){const xy=world.view==='top'?[e.pos[0],e.pos[2]]:[e.pos[0],1-e.pos[1]];if(xy[0]<minX-2||xy[0]>maxX+3||xy[1]<minY-2||xy[1]>maxY+3)continue;const size=zoom*.4,img=itemImages.get(e.item?.id);if(e.block||e.type==='primed_tnt'){const visual=e.type==='primed_tnt'?BoardTiming.tntVisual(e):{scale:1,lit:false},size=zoom*visual.scale,left=pan.x+xy[0]*zoom-size/2,top=pan.y+(xy[1]-.5)*zoom-size/2;drawTile(ctx,e.block||{id:'tnt'},left,top,size);if(visual.lit){ctx.fillStyle='rgba(255,255,255,.55)';ctx.fillRect(left,top,size,size);}if(e.type==='primed_tnt'){ctx.fillStyle='#fff';ctx.font='bold 11px sans-serif';ctx.fillText(e.fuse+'gt',left,top-3);}}else if(defs.has(e.item?.id))drawTile(ctx,{id:e.item.id},pan.x+xy[0]*zoom-size/2,pan.y+xy[1]*zoom-size/2,size);else if(img?.complete)ctx.drawImage(img,pan.x+xy[0]*zoom-size/2,pan.y+xy[1]*zoom-size/2,size,size);continue;}
+      const ex=e.pos[0],ey=world.view==='top'?e.pos[2]:-e.pos[1];if(ex<minX-3||ex>maxX+4||ey<minY-3||ey>maxY+4)continue;const img=entityImage(e.type,e.facing);if(img.complete&&img.naturalWidth)ctx.drawImage(img,pan.x+(e.pos[0]-2)*zoom,pan.y+(ey-2)*zoom,4*zoom,4*zoom);
+    }
 
     if(timing)for(const fx of timing.explosionEffects||[]){const age=timing.time-fx.time;if(age<0||age>8)continue;const c=world.view==='top'?[fx.center[0],fx.center[2]]:[fx.center[0],-fx.center[1]],r=(.4+age*.28)*zoom;ctx.save();ctx.globalAlpha=(1-age/9)*.8;ctx.strokeStyle='#ffd166';ctx.lineWidth=3;ctx.beginPath();ctx.arc(pan.x+c[0]*zoom,pan.y+c[1]*zoom,r,0,Math.PI*2);ctx.stroke();ctx.restore();}
     if(hover&&Math.abs(hover.x)<=BoardModel.LIMIT&&Math.abs(hover.y)<=BoardModel.LIMIT&&pointer?.mode!=='pan'){
@@ -210,7 +230,7 @@
   $('boardSave').onclick=()=>{const blob=new Blob([JSON.stringify(capture(),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='二维搭建.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);};
   $('boardLoad').onclick=()=>$('boardFile').click();$('boardFile').onchange=async()=>{const file=$('boardFile').files[0];if(!file)return;try{if(file.size>20*1024*1024)throw new Error('文件超过 20 MB');const data=JSON.parse(await file.text()),packet=validatePacket(data,data.view==='top'?'top':data.view==='side'?'side':world.view);remember();persist(true);restore(packet);persist();status('');}catch(error){status('打开失败：'+error.message);}finally{$('boardFile').value='';}};
   new ResizeObserver(()=>{if(dialog.open)resize();}).observe($('boardStage'));
-  atlas.onload=()=>{tileCache.clear();drawOptions();drawPalette();dirty=true;};atlas.onerror=()=>status('贴图加载失败。');
-  partsAtlas.onload=()=>{tileCache.clear();drawOptions();drawPalette();dirty=true;};partsAtlas.onerror=()=>status('活塞头贴图加载失败。');partsAtlas.src='board-piston-parts.png';
+  atlas.onload=()=>{tileCache.clear();drawOptions();redrawPaletteIcons();dirty=true;};atlas.onerror=()=>status('贴图加载失败。');
+  partsAtlas.onload=()=>{tileCache.clear();drawOptions();redrawPaletteIcons();dirty=true;};partsAtlas.onerror=()=>status('活塞头贴图加载失败。');partsAtlas.src='board-piston-parts.png';
   atlas.src='board-atlas.png';updateHistory();choose(selected);renderTiming();
 })();

@@ -48,24 +48,27 @@ public final class GifWriter {
         try {
             var histogram = new PaletteBuilder();
             GifWriter gif = null;
-            try (var pixels = new java.io.DataOutputStream(new java.io.BufferedOutputStream(Files.newOutputStream(spool),1<<20))) {
+            byte[] ioBuf = new byte[65536];
+            try (var pixels = new java.io.BufferedOutputStream(Files.newOutputStream(spool),1<<20)) {
                 for (int tick=0;tick<frameCount;tick++) {
+                    if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("渲染已取消");
                     Image frame=source.render(tick);
                     if (gif==null) gif=new GifWriter(frame.width,frame.height);
                     if (frame.width!=gif.width || frame.height!=gif.height) throw new IOException("frame size mismatch");
                     histogram.add(frame);
-                    for (int pixel:frame.pixels()) pixels.writeInt(pixel);
+                    writeSpoolPixels(pixels, frame.pixels(), ioBuf);
                     progress.update("rendering",tick+1,frameCount);
                 }
             }
             histogram.finish(gif.palette);
             encoded=Files.createTempFile(parent,".projection-gif-",".tmp");
             try (var output=new java.io.BufferedOutputStream(Files.newOutputStream(encoded),1<<20);
-                 var pixels=new java.io.DataInputStream(new java.io.BufferedInputStream(Files.newInputStream(spool),1<<20))) {
+                 var pixels=new java.io.BufferedInputStream(Files.newInputStream(spool),1<<20)) {
                 gif.out.stream=output; gif.writeHeader();
                 Image frame=new Image(gif.width,gif.height);
                 for(int tick=0;tick<frameCount;tick++) {
-                    for(int i=0;i<frame.pixels().length;i++) frame.pixels()[i]=pixels.readInt();
+                    if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("渲染已取消");
+                    readSpoolPixels(pixels, frame.pixels(), ioBuf);
                     gif.writeFrame(frame,delayCs);
                     progress.update("encoding",tick+1,frameCount);
                 }
@@ -75,6 +78,40 @@ public final class GifWriter {
         } finally {
             Files.deleteIfExists(spool);
             if(encoded!=null) Files.deleteIfExists(encoded);
+        }
+    }
+
+    private static void writeSpoolPixels(java.io.OutputStream out, int[] data, byte[] buf) throws IOException {
+        int i = 0, len = data.length;
+        while (i < len) {
+            int batch = Math.min(len - i, buf.length >> 2), off = 0;
+            for (int j = 0; j < batch; j++) {
+                int p = data[i + j];
+                buf[off] = (byte) p;
+                buf[off + 1] = (byte) (p >>> 8);
+                buf[off + 2] = (byte) (p >>> 16);
+                buf[off + 3] = (byte) (p >>> 24);
+                off += 4;
+            }
+            out.write(buf, 0, off);
+            i += batch;
+        }
+    }
+
+    private static void readSpoolPixels(java.io.InputStream in, int[] data, byte[] buf) throws IOException {
+        int i = 0, len = data.length;
+        while (i < len) {
+            int batch = Math.min(len - i, buf.length >> 2), need = batch << 2, got = 0;
+            while (got < need) {
+                int n = in.read(buf, got, need - got);
+                if (n < 0) throw new java.io.EOFException();
+                got += n;
+            }
+            for (int j = 0, off = 0; j < batch; j++, off += 4) {
+                data[i + j] = (buf[off] & 0xFF) | ((buf[off + 1] & 0xFF) << 8)
+                        | ((buf[off + 2] & 0xFF) << 16) | ((buf[off + 3] & 0xFF) << 24);
+            }
+            i += batch;
         }
     }
 
@@ -254,6 +291,11 @@ public final class GifWriter {
     // ------------------------------------------------------------------
     // 按 GIF 规范写入可变位宽 LZW 数据及清除、结束代码。
 
+    private final int[] lzwKeys = new int[8192];
+    private final int[] lzwEpochs = new int[8192];
+    private final short[] lzwVals = new short[8192];
+    private int lzwEpoch = 0;
+
     private void writeLzw(byte[] data) {
         final int minCodeSize = 8;
         final int clearCode = 1 << minCodeSize;         // 256
@@ -263,26 +305,35 @@ public final class GifWriter {
         BitWriter bw = new BitWriter();
         int codeSize = minCodeSize + 1;
         int nextCode = endCode + 1;
-        java.util.Map<Integer, Integer> table = new java.util.HashMap<>();
+        int epoch = ++this.lzwEpoch;
+        if (epoch == 0) { java.util.Arrays.fill(this.lzwEpochs, 0); epoch = this.lzwEpoch = 1; }
         bw.write(clearCode, codeSize);
 
         int prefix = data.length > 0 ? (data[0] & 0xFF) : -1;
         for (int i = 1; i < data.length; i++) {
             int k = data[i] & 0xFF;
             int key = (prefix << 8) | k;
-            Integer existing = table.get(key);
-            if (existing != null) {
+            int slot = (key * 0x9E3779B9) >>> 19;
+            int existing = -1;
+            while (this.lzwEpochs[slot] == epoch) {
+                if (this.lzwKeys[slot] == key) { existing = this.lzwVals[slot] & 0xFFFF; break; }
+                slot = (slot + 1) & 8191;
+            }
+            if (existing >= 0) {
                 prefix = existing;
                 continue;
             }
             bw.write(prefix, codeSize);
-            table.put(key, nextCode++);
+            this.lzwEpochs[slot] = epoch;
+            this.lzwKeys[slot] = key;
+            this.lzwVals[slot] = (short) (nextCode++);
             if (nextCode > (1 << codeSize)) {
                 if (codeSize < 12) {
                     codeSize++;
                 } else {
                     bw.write(clearCode, codeSize);
-                    table.clear();
+                    epoch = ++this.lzwEpoch;
+                    if (epoch == 0) { java.util.Arrays.fill(this.lzwEpochs, 0); epoch = this.lzwEpoch = 1; }
                     codeSize = minCodeSize + 1;
                     nextCode = endCode + 1;
                 }

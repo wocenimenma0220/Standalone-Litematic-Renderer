@@ -1,225 +1,163 @@
-<a id="readme-top"></a>
-
 <div align="center">
   <img src="webapp/icon.png" alt="投影预览图标" width="88" height="88" />
   <h1>投影预览</h1>
-  <p><strong>Standalone Litematic Renderer</strong></p>
-  <p>在游戏外查看 Minecraft 投影、检查内部结构、整理材料，或搭建二维红石实验。</p>
+  <p>Standalone Litematic Renderer — Minecraft Java 结构查看、材料统计与二维红石实验工具</p>
   <p>
-    <a href="https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases"><strong>下载 Windows 便携版</strong></a>
+    <a href="https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases">下载便携版</a>
     · <a href="docs/DEVELOPMENT.md">开发文档</a>
-    · <a href="https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/issues">反馈问题</a>
+    · <a href="https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/issues">问题反馈</a>
   </p>
-  <p>Windows x64 · Java 渲染引擎 · Electron 桌面界面 · 作者 LiteKinda</p>
+  <p>Windows x64 · Java 渲染引擎 · Electron 桌面应用 · 作者 LiteKinda</p>
 </div>
 
-- 作者 **LiteKinda**：[B站主页](https://space.bilibili.com/107835436?spm_id_from=333.788.0.0)
-- **XeKr 红显材质包**来自 **XeKr**：[B站主页](https://space.bilibili.com/5930630?spm_id_from=333.788.upinfo.head.click)
-- [XeKr红显下载](https://modrinth.com/resourcepack/xk-redstone-display/versions)
-- **护眼大补丸**来自 **黑山大叔**：[B站主页](https://space.bilibili.com/19428259?spm_id_from=333.788.upinfo.detail.click)
+无需启动 Minecraft 或安装 Litematica，直接打开 `.litematic`、Java 结构 `.nbt` 或 Sponge `.schem` 文件即可旋转预览模型、第一人称漫游、按层切片检查、统计材料，并导出图片、动图或编辑后的投影。自带 Java 与 Electron 运行时，解压即用。
 
-投影预览是一款独立运行的 Minecraft Java 版结构查看与导出工具。打开 `.litematic`、Java 结构 `.nbt` 或 Sponge `.schem`，即可旋转查看模型、自由漫游、按层观察、统计材料，并导出图片或编辑后的投影。便携包包含所需运行时，无需先启动 Minecraft，也无需安装 Litematica 模组。
+附带侧视与俯视二维搭建画布，适合做小型红石、容器、矿车、TNT 与流体测试，并支持按游戏刻（gt）和事件阶段逐步单步排查。
 
-此外，软件提供侧视与俯视的二维搭建画布，用于局部红石、容器、矿车、TNT 与流体实验，并可逐刻检查执行过程。二维实验与三维投影编辑的功能范围不同，详见[当前限制](#limitations)。
+- 作者 **LiteKinda**：[B 站主页](https://space.bilibili.com/107835436?spm_id_from=333.788.0.0)
+- **XeKr 红显材质包**（**XeKr**）：[B 站主页](https://space.bilibili.com/5930630?spm_id_from=333.788.upinfo.head.click) · [Modrinth 下载](https://modrinth.com/resourcepack/xk-redstone-display/versions)
+- **护眼大补丸**（**黑山大叔**）：[B 站主页](https://space.bilibili.com/19428259?spm_id_from=333.788.upinfo.detail.click)
 
-<details>
-  <summary>目录</summary>
-
-  - [快速开始](#quick-start)
-  - [功能与截图](#features)
-    - [三维预览与自由漫游](#preview)
-    - [选区、逐层观察与图片导出](#inspection)
-    - [材料清单与容器内容物](#materials)
-    - [三维投影编辑](#editor)
-    - [二维搭建与微时序](#board)
-  - [支持的文件格式](#formats)
-  - [常用操作](#controls)
-  - [从源码构建](#development)
-  - [当前限制](#limitations)
-  - [反馈与贡献](#contributing)
-  - [许可与致谢](#credits)
-
-</details>
-
-<a id="quick-start"></a>
+---
 
 ## 快速开始
 
-1. 前往 [Releases](https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases)，下载所需版本的 Windows x64 便携 ZIP。测试版也会显示在此页面，请留意版本说明。
-2. 将压缩包**完整解压**到可写目录，双击 `投影预览.exe`。请保留同目录下的 `bin`、`runtime`、`assets` 和 `webapp` 等文件夹。
-3. 在界面中打开投影文件，等待模型加载后旋转、缩放或进入漫游。
-4. 通过侧栏选择显示范围、调整光照、查看材料，或从菜单导出 PNG / GIF。
+1. 从 [Releases](https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases) 下载对应版本的 Windows x64 便携包（带 `-test` 等后缀的为测试版）。
+2. 将压缩包完整解压到可写目录（保留同级的 `bin`、`runtime`、`assets`、`webapp` 等文件夹），双击 `投影预览.exe`。
+3. 拖入或选择投影文件；通过左侧栏可调整选区、光照、材料清单或切换渲染/编辑模式。
 
-**便携版不需要另外安装 Java 或 Node.js。** 源码开发环境的要求见[从源码构建](#development)。
+> 便携版已自带运行环境，不用额外装 Java 或 Node.js。想先试效果可以直接打开仓库里的 [功能演示投影](docs/examples/功能演示.litematic)（含箱子、漏斗、红石、玻璃、水、TNT 和矿车，用于展示渲染与状态查看）。
 
-想先试用功能，可以下载仓库里的[功能演示投影](docs/examples/功能演示.litematic)。它包含箱子、漏斗、红石元件、玻璃、水、TNT 和矿车等，用于观察外观与保存状态；它不是一台可运行机器的设计图。
+---
 
-<a id="features"></a>
+## 主要功能
 
-## 功能与截图
+当前正式版本：**1.3.0**（以下功能截图拍摄于 1.2.0 定型阶段）。
 
-当前正式版本为 **1.2.0**。以下五张截图拍摄于正式发布前的 `1.2.0test-v2`，展示本次正式版包含的功能；三维截图使用仓库附带的功能演示投影。
-
-<a id="preview"></a>
-
-### 1. 三维预览与自由漫游
+### 三维预览与漫游
 
 ![三维预览：红石、容器、透明方块与实体的当前界面](docs/images/01-preview.jpg)
 
-- **整体观察与近景漫游**：旋转、缩放模型，或进入第一人称自由飞行，检查建筑内部和大型机器的局部结构。
-- **材质与光照**：显示方块状态、透明材质、发光效果和平滑光照，可调整光照、背景及资源包；支持部分方块实体和普通实体的静态外观。
-- **多种加载方式**：提供自动选择、完整加载与大投影分块加载。大投影可先显示总览，再按视角补充细节，并通过 LOD 降低远景开销。
-- **可调性能与缓存**：可设置预览几何缓存上限、漫游水平视距与磁盘场景缓存限额。默认退出时清理渲染缓存；关闭该选项后，下次启动可复用场景缓存。
-- **预览与导出**：GPU 用于交互式查看，Java 软件渲染用于图片与动画导出，适合在同一份投影上完成检查和展示。
+- 自由旋转、缩放观察整体，或按 `V` 切换第一人称飞行漫游钻进机器内部查看走线。
+- 完整解析方块状态、透明材质排序、发光方块、平滑光照，以及部分方块实体和静态实体外观；支持加载外部资源包。
+- 大型投影自动切换分块流式加载：先显示粗略总览，再按视角精细补全与 LOD 降级，也可在设置里强制完整加载、调节视距与缓存大小（默认退出清理渲染缓存，可改为持久化复用）。
+- 交互使用 GPU 实时渲染，导出 PNG / GIF 时走 Java 软件渲染管线。
 
-<a id="inspection"></a>
-
-### 2. 选区、逐层观察与图片导出
+### 选区、逐层查看与图片导出
 
 ![选择渲染：保留选区，淡化外部方块并观察内部结构](docs/images/02-selection.jpg)
 
-- **双角点选区**：用两个角点限定观察范围，支持输入坐标、移动角点和独立调整各方向裁切面。选区外方块可淡化显示，保留周围结构作为参照。
-- **逐层查看**：按 Y 高度切换切片，适合逐层阅读建筑与红石线路；选区工具关闭后仍可保留选区显示。
-- **搜索与定位**：按中文名称、方块名称或 ID 查找目标，定位匹配方块并观察它们在结构中的分布。
-- **方块与容器检查**：查看方块状态、NBT 和已保存的容器内容物、物品组件。文件未保存容器数据时会提示，不能据此判断原容器为空。
-- **PNG 与 360° GIF**：设置输出尺寸、视角和背景，导出静态图片或旋转动画；支持透明背景，选择渲染范围也可应用到导出。任务在后台执行，期间可继续预览，退出软件会停止未完成的任务。
+- 按 `B` 打开选点工具，设置两个角点框定局部区域；选区外的方块会自动淡化或裁切，关闭面板后仍保持选区效果。
+- 支持 Y 轴逐层切片浏览，方便逐层核对红石和建筑结构。
+- 支持按中文名、英文名或方块 ID 搜索并定位目标方块；点击可查看方块状态、NBT 及容器内物品与组件（若原投影未导出库存会明确提示）。
+- 后台导出自定义分辨率和视角的 PNG（支持透明背景）以及 360° 旋转 GIF，导出期间不阻塞画面浏览。
 
-<a id="materials"></a>
-
-### 3. 材料清单与容器内容物
+### 材料清单与容器统计
 
 ![材料面板：建材、容器内容物、数量换算和表格导出](docs/images/03-materials.jpg)
 
-- **两类统计**：分别列出搭建所需建材和投影中已保存的容器内容物，避免把库存物品混入方块数量。
-- **名称搜索与数量换算**：按名称或 ID 筛选，并查看数量、组数及盒数，方便备料与运输。
-- **水桶换算为冰**：可将建材中的普通水桶按一桶水对应一块普通冰换算，导出沿用换算结果；容器内容物不受此换算影响。
-- **XLSX / CSV 导出**：两类清单可合并到一个文件、分别导出，或只导出其中一类。
-- **缺失数据提示**：材料表会标明容器数据不完整的情况。统计依据文件中实际保存的数据，无法补回导出投影时遗漏的库存。
+- 将“建筑所需材料”与“容器内部物品”分开统计，互不混算。
+- 支持名称/ID 筛选，并按个 / 组 / 潜影盒自动换算数量。
+- 可一键将建材列表中的水桶按 1:1 换算为普通冰块（不影响容器内物品），并支持合并或拆分导出为 XLSX / CSV。
 
-<a id="editor"></a>
-
-### 4. 三维投影编辑
+### 三维投影编辑
 
 ![更改投影：方块分类、背包、快捷栏、调试棒与导出](docs/images/04-editor.jpg)
 
-- **直接修改结构**：进入“更改投影”后，在三维视图中放置、删除和拾取方块，通过分类或搜索选择材料。
-- **调试棒**：查看和修改方块状态，例如朝向、连接或开关状态，便于调整保存下来的结构外观。
-- **背包与快捷栏**：提供 36 格背包和 9 格快捷栏，可用数字键或滚轮切换常用方块。
-- **撤销与重做**：回退或恢复编辑操作；已接入的成对方块及活塞结构编辑会处理相关联动。
-- **另存投影**：编辑后显式导出 `.litematic`，原文件不会随操作自动覆盖。由 `.nbt` / `.schem` 导入的结构也统一导出为 `.litematic`，并保留原始导入数据。
+- 按 `G` 进入“更改投影”后可在三维视图里直接放置、删除或吸取方块，内置 36 格背包与 9 格快捷栏。
+- 内置调试棒工具，直接切换朝向、开关、连接状态等方块属性。
+- 编辑支持撤销与重做，处理常见多格方块及活塞联动。
+- 所有改动仅存在于编辑副本，必须手动导出 `.litematic` 才会落盘，不会误改源文件；由 `.nbt` / `.schem` 导入的结构同样统一导出为 `.litematic`。
 
-三维编辑修改的是投影保存状态。需要观察运行过程时，请使用下面的二维实验画布。
-
-<a id="board"></a>
-
-### 5. 二维搭建与微时序
+### 二维搭建与微时序排查
 
 ![二维侧视：TNT 水流实验、逐刻推进、阶段记录与待执行队列](docs/images/05-board-timing.jpg)
 
-- **侧视 / 俯视画布**：在网格中搭建局部结构，按分类或名称搜索方块。左键放置、右键操作元件或打开容器，支持拖动、平移、缩放及撤销重做。
-- **红石与活塞**：已接入红石粉、火把、中继器、比较器、侦测器、灯、铜灯，以及平面内的活塞推动、黏性分支、短脉冲和部分准连接 / BUD 行为。
-- **容器与运输**：操作箱子、漏斗、投掷器等库存，查看漏斗锁定与传输冷却，实验铁轨、矿车和容器实体交互。
-- **TNT 与流体**：观察引信、连锁点燃、爆炸遮挡与冲量，以及水流液位、退流、含水和流体推力等已接入行为。
-- **逐步检查**：画布默认暂停，可连续运行，也可推进 1 个游戏刻（gt）、进入下一阶段、执行下一事件或完成本刻。时序面板显示阶段、事件与待执行队列，支持按坐标、事件或元件 ID 筛选并导出记录。
-- **保存与恢复**：手动保存 / 打开 JSON，可保留方块、容器、实体和执行队列；侧视与俯视分别暂存上次画布，重启后恢复为暂停状态。运行时约每两秒暂存，关闭画布与正常退出时即时保存，重要设计建议另存 JSON。
+- 提供“侧视”与“俯视”两种平面画布，左键放方块、右键触发元件或打开容器，支持平移缩放、框选拖动和撤销重做。
+- 已接入常见红石元件（粉、火把、中继器、比较器、侦测器、铜灯等）、平面活塞推动（含短脉冲丢块与部分准连接 / BUD）、容器漏斗传输冷却、铁轨矿车，以及 TNT 引爆、爆炸冲量和基础水流/熔岩扩散。
+- 画布默认暂停：可连续运行，也能单步推进 1 gt、下一阶段或下一事件；打开时序面板可查看各阶段微时序记录并按坐标/元件筛选导出。
+- 侧视与俯视画布均会定期自动暂存并在下次重启恢复（保持暂停），重要设计也支持导出/导入 JSON（[更多实验示例见 docs/examples](docs/examples/)）。
 
-截图示例：[TNT—水流运输与爆炸冲量](docs/examples/TNT-水流运输与爆炸冲量.json)。进入“二维搭建 → 侧视”，点击“打开”载入 JSON，再打开“显示时序”逐刻观察。更多实验位于 [docs/examples](docs/examples/)。
+更多细节见[二维搭建范围说明](docs/二维微时序测试版说明.md)与[二维 TNT 与流体实现](docs/二维TNT与流体实现.md)。
 
-二维功能仍在扩展中，仅计算当前平面。完整覆盖清单见[二维搭建与微时序范围](docs/二维微时序测试版说明.md)，TNT 与流体的细节见[实现说明](docs/二维TNT与流体实现.md)。
+---
 
-<a id="formats"></a>
+## 支持的格式
 
-## 支持的文件格式
-
-| 格式 | 用途 | 说明 |
+| 格式 | 用途 | 备注 |
 | --- | --- | --- |
-| `.litematic` | 三维查看、检查、材料统计与编辑 | 编辑结果也使用此格式导出 |
-| `.nbt` | Minecraft Java 结构文件导入 | 多套调色板使用第一套；不包含任意 NBT 文件或 SNBT 文本 |
-| `.schem` | Sponge v2 / v3 结构导入 | 不执行游戏 DataFixer 迁移，旧版名称和 NBT 可能存在兼容差异 |
-| `.json` | 二维画布保存与恢复 | 在二维搭建界面打开，与三维结构文件入口分开 |
+| `.litematic` | 三维查看、检查、材料统计与编辑 | 编辑结果默认导出为该格式 |
+| `.nbt` | 导入 Minecraft Java 结构文件 | 多调色板默认读取第一套，不支持任意 SNBT |
+| `.schem` | 导入 Sponge v2 / v3 结构 | 不做游戏 DataFixer 跨版本迁移 |
+| `.json` | 二维画布存档 | 在“二维搭建”界面单独打开 |
 
-Java 结构 NBT 与 Sponge 导入目前限制为最多 **1600 万格**，单轴尺寸为 **1–16384**。旧式数字 ID 的 `.schematic`、Bedrock 结构和其他同名扩展文件不在当前支持范围。
+> Java `.nbt` 和 Sponge `.schem` 目前限制总体积不超过 1600 万格、单轴范围 1–16384，暂不支持老版本数字 ID 的 `.schematic` 或基岩版结构。
 
-导出内容包括 PNG、旋转 GIF、XLSX / CSV 材料表、编辑后的 `.litematic`、二维画布 JSON 和时序记录。
+---
 
-<a id="controls"></a>
+## 常用快捷键
 
-## 常用操作
+默认键位可在界面设置中自定义：
 
-以下为默认按键，可在界面的快捷键设置中查看和调整。
-
-| 场景 | 操作 | 默认按键 / 鼠标 |
+| 场景 | 功能 | 默认按键 |
 | --- | --- | --- |
-| 三维 | 开关自由漫游 | `V` |
-| 三维 | 开关更改投影 | `G` |
-| 三维 | 开关选点工具 | `B` |
-| 三维 | 打开指令输入 | `/` |
-| 三维 | 漫游移动、上升、下降、加速 | `W A S D`、`Space`、`Shift` / `C`、`Ctrl` |
-| 选区 | 设置两个角点 | 左键 / 右键 |
-| 选区 | 移动当前角点；逐层模式切换高度 | `Alt` + 滚轮 |
-| 编辑 | 选择快捷栏、调试棒、切换槽位 | `1–9`、`0`、滚轮 |
-| 编辑 / 二维 | 撤销、重做 | `Ctrl + Z`、`Ctrl + Shift + Z` |
-| 二维 | 放置、交互 / 打开容器 | 左键、右键 |
-| 二维 | 移动方块、平移画布、缩放 | `Shift` + 右键拖动、中键拖动、滚轮 |
-| 窗口 | 全屏、释放鼠标 | `F11`、`Esc` |
+| 三维视图 | 切换漫游模式 | `V` |
+| 三维视图 | 切换更改投影 | `G` |
+| 三维视图 | 切换选点工具 | `B` |
+| 三维视图 | 打开命令栏 | `/` |
+| 漫游移动 | 移动 / 上升 / 下降 / 加速 | `W A S D`、`Space`、`Shift` / `C`、`Ctrl` |
+| 选区 | 设置角点1 / 角点2 | 左键 / 右键 |
+| 选区 / 切片 | 调整角点或切换切片高度 | `Alt` + 滚轮 |
+| 编辑快捷栏 | 选择槽位 / 调试棒 / 切换 | `1–9`、`0`、滚轮 |
+| 通用编辑 | 撤销 / 重做 | `Ctrl + Z`、`Ctrl + Shift + Z` |
+| 二维画布 | 放置 / 交互或开容器 | 左键 / 右键 |
+| 二维画布 | 移动方块 / 平移 / 缩放 | `Shift` + 右键拖动、中键拖动、滚轮 |
+| 窗口 | 全屏 / 释放鼠标锁定 | `F11`、`Esc` |
 
-<a id="development"></a>
+---
 
 ## 从源码构建
 
-开发环境需要 **Windows、PowerShell 7、JDK 21 或更新版本、Node.js**。打包还需要 JDK 的 `jlink` 和 Windows .NET Framework C# 编译器。
+需要 **Windows、PowerShell 7、JDK 21+、Node.js**（打包便携版另需 JDK 自带 `jlink` 及系统 `.NET Framework` C# 编译器）。
 
 ```powershell
 git clone https://github.com/wocenimenma0220/Standalone-Litematic-Renderer.git
 cd Standalone-Litematic-Renderer
 
-# 安装桌面界面依赖
+# 安装 Electron 依赖
 .\install.bat
 
-# 从本地 Minecraft Java 客户端 JAR 准备原版模型、贴图等资源
+# 从本地 Minecraft Java 客户端 JAR 准备贴图与模型资源
 .\tools\prepare-resources.ps1 -ClientJar 'C:\path\to\client.jar'
 
-# 编译并生成包含运行时的便携包，输出位于 dist
+# 构建便携发行包（输出到 dist/）
 .\package.ps1 -JdkHome 'C:\path\to\jdk'
 ```
 
-基本检查入口为：
+运行回归测试：
 
 ```powershell
 .\verify.ps1 -JdkHome 'C:\path\to\jdk'
 ```
 
-默认检查使用项目自有的小型资源夹具；真实资源回归、界面检查、版本管理和代码入口见[开发与验证](docs/DEVELOPMENT.md)。
+详细测试参数（`-Profile Full`、`-Ui`、`-DesktopUi`）和目录结构见[开发与验证文档](docs/DEVELOPMENT.md)。
 
-<a id="limitations"></a>
+---
 
-## 当前限制
+## 目前已知边界
 
-- **二维模拟只覆盖当前平面**：面外更新、随机刻、区块加载卸载和三维投影联动尚未接入，复杂机器需要在游戏中复核。
-- **部分机制仅保存状态**：二维熔炉、合成器和酿造台保留库存，但不执行实际生产；生物和船没有 AI。完整战斗、战利品、燃烧和环境机制仍有缺项。
-- **三维显示受资源与实现范围影响**：部分实体、特殊模型或模组方块可能缺少外观或行为支持。资源包不能自动赋予模组逻辑，软件渲染导出与 GPU 预览也可能存在视觉差异。
-- **投影文件可能缺少数据**：原导出过程未保存的实体、容器库存等无法恢复。旧版本结构不会自动完成原版的数据迁移。
-- **大投影仍有资源开销**：分块加载和缓存可以改善查看体验，光照、贴图与导出仍会占用内存和时间，实际表现取决于投影和设备。
-- **当前发布以 Windows x64 为目标**：其他系统暂未提供同等验证的便携发行包。
+- 二维画布仅模拟当前平面（侧视 z=0，俯视 y=0），不包含区块加载、随机刻、熔炉/合成器生产配方或生物 AI。
+- 部分模组方块或冷门实体的特殊模型缺少静态渲染适配，GPU 实时预览与软件导出画面之间偶尔会有轻微色差。
+- 若原始投影导出时漏存了箱子或实体 NBT，软件无法凭空补回。
+- 便携版目前仅针对 Windows x64 构建验证。
 
-<a id="contributing"></a>
+---
 
-## 反馈与贡献
+## 致谢与许可
 
-欢迎通过 [Issues](https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/issues) 反馈问题或建议。复现问题时，请附上软件版本、操作步骤、预期与实际结果，以及可公开的最小投影 / 二维 JSON 示例；涉及显示问题时附上截图。
+仓库根目录暂未附带单独的 `LICENSE` 文本；`webapp/package.json` 标注为 ISC。内置第三方资源需遵守对应作者许可：
 
-提交代码前请阅读[开发与验证](docs/DEVELOPMENT.md)，针对改动运行相关检查。二维行为的改动还应说明适用平面、时序和机制边界，便于与现有功能范围核对。
+- 部分静态方块实体模型改写自 EnhancedBlockEntities（LGPL-3.0）：[EBE-NOTICE](assets/builtin/static-block-entities/EBE-NOTICE.md) · [EBE-LICENSE](assets/builtin/static-block-entities/EBE-LICENSE.txt)
+- 内置字体及 Unifont 说明：[字体说明](assets/builtin/minecraft-font/README.txt)
 
-<a id="credits"></a>
-
-## 许可与致谢
-
-仓库目前尚未提供统一的根目录 `LICENSE` 文本；`webapp/package.json` 中标注了 ISC。各类第三方代码、模型、字体和 Minecraft 资源仍需分别遵循其来源声明，项目整体许可有待补充明确。
-
-- 部分静态方块实体模型改编自 FoundationGames 及贡献者的 EnhancedBlockEntities，相关来源与 LGPL-3.0 文本见 [EBE-NOTICE](assets/builtin/static-block-entities/EBE-NOTICE.md) 和 [EBE-LICENSE](assets/builtin/static-block-entities/EBE-LICENSE.txt)。
-- Minecraft 字体资源与 Unifont 的来源说明见[字体资源说明](assets/builtin/minecraft-font/README.txt)；字体归档内保留了对应许可文本。
-- 本 README 的组织方式参考 [Best-README-Template](https://github.com/othneildrew/Best-README-Template)，截图与功能说明根据本项目当前界面编写。
-
-Minecraft 为 Mojang / Microsoft 的商标；本项目为独立社区工具。
-
-<p align="right"><a href="#readme-top">返回顶部 ↑</a></p>
+Minecraft 为 Mojang / Microsoft 商标，本项目为独立社区工具。如有建议或 Bug，欢迎附带版本号、复现步骤与最小投影样本提交 [Issue](https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/issues)。

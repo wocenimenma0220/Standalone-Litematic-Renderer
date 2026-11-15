@@ -2,11 +2,21 @@
 
 const fs = require('node:fs/promises');
 const { randomUUID } = require('node:crypto');
-const { inflateSync } = require('node:zlib');
+const { promisify } = require('node:util');
+const zlib = require('node:zlib');
+const { inflateSync } = zlib;
+const inflateAsync = promisify(zlib.inflate);
 const RAW_PAGE_LIMIT=16*1024*1024,TRANSFER_SCRATCH_LIMIT=80*1024*1024;
 const BATCH_PAGE_LIMIT=128,BATCH_RAW_LIMIT=2*1024*1024;
-const CRC_TABLE=Array.from({length:256},(_,i)=>{for(let b=0;b<8;b++)i=i&1?0xedb88320^(i>>>1):i>>>1;return i>>>0;});
-function crc32(bytes){let value=0xffffffff;for(const byte of bytes)value=CRC_TABLE[(value^byte)&255]^(value>>>8);return (value^0xffffffff)>>>0;}
+const BATCH_DECODE_CONCURRENCY=4;
+let CRC_TABLE=null;
+function jsCrc32(bytes){
+  if(!CRC_TABLE)CRC_TABLE=Array.from({length:256},(_,i)=>{for(let b=0;b<8;b++)i=i&1?0xedb88320^(i>>>1):i>>>1;return i>>>0;});
+  let value=0xffffffff;
+  for(let i=0;i<bytes.length;i++)value=CRC_TABLE[(value^bytes[i])&255]^(value>>>8);
+  return (value^0xffffffff)>>>0;
+}
+function crc32(bytes){return typeof zlib.crc32==='function'?(zlib.crc32(bytes)>>>0):jsCrc32(bytes);}
 const INLINE_LIMIT = 32 * 1024 * 1024;
 const CHUNK_LIMIT = 8 * 1024 * 1024;
 
@@ -27,7 +37,19 @@ class SceneTransfer {
       if(held>BATCH_RAW_LIMIT)throw new Error('模型页批次超过空间预算');
     }
     this.decoding=true;
-    try{const packets=[];held=0;for(const page of pages){packets.push(await this.decodePage(owner,id,page,held));held+=page.rawBytes;}return packets;}
+    try{
+      const packets=new Array(pages.length);
+      let cursor=0;
+      const worker=async()=>{
+        while(true){
+          const index=cursor++;
+          if(index>=pages.length)return;
+          packets[index]=await this.decodePage(owner,id,pages[index],held,true);
+        }
+      };
+      await Promise.all(Array.from({length:Math.min(BATCH_DECODE_CONCURRENCY,pages.length)},worker));
+      return packets;
+    }
     finally{this.decoding=false;}
   }
   validatePage(owner,id,page) {
@@ -38,15 +60,23 @@ class SceneTransfer {
     if(!scene||scene.owner!==owner)throw new Error('模型已更新，请重新加载预览。');
     if(offset<0||offset+bytes>scene.size)throw new Error('无效的模型分块请求。');
   }
-  async decodePage(owner,id,page,held=0) {
+  async decodePage(owner,id,page,held=0,parallel=false) {
       this.validatePage(owner,id,page);const {offset,bytes,rawBytes,codec,checksum}=page;
       const scratch=held+bytes+rawBytes*3+1024*1024;if(scratch>TRANSFER_SCRATCH_LIMIT)throw new Error('页面读取超过临时空间预算');
-      this.peakScratchBytes=Math.max(this.peakScratchBytes,scratch);const wire=Buffer.allocUnsafeSlow(bytes);
-      for(let at=0;at<bytes;at+=CHUNK_LIMIT){const n=Math.min(CHUNK_LIMIT,bytes-at);wire.set(new Uint8Array(await this.read(owner,id,offset+at,n)),at);}
-      const started=performance.now(),raw=(codec&1)===1?inflateSync(wire,{maxOutputLength:rawBytes}):wire;
+      this.peakScratchBytes=Math.max(this.peakScratchBytes,scratch);
+      let wire;
+      if(bytes<=CHUNK_LIMIT){
+        wire=Buffer.from(await this.read(owner,id,offset,bytes));
+      }else{
+        wire=Buffer.allocUnsafeSlow(bytes);
+        for(let at=0;at<bytes;at+=CHUNK_LIMIT){const n=Math.min(CHUNK_LIMIT,bytes-at);wire.set(new Uint8Array(await this.read(owner,id,offset+at,n)),at);}
+      }
+      const started=performance.now();
+      const raw=(codec&1)===1?((parallel||bytes>=4096)?await inflateAsync(wire,{maxOutputLength:rawBytes}):inflateSync(wire,{maxOutputLength:rawBytes})):wire;
       if(raw.length!==rawBytes||crc32(raw)!==checksum)throw new Error('模型页校验失败，请重新渲染');
       if(this.scenes.get(id)?.owner!==owner)throw new Error('模型已更新，请重新加载预览。');
-      return {data:raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength),storedBytes:bytes,decodedBytes:rawBytes,decodeMillis:performance.now()-started,scratchLimitBytes:TRANSFER_SCRATCH_LIMIT,peakScratchBytes:this.peakScratchBytes,cpuCacheBytes:0};
+      const data=(raw.byteOffset===0&&raw.byteLength===raw.buffer.byteLength)?raw.buffer:raw.buffer.slice(raw.byteOffset,raw.byteOffset+raw.byteLength);
+      return {data,storedBytes:bytes,decodedBytes:rawBytes,decodeMillis:performance.now()-started,scratchLimitBytes:TRANSFER_SCRATCH_LIMIT,peakScratchBytes:this.peakScratchBytes,cpuCacheBytes:0};
   }
   async close() {
     ++this.generation;

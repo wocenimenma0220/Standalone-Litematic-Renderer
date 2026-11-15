@@ -84,6 +84,7 @@ public final class SpriteAtlas {
 
     /** 重新拼接场景文字和皮肤，保证 CPU 导出和 WebGL 使用相同像素。 */
     public void replaceGeneratedSprites(Map<String, Image> images) {
+        if (images.isEmpty() && this.generatedPixels.isEmpty()) return;
         boolean identical = images.size() == this.generatedPixels.size();
         if (identical) for (var item : images.entrySet()) {
             Image image = item.getValue();
@@ -137,6 +138,16 @@ public final class SpriteAtlas {
 
         int[] layout = packShelves(sorted, width, pad);
         int height = roundUpPow2(Math.max(layout[0], 16));
+        if (height > 4096 && width < 8192) {
+            int wideWidth = 8192;
+            int[] wideLayout = packShelves(sorted, wideWidth, pad);
+            int wideHeight = roundUpPow2(Math.max(wideLayout[0], 16));
+            if (wideHeight < height) {
+                width = wideWidth;
+                layout = wideLayout;
+                height = wideHeight;
+            }
+        }
         this.stitched = new Image(width, height);
         int cx = 0, cy = 0, crow = 0;
         for (SpriteContents s : sorted) {
@@ -177,11 +188,8 @@ public final class SpriteAtlas {
             s.lastBakedFrame = frame;
             int px = e.getValue().pixelX;
             int py = e.getValue().pixelY;
-            for (int y = 0; y < s.frameHeight; y++) {
-                for (int x = 0; x < s.frameWidth; x++) {
-                    this.stitched.setPixel(px + x, py + y, s.framePixel(frame, x, y));
-                }
-            }
+            s.sheet.blitTo(this.stitched, s.frameX(frame) * s.frameWidth, s.frameY(frame) * s.frameHeight,
+                    px, py, s.frameWidth, s.frameHeight);
             extrude(px,py,s.frameWidth,s.frameHeight);
             changed++;
         }

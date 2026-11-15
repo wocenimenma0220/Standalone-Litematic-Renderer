@@ -5,9 +5,6 @@ import java.util.*;
 
 /** 只在占用区段附近分配光照，远处空白不分配体素数组。 */
 public final class SparseLightVolume implements LightSampler {
-    private record Section(int x,int y,int z) {
-        @Override public int hashCode(){return coordinateHash(x,y,z);}
-    }
     // 对 X/Z 坐标进行混合哈希，避免宽建筑中产生长碰撞链。
     private static int coordinateHash(int x,int y,int z) {
         int hash=x*0x8da6b343^y*0xd8163841^z*0xcb1ab31f;
@@ -16,25 +13,24 @@ public final class SparseLightVolume implements LightSampler {
     private static final int[][] DIRECTIONS={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
     private static final int[] DELTA={1,-1,256,-256,16,-16};
     private static final class Chunk {
-        final Section section;final int id;
+        final int sx,sy,sz,id;
         BlockState[] cells;
         boolean occupied;
         final Chunk[] neighbors=new Chunk[6];
         final LightPage sky=new LightPage(),block=new LightPage();
-        Chunk(Section section,int id){this.section=section;this.id=id;}
+        Chunk(int sx,int sy,int sz,int id){this.sx=sx;this.sy=sy;this.sz=sz;this.id=id;}
     }
     private final int sx,sy,sz;
     private final BlockShape shapes;
     private final boolean realLighting;
     private final LightVolume.Cells source;
-    private record Column(int x,int z) {
-        @Override public int hashCode(){return coordinateHash(x,0,z);}
-    }
     private static final class ColumnData {
+        final int x,z;
         int blocker=-1;
         TreeMap<Integer,Integer> absorption=new TreeMap<>();
         int top=-1;
         byte[] levels;
+        ColumnData(int x,int z){this.x=x;this.z=z;}
         int calculate(int y) {
             if(y<=blocker)return 0;
             int level=15,previous=-1;
@@ -57,63 +53,116 @@ public final class SparseLightVolume implements LightSampler {
             int depth=top-y;return depth<15?levels[depth]:0;
         }
     }
-    private final Map<Column,ColumnData> columns=new HashMap<>();
-    private final Map<Section,Chunk> chunks=new LinkedHashMap<>();
+    private ColumnData[] columnTable=new ColumnData[256];
+    private final List<ColumnData> columnList=new ArrayList<>();
+    private Chunk[] chunkTable=new Chunk[256];
     private final List<Chunk> ids=new ArrayList<>();
     private boolean computed,hasBlockLight;
     public SparseLightVolume(int sx,int sy,int sz,BlockShape shapes){this(sx,sy,sz,shapes,false);}
     public SparseLightVolume(int sx,int sy,int sz,BlockShape shapes,boolean realLighting){this(sx,sy,sz,shapes,realLighting,null);}
     public SparseLightVolume(int sx,int sy,int sz,BlockShape shapes,boolean realLighting,LightVolume.Cells source){this.sx=sx;this.sy=sy;this.sz=sz;this.shapes=shapes;this.realLighting=realLighting;this.source=source;}
-    private Chunk create(Section section) {
-        Chunk existing=chunks.get(section);if(existing!=null)return existing;
+    private Chunk findChunk(int x,int y,int z) {
+        Chunk[] table=this.chunkTable;int mask=table.length-1,slot=coordinateHash(x,y,z)&mask;
+        while(true) {
+            Chunk c=table[slot];if(c==null)return null;
+            if(c.sx==x&&c.sy==y&&c.sz==z)return c;
+            slot=(slot+1)&mask;
+        }
+    }
+    private void insertChunk(Chunk chunk) {
+        if((ids.size()+1)*2>chunkTable.length) {
+            Chunk[] grown=new Chunk[chunkTable.length*2];int mask=grown.length-1;
+            for(Chunk existing:chunkTable) {
+                if(existing==null)continue;
+                int slot=coordinateHash(existing.sx,existing.sy,existing.sz)&mask;
+                while(grown[slot]!=null)slot=(slot+1)&mask;
+                grown[slot]=existing;
+            }
+            chunkTable=grown;
+        }
+        int mask=chunkTable.length-1,slot=coordinateHash(chunk.sx,chunk.sy,chunk.sz)&mask;
+        while(chunkTable[slot]!=null)slot=(slot+1)&mask;
+        chunkTable[slot]=chunk;ids.add(chunk);
+    }
+    private ColumnData findColumn(int x,int z) {
+        ColumnData[] table=this.columnTable;int mask=table.length-1,slot=coordinateHash(x,0,z)&mask;
+        while(true) {
+            ColumnData c=table[slot];if(c==null)return null;
+            if(c.x==x&&c.z==z)return c;
+            slot=(slot+1)&mask;
+        }
+    }
+    private ColumnData getOrCreateColumn(int x,int z) {
+        ColumnData existing=findColumn(x,z);if(existing!=null)return existing;
+        if((columnList.size()+1)*2>columnTable.length) {
+            ColumnData[] grown=new ColumnData[columnTable.length*2];int mask=grown.length-1;
+            for(ColumnData c:columnTable) {
+                if(c==null)continue;
+                int slot=coordinateHash(c.x,0,c.z)&mask;
+                while(grown[slot]!=null)slot=(slot+1)&mask;
+                grown[slot]=c;
+            }
+            columnTable=grown;
+        }
+        ColumnData created=new ColumnData(x,z);
+        int mask=columnTable.length-1,slot=coordinateHash(x,0,z)&mask;
+        while(columnTable[slot]!=null)slot=(slot+1)&mask;
+        columnTable[slot]=created;columnList.add(created);
+        return created;
+    }
+    private Chunk create(int x,int y,int z) {
+        Chunk existing=findChunk(x,y,z);if(existing!=null)return existing;
         long available=Runtime.getRuntime().maxMemory()-(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory());
-        // 已有区段已计入堆占用，只为新增数据预留容量。
-        if(available<32L*1024*1024){System.gc();available=Runtime.getRuntime().maxMemory()-(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory());}
-        if(available<16L*1024*1024)throw new IllegalArgumentException("投影过大，分块光照所需内存不足；请拆分投影。");
-        Chunk created=new Chunk(section,ids.size());ids.add(created);chunks.put(section,created);return created;
+        if(available<16L*1024*1024) {
+            // 仅在真正触及硬门槛准备报错前尝试回收一次可释放对象，避免正常分配期频繁全停 GC。
+            System.gc();
+            available=Runtime.getRuntime().maxMemory()-(Runtime.getRuntime().totalMemory()-Runtime.getRuntime().freeMemory());
+            if(available<16L*1024*1024)throw new IllegalArgumentException("投影过大，分块光照所需内存不足；请拆分投影。");
+        }
+        Chunk created=new Chunk(x,y,z,ids.size());insertChunk(created);return created;
     }
     private static int index(int x,int y,int z){return ((y&15)<<8)|((z&15)<<4)|(x&15);}
     private boolean inside(int x,int y,int z){return x>=0&&y>=0&&z>=0&&x<sx&&y<sy&&z<sz;}
     public void put(int x,int y,int z,BlockState state) {
         if(computed)throw new IllegalStateException("lighting already computed");
         if(!inside(x,y,z))throw new IllegalArgumentException("light cell outside bounds");
-        Chunk chunk=create(new Section(x>>4,y>>4,z>>4));chunk.occupied=true;
+        Chunk chunk=create(x>>4,y>>4,z>>4);chunk.occupied=true;
         if(source==null){if(chunk.cells==null)chunk.cells=new BlockState[4096];chunk.cells[index(x,y,z)]=state;}
     }
     private BlockState state(Chunk chunk,int local) {
         if(!chunk.occupied)return null;
         if(source==null)return chunk.cells[local];
-        return source.at(chunk.section.x*16+(local&15),chunk.section.y*16+(local>>8),chunk.section.z*16+((local>>4)&15));
+        return source.at(chunk.sx*16+(local&15),chunk.sy*16+(local>>8),chunk.sz*16+((local>>4)&15));
     }
-    public int sectionCount(){return chunks.size();}
+    public int sectionCount(){return ids.size();}
     @Override public void compute() {
         if(computed)return;computed=true;
         List<Chunk> occupied=new ArrayList<>(ids);
         for(Chunk chunk:occupied) {
             if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
-            var section=chunk.section;
+            int cx=chunk.sx,cy=chunk.sy,cz=chunk.sz;
             for(int dx=-1;dx<=1;dx++)for(int dy=-1;dy<=1;dy++)for(int dz=-1;dz<=1;dz++) {
-                int x=section.x+dx,y=section.y+dy,z=section.z+dz;
-                if(x>=0&&y>=0&&z>=0&&x<=(sx-1)/16&&y<=(sy-1)/16&&z<=(sz-1)/16)create(new Section(x,y,z));
+                int x=cx+dx,y=cy+dy,z=cz+dz;
+                if(x>=0&&y>=0&&z>=0&&x<=(sx-1)/16&&y<=(sy-1)/16&&z<=(sz-1)/16)create(x,y,z);
             }
             if(realLighting)for(int local=0;local<4096;local++) {
                 BlockState state=state(chunk,local);int opacity=LightVolume.skyOpacity(state,shapes);
                 if(opacity==0)continue;
-                int x=section.x*16+(local&15),y=section.y*16+(local>>8),z=section.z*16+((local>>4)&15);
-                ColumnData data=columns.computeIfAbsent(new Column(x,z),key->new ColumnData());
+                int x=cx*16+(local&15),y=cy*16+(local>>8),z=cz*16+((local>>4)&15);
+                ColumnData data=getOrCreateColumn(x,z);
                 if(opacity>=15)data.blocker=Math.max(data.blocker,y);else data.absorption.put(y,opacity);
             }
         }
         int columnCount=0;
-        for(ColumnData column:columns.values()){
+        for(ColumnData column:columnList){
             if((columnCount++&1023)==0&&Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
             column.freeze();
         }
-        for(Chunk chunk:ids)for(int d=0;d<6;d++)chunk.neighbors[d]=chunks.get(new Section(chunk.section.x+DIRECTIONS[d][0],chunk.section.y+DIRECTIONS[d][1],chunk.section.z+DIRECTIONS[d][2]));
+        for(Chunk chunk:ids)for(int d=0;d<6;d++)chunk.neighbors[d]=findChunk(chunk.sx+DIRECTIONS[d][0],chunk.sy+DIRECTIONS[d][1],chunk.sz+DIRECTIONS[d][2]);
         for(Chunk chunk:ids)chunk.sky.fill(15);
         for(Chunk chunk:ids)for(int local=0;local<4096;local++) {
             if(local==0&&Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
-            int x=chunk.section.x*16+(local&15),y=chunk.section.y*16+(local>>8),z=chunk.section.z*16+((local>>4)&15);
+            int x=chunk.sx*16+(local&15),y=chunk.sy*16+(local>>8),z=chunk.sz*16+((local>>4)&15);
             // 边缘填充不能在不完整区段旁生成额外天空光。
             if(!inside(x,y,z)){chunk.sky.set(local,0);continue;}
             BlockState state=state(chunk,local);
@@ -135,28 +184,35 @@ public final class SparseLightVolume implements LightSampler {
         try{skyThread.join();blockThread.join();}catch(InterruptedException stopped){skyThread.interrupt();blockThread.interrupt();Thread.currentThread().interrupt();throw new java.util.concurrent.CancellationException("光照计算已取消");}
         Throwable error=failure.get();if(error instanceof RuntimeException runtime)throw runtime;if(error instanceof Error fatal)throw fatal;if(error!=null)throw new IllegalStateException(error);
     }
-    private int direct(int x,int y,int z){ColumnData data=columns.get(new Column(x,z));return data==null?15:data.direct(y);}
-    /** 未分配空气中的天空光采用解析计算，避免为空白间隙分配数组。 */
+    private int direct(int x,int y,int z){ColumnData data=findColumn(x,z);return data==null?15:data.direct(y);}
+    /** 未分配空气中的天空光按曼哈顿半径由近及远解析计算，命中可提前终止。 */
     private int emptySky(int x,int y,int z) {
         int value=direct(x,y,z);
-        for(int dx=-14;dx<=14&&value<15;dx++)for(int dz=-14+Math.abs(dx);dz<=14-Math.abs(dx);dz++) {
-            int distance=Math.abs(dx)+Math.abs(dz);
-            if(15-distance>value&&inside(x+dx,y,z+dz))value=Math.max(value,direct(x+dx,y,z+dz)-distance);
+        for(int d=1;d<=14&&15-d>value;d++) {
+            for(int step=0;step<d&&15-d>value;step++) {
+                value=Math.max(value,skyAtOffset(x+d-step,y,z+step,d));
+                value=Math.max(value,skyAtOffset(x-step,y,z+d-step,d));
+                value=Math.max(value,skyAtOffset(x-d+step,y,z-step,d));
+                value=Math.max(value,skyAtOffset(x+step,y,z-d+step,d));
+            }
         }
         return value;
+    }
+    private int skyAtOffset(int nx,int ny,int nz,int distance) {
+        return nx>=0&&nz>=0&&nx<sx&&nz<sz?direct(nx,ny,nz)-distance:0;
     }
     private void seedEmptyBorders() {
         for(Chunk chunk:ids)for(int local=0;local<4096;local++) {
             if(local==0&&Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
             int lx=local&15,ly=local>>8,lz=(local>>4)&15;
             if(lx!=0&&lx!=15&&ly!=0&&ly!=15&&lz!=0&&lz!=15)continue;
-            int x=chunk.section.x*16+lx,y=chunk.section.y*16+ly,z=chunk.section.z*16+lz;
+            int x=chunk.sx*16+lx,y=chunk.sy*16+ly,z=chunk.sz*16+lz;
             if(!inside(x,y,z))continue;
             BlockState state=state(chunk,local);if(!shapes.lightPermeable(state))continue;
             int opacity=LightVolume.skyOpacity(state,shapes);
             for(int[] d:DIRECTIONS) {
                 int nx=x+d[0],ny=y+d[1],nz=z+d[2];
-                if(!inside(nx,ny,nz)||chunks.containsKey(new Section(nx>>4,ny>>4,nz>>4)))continue;
+                if(!inside(nx,ny,nz)||findChunk(nx>>4,ny>>4,nz>>4)!=null)continue;
                 int source=emptySky(nx,ny,nz),cost=d[1]==1&&source==15&&opacity==0?0:Math.max(1,opacity);
                 chunk.sky.set(local,Math.max(chunk.sky.get(local),Math.max(0,source-cost)));
             }
@@ -172,7 +228,7 @@ public final class SparseLightVolume implements LightSampler {
             if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
             long packed=queue.remove();Chunk chunk=ids.get((int)(packed>>>12));int local=(int)(packed&4095);
             pending[chunk.id].clear(local);int level=(skylight?chunk.sky:chunk.block).get(local);if(level<=1)continue;
-            int x=chunk.section.x*16+(local&15),y=chunk.section.y*16+(local>>8),z=chunk.section.z*16+((local>>4)&15);
+            int x=chunk.sx*16+(local&15),y=chunk.sy*16+(local>>8),z=chunk.sz*16+((local>>4)&15);
             for(int d=0;d<6;d++) {
                 int[] direction=DIRECTIONS[d];
                 int nx=x+direction[0],ny=y+direction[1],nz=z+direction[2];if(!inside(nx,ny,nz))continue;
@@ -219,10 +275,10 @@ public final class SparseLightVolume implements LightSampler {
             if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
             long packed=queue.remove();Chunk chunk=ids.get((int)(packed>>>12));int local=(int)(packed&4095);
             int level=chunk.block.get(local);if(level<=1)continue;
-            int x=chunk.section.x*16+(local&15),y=chunk.section.y*16+(local>>8),z=chunk.section.z*16+((local>>4)&15);
+            int x=chunk.sx*16+(local&15),y=chunk.sy*16+(local>>8),z=chunk.sz*16+((local>>4)&15);
             for(int[] direction:DIRECTIONS) {
                 int nx=x+direction[0],ny=y+direction[1],nz=z+direction[2];if(!inside(nx,ny,nz))continue;
-                Chunk target=chunks.get(new Section(nx>>4,ny>>4,nz>>4));if(target==null)continue;
+                Chunk target=findChunk(nx>>4,ny>>4,nz>>4);if(target==null)continue;
                 int destination=index(nx,ny,nz);BlockState state=state(target,destination);if(!shapes.lightPermeable(state))continue;
                 int value=level-1;LightPage values=target.block;
                 if(value>values.get(destination)){values.set(destination,value);if(value>1&&enqueued<capacity){queue.add(((long)target.id<<12)|destination);enqueued++;}}
@@ -231,7 +287,7 @@ public final class SparseLightVolume implements LightSampler {
     }
     private long voxelIndex(long packed) {
         Chunk chunk=ids.get((int)(packed>>>12));int local=(int)(packed&4095);
-        int x=chunk.section.x*16+(local&15),y=chunk.section.y*16+(local>>8),z=chunk.section.z*16+((local>>4)&15);
+        int x=chunk.sx*16+(local&15),y=chunk.sy*16+(local>>8),z=chunk.sz*16+((local>>4)&15);
         return ((long)y*sz+z)*sx+x;
     }
     private static final class SampleCache { int x=Integer.MIN_VALUE,y,z;Chunk chunk; }
@@ -242,7 +298,7 @@ public final class SparseLightVolume implements LightSampler {
         int dx=x-cache.x,dy=y-cache.y,dz=z-cache.z;Chunk result=null;
         boolean adjacent=cache.chunk!=null&&Math.abs((long)dx)+Math.abs((long)dy)+Math.abs((long)dz)==1;
         if(adjacent)result=cache.chunk.neighbors[dx==1?0:dx==-1?1:dy==1?2:dy==-1?3:dz==1?4:5];
-        else result=chunks.get(new Section(x,y,z));
+        else result=findChunk(x,y,z);
         cache.x=x;cache.y=y;cache.z=z;cache.chunk=result;return result;
     }
     @Override public int cellLight(int x,int y,int z) {
@@ -257,7 +313,7 @@ public final class SparseLightVolume implements LightSampler {
         final int bx=(x-1)>>4,by=(y-1)>>4,bz=(z-1)>>4;
         final Chunk[] neighborhood=new Chunk[27];
         for(int dy=0;dy<3;dy++)for(int dz=0;dz<3;dz++)for(int dx=0;dx<3;dx++)
-            neighborhood[(dy*3+dz)*3+dx]=chunks.get(new Section(bx+dx,by+dy,bz+dz));
+            neighborhood[(dy*3+dz)*3+dx]=findChunk(bx+dx,by+dy,bz+dz);
         return new LightSampler() {
             public void compute(){throw new IllegalStateException("Read-only light snapshot");}
             public int cellLight(int sx,int sy,int sz) {

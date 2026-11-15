@@ -123,33 +123,50 @@ public final class Rasterizer {
 
         int[] px = this.color.pixels();
         float[] dep = this.depth;
+        double invD1 = triangle1 ? 1.0 / d1 : 0.0;
+        double a0 = (sy1 - sy2) * invD1, b0 = (sx2 - sx1) * invD1;
+        double a1 = (sy2 - sy0) * invD1, b1 = (sx0 - sx2) * invD1;
+        double invD2 = triangle2 ? 1.0 / d2 : 0.0;
+        double ma0 = (sy2 - sy3) * invD2, mb0 = (sx3 - sx2) * invD2;
+        double ma1 = (sy3 - sy0) * invD2, mb1 = (sx0 - sx3) * invD2;
+        boolean hasAo = ao != null;
+        double ao0 = hasAo ? ao[0] : 0.0, ao1 = hasAo ? ao[1] : 0.0, ao2 = hasAo ? ao[2] : 0.0, ao3 = hasAo ? ao[3] : 0.0;
+        int[] atlasPixels = atlasImg != null ? atlasImg.pixels() : null;
+        int atlasW = atlasImg != null ? atlasImg.width : 0, atlasH = atlasImg != null ? atlasImg.height : 0;
+        int epx = entry != null ? entry.pixelX : 0, epy = entry != null ? entry.pixelY : 0;
+        int efw = entry != null ? entry.contents.frameWidth : 0, efh = entry != null ? entry.contents.frameHeight : 0;
 
         for (int y = y0; y <= y1; y++) {
+            double pys = y + 0.5;
+            double l0Row = b0 * (pys - sy2), l1Row = b1 * (pys - sy2);
+            double m0Row = mb0 * (pys - sy3), m1Row = mb1 * (pys - sy3);
             for (int x = x0; x <= x1; x++) {
-                double pxs = x + 0.5, pys = y + 0.5;
+                double pxs = x + 0.5;
                 double uFrac, vFrac, vz;
                 float vShade;
                 double weight0,weight1,weight2;int corner1,corner2;
 
-                double l0 = ((sy1 - sy2) * (pxs - sx2) + (sx2 - sx1) * (pys - sy2)) / d1;
-                double l1 = ((sy2 - sy0) * (pxs - sx2) + (sx0 - sx2) * (pys - sy2)) / d1;
+                double dx1 = pxs - sx2;
+                double l0 = a0 * dx1 + l0Row;
+                double l1 = a1 * dx1 + l1Row;
                 double l2 = 1 - l0 - l1;
                 if (triangle1 && l0 >= -1e-7 && l1 >= -1e-7 && l2 >= -1e-7) {
                     uFrac = l0 * u0 + l1 * u1 + l2 * u2;
                     vFrac = l0 * v0 + l1 * v1 + l2 * v2;
                     vz = l0 * V0[2] + l1 * V1[2] + l2 * V2[2];
-                    vShade = ao == null ? shade : (float) (l0 * ao[0] + l1 * ao[1] + l2 * ao[2]) * shade;
+                    vShade = !hasAo ? shade : (float) (l0 * ao0 + l1 * ao1 + l2 * ao2) * shade;
                     weight0=l0;weight1=l1;weight2=l2;corner1=1;corner2=2;
                 } else {
                     if(!triangle2)continue;
-                    double m0 = ((sy2 - sy3) * (pxs - sx3) + (sx3 - sx2) * (pys - sy3)) / d2;
-                    double m1 = ((sy3 - sy0) * (pxs - sx3) + (sx0 - sx3) * (pys - sy3)) / d2;
+                    double dx2 = pxs - sx3;
+                    double m0 = ma0 * dx2 + m0Row;
+                    double m1 = ma1 * dx2 + m1Row;
                     double m2 = 1 - m0 - m1;
                     if (!(m0 >= -1e-7 && m1 >= -1e-7 && m2 >= -1e-7)) continue;
                     uFrac = m0 * u0 + m1 * u2 + m2 * u3;
                     vFrac = m0 * v0 + m1 * v2 + m2 * v3;
                     vz = m0 * V0[2] + m1 * V2[2] + m2 * V3[2];
-                    vShade = ao == null ? shade : (float) (m0 * ao[0] + m1 * ao[2] + m2 * ao[3]) * shade;
+                    vShade = !hasAo ? shade : (float) (m0 * ao0 + m1 * ao2 + m2 * ao3) * shade;
                     weight0=m0;weight1=m1;weight2=m2;corner1=2;corner2=3;
                 }
                 if(selectionPass!=0){
@@ -172,19 +189,19 @@ public final class Rasterizer {
                     cg=(float)((Image.green(c0)*weight0+Image.green(c1)*weight1+Image.green(c2)*weight2)/255);
                     cb=(float)((Image.blue(c0)*weight0+Image.blue(c1)*weight1+Image.blue(c2)*weight2)/255);
                 }
-                if (atlasImg != null) {
+                if (atlasPixels != null) {
                     int tx, ty;
                     if (entry == null) {
 
-                        tx = Math.min(atlasImg.width - 1, Math.max(0, (int) ((float) uFrac * atlasImg.width)));
-                        ty = Math.min(atlasImg.height - 1, Math.max(0, (int) ((float) vFrac * atlasImg.height)));
+                        tx = Math.min(atlasW - 1, Math.max(0, (int) ((float) uFrac * atlasW)));
+                        ty = Math.min(atlasH - 1, Math.max(0, (int) ((float) vFrac * atlasH)));
                     } else {
                         // 在单张贴图的像素空间中采样，避免图集布局变化引入边缘舍入差异。
 
-                        tx = entry.pixelX + Math.min(entry.contents.frameWidth-1,Math.max(0,(int)(uFrac*entry.contents.frameWidth)));
-                        ty = entry.pixelY + Math.min(entry.contents.frameHeight-1,Math.max(0,(int)(vFrac*entry.contents.frameHeight)));
+                        tx = epx + Math.min(efw-1,Math.max(0,(int)(uFrac*efw)));
+                        ty = epy + Math.min(efh-1,Math.max(0,(int)(vFrac*efh)));
                     }
-                    int texel = atlasImg.pixel(tx, ty);
+                    int texel = atlasPixels[ty * atlasW + tx];
                     int ta = Image.alpha(texel);
                     if (ta == 0) continue;   // 完全透明的像素不写颜色，也不写深度。
                     int tr = clamp255(Image.red(texel) * cr);

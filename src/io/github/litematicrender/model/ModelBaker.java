@@ -15,12 +15,12 @@ public final class ModelBaker {
     /** 按剔除方向组织面片，同时保存环境光遮蔽开关和粒子贴图。 */
     public static final class BakedModel {
         public final List<Quad> all = new ArrayList<>();
+        @SuppressWarnings({"rawtypes", "unchecked"})
         public final List<Quad>[] byFace = new List[6];
         public final List<Quad> unculled = new ArrayList<>();
         public boolean useAmbientOcclusion = true;
         public String particleSprite;
 
-        @SuppressWarnings("unchecked")
         public void addCulled(int face, Quad q) {
             if (byFace[face] == null) byFace[face] = new ArrayList<>();
             byFace[face].add(q);

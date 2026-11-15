@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$JdkHome = (Join-Path $PSScriptRoot '../../../jdk-25.0.4.1+1'),
     [string]$MinecraftCache = (Join-Path $env:USERPROFILE '.gradle/caches/fabric-loom/26.3'),
     [string]$DependencyCache = (Join-Path $env:USERPROFILE '.gradle/caches/modules-2/files-2.1'),
@@ -31,11 +31,11 @@ try {
     if ($VerifyWire) {
         $wireOutput = Join-Path $projectRoot 'tools/verify/board-wire-output'
         New-Item -ItemType Directory -Force -Path $wireOutput | Out-Null
-        & (Join-Path $JdkHome 'bin/javac.exe') -cp $classpath -d $outputDir (Join-Path $PSScriptRoot 'verify/VanillaWireReference.java')
+        & (Join-Path $JdkHome 'bin/javac.exe') -cp $classpath -d $outputDir (Join-Path $PSScriptRoot 'verify/board/VanillaWireReference.java')
         if ($LASTEXITCODE -ne 0) { throw 'Wire reference compilation failed.' }
         & (Join-Path $JdkHome 'bin/java.exe') -cp ($outputDir+';'+$classpath) VanillaWireReference (Join-Path $wireOutput 'vanilla-reference.json')
         if ($LASTEXITCODE -ne 0) { throw 'Wire reference export failed.' }
-        & node (Join-Path $PSScriptRoot 'verify/board-wire-vanilla.cjs')
+        & node (Join-Path $PSScriptRoot 'verify/board/board-wire-vanilla.cjs')
         if ($LASTEXITCODE -ne 0) { throw 'Wire reference comparison failed.' }
     }
 } finally { Pop-Location }

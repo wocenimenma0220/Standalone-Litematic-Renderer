@@ -50,7 +50,7 @@
 | `board-world-features.js:38` | 1352 条爆炸射线、方块抗性、破坏任务、连锁 TNT | 不计算实体暴露度与冲量；含水抗性、浮点精度、打乱次序等不完整 |
 | `board-world.js:70` | 单独的二维水流扩散模型 | 与运行实体的 `TimingWorld` 不是同一份流体状态和时钟 |
 | `board.js:20,152,167` | 从时序引擎同步画布，默认启用时序 | 正常运行调用 `timing.tick()`，不会同时执行旧 `world.tick()` 的扩散 |
-| `board-physics-data.js`、`tools/verify/ExportBoardPhysics.java` | 原版导出的碰撞盒、推动反应、方块爆炸抗性 | 当前抗性字段没有把方块内流体作为另一层状态读取 |
+| `board-physics-data.js`、`tools/verify/board/ExportBoardPhysics.java` | 原版导出的碰撞盒、推动反应、方块爆炸抗性 | 当前抗性字段没有把方块内流体作为另一层状态读取 |
 
 本轮用现有模块运行的调查结果：
 

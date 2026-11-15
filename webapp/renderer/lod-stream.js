@@ -166,18 +166,52 @@ class LodStream {
     if(!boxInFrustum(section,planes))return false;
     return !this.view.reachableSections||!section.sectionIds||section.sectionIds.some(id=>this.view.reachableSections[id]);
   }
+  _boundsEqual(a,b){return a===b||!!(a&&b&&a.min[0]===b.min[0]&&a.min[1]===b.min[1]&&a.min[2]===b.min[2]&&a.max[0]===b.max[0]&&a.max[1]===b.max[1]&&a.max[2]===b.max[2]);}
+  _vec3Equal(a,b){return a===b||!!(a&&b&&a[0]===b[0]&&a[1]===b[1]&&a[2]===b[2]);}
+  _samePlan(cam,distance,width,height){
+    const p=this._lastPlanState;
+    if(!p||!this.planKey)return false;
+    return p.orbit===cam.orbit&&p.rotationDeg===cam.rotationDeg&&p.slantDeg===cam.slantDeg
+      &&p.zoom===cam.zoom&&p.fovDeg===cam.fovDeg&&p.culling===cam.culling&&p.occlusion===cam.occlusion
+      &&p.lodLevel===cam.lodLevel&&p.lodEnabled===cam.lodEnabled&&p.distance===distance&&p.width===width&&p.height===height
+      &&this._vec3Equal(p.eye,cam.eye)&&this._vec3Equal(p.target,cam.target)&&this._vec3Equal(p.up,cam.up)
+      &&this._boundsEqual(p.focus,cam.focus);
+  }
+  _queryTreeRange(node,minX,maxX,minZ,maxZ,out){
+    if(!node)return;
+    if(node.sections){
+      for(let i=0;i<node.sections.length;i++){const s=node.sections[i],p=s.position;if(p&&p[0]>=minX&&p[0]<=maxX&&p[2]>=minZ&&p[2]<=maxZ)out.push(s);}
+      return;
+    }
+    const axis=node.axis,planeSec=node.plane/16;
+    if(axis===0){if(minX<planeSec)this._queryTreeRange(node.left,minX,maxX,minZ,maxZ,out);if(maxX>=planeSec)this._queryTreeRange(node.right,minX,maxX,minZ,maxZ,out);}
+    else if(axis===2){if(minZ<planeSec)this._queryTreeRange(node.left,minX,maxX,minZ,maxZ,out);if(maxZ>=planeSec)this._queryTreeRange(node.right,minX,maxX,minZ,maxZ,out);}
+    else{this._queryTreeRange(node.left,minX,maxX,minZ,maxZ,out);this._queryTreeRange(node.right,minX,maxX,minZ,maxZ,out);}
+  }
   plan(cam,planes,force=false) {
     if(this.disposed||this.resizing)return;
     this.lastCamera=cam;this.lastPlanes=planes;
     const width=this.view.lodViewportWidth||this.view.canvas.width,height=this.view.lodViewportHeight||this.view.canvas.height;
     const distance=cam.orbit?null:(cam.viewDistance??6);
-    const key=JSON.stringify([cam.orbit,cam.eye,cam.target,cam.up,cam.rotationDeg,cam.slantDeg,cam.zoom,cam.fovDeg,cam.culling,cam.occlusion,cam.lodLevel,cam.lodEnabled,cam.focus,distance,width,height]);
-    const now=performance.now();if(!force&&(key===this.planKey||distance===this.lastViewDistance&&now-this.lastPlan<100))return;this.lastPlan=now;this.planKey=key;this.lastViewDistance=distance;
+    const now=performance.now();if(!force&&(this._samePlan(cam,distance,width,height)||this.planKey&&distance===this.lastViewDistance&&now-this.lastPlan<100))return;
+    this.lastPlan=now;this.planKey=true;this.lastViewDistance=distance;
+    this._lastPlanState={
+      orbit:cam.orbit,eye:cam.eye?[cam.eye[0],cam.eye[1],cam.eye[2]]:null,target:cam.target?[cam.target[0],cam.target[1],cam.target[2]]:null,
+      up:cam.up?[cam.up[0],cam.up[1],cam.up[2]]:null,rotationDeg:cam.rotationDeg,slantDeg:cam.slantDeg,zoom:cam.zoom,fovDeg:cam.fovDeg,
+      culling:cam.culling,occlusion:cam.occlusion,lodLevel:cam.lodLevel,lodEnabled:cam.lodEnabled,
+      focus:cam.focus?{min:[...cam.focus.min],max:[...cam.focus.max]}:null,distance,width,height
+    };
     const view=this.view,small=!this.progressive&&this.manifest.quads*80<8*1024*1024,eye=cam.eye||view.center;
     const candidates=[];
     const orbitPixels=cam.orbit?16*view.fitOrtho(cam.rotationDeg||0,cam.slantDeg||0,width,height,cam.zoom||1).scale:0;
-    const range=this.manifest.sections.filter(section=>inRenderDistance(section,cam));
-    this.overviewBytes=range.reduce((n,s)=>n+s.costs[3],0);this.rangeSections=range.length;
+    let range;
+    if(!cam.orbit&&cam.eye){
+      const d=Number.isInteger(cam.viewDistance)?Math.max(1,Math.min(128,cam.viewDistance)):6;
+      const cx=Math.floor(cam.eye[0]/16),cz=Math.floor(cam.eye[2]/16);
+      range=[];this._queryTreeRange(this.tree,cx-d,cx+d,cz-d,cz+d,range);
+    }else{range=this.manifest.sections;}
+    let overviewBytes=0;for(let i=0;i<range.length;i++)overviewBytes+=range[i].costs[3];
+    this.overviewBytes=overviewBytes;this.rangeSections=range.length;
     this.keepOverview=(this.hasOverview||this.progressive||cam.lodEnabled!==false)&&this.overviewBytes<=(this.capacity-this.swapReserve)*.6;
     if(!this.keepOverview&&this.fallbacks.size){for(const fallback of this.fallbacks.values())this.drop(fallback);this.fallbacks.clear();this.changed();}
     for(const section of range)if(this.visible(section,planes,cam)) {
@@ -396,6 +430,7 @@ class LodStream {
     if(this.view.uni.colorOnly!=null)this.gl.uniform1f(this.view.uni.colorOnly,page.proxy?1:0);
     const gl=this.gl,a=this.view.attr;this.view.resetCompact();
     if(page.compactGpu){
+      this.view._compactActive=true;
       gl.uniform1f(this.view.uni.compact,1);gl.uniform3fv(this.view.uni.sectionOrigin,page.position.map(v=>v*16));
       gl.disableVertexAttribArray(a.uv);gl.disableVertexAttribArray(a.color);
       gl.bindBuffer(gl.ARRAY_BUFFER,this.view.compactCorners);gl.enableVertexAttribArray(a.pos);gl.vertexAttribPointer(a.pos,1,gl.FLOAT,false,4,0);
@@ -438,16 +473,18 @@ class LodStream {
       }
     }else leaf(0,resident.blendCount,true);
     if(at!==resident.blendCount)throw Error('LOD 透明排序丢失几何');
-    const pages=resident.blendPages=resident.pages.filter(p=>p.layer===4);for(const page of pages)page.used=0;
+    const pages=resident.blendPages||(resident.blendPages=resident.pages.filter(p=>p.layer===4));for(const page of pages)page.used=0;
     let runs=0,lastPage=-1;
     for(const face of order) {
-      let lo=0,hi=pages.length-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(pages[mid].start<=face)lo=mid;else hi=mid-1;}
+      let lo;
+      if(lastPage>=0&&face>=pages[lastPage].start&&(lastPage+1>=pages.length||face<pages[lastPage+1].start)){lo=lastPage;}
+      else{lo=0;let hi=pages.length-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(pages[mid].start<=face)lo=mid;else hi=mid-1;}}
       const page=pages[lo],local=face-page.start;
       if(lo!==lastPage){resident.runPages[runs]=lo;resident.runStarts[runs]=page.used;resident.runCounts[runs]=0;runs++;lastPage=lo;}
       for(let k=0;k<6;k++)page.indices[page.used*6+k]=local*4+QUAD_TRIANGLES[k];page.used++;resident.runCounts[runs-1]++;
     }
     resident.runLength=runs;
-    for(const page of pages){this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER,page.ibo);this.gl.bufferSubData(this.gl.ELEMENT_ARRAY_BUFFER,0,page.indices);}
+    for(const page of pages)if(page.used>0){this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER,page.ibo);this.gl.bufferSubData(this.gl.ELEMENT_ARRAY_BUFFER,0,page.indices.subarray(0,page.used*6));}
   }
   draw(cam,planes) {
     this.plan(cam,planes);const gl=this.gl,view=this.view,visible=new Set();

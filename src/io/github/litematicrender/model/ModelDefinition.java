@@ -129,8 +129,8 @@ public final class ModelDefinition {
         if (facesObj != null) {
             for (Map.Entry<String, Object> e : facesObj.entrySet()) {
                 Object v = e.getValue();
-                if (v instanceof Map) {
-                    faces.put(e.getKey(), new Face((Map<String, Object>) v));
+                if (v instanceof Map<?, ?>) {
+                    faces.put(e.getKey(), new Face(MiniJson.asObject(v)));
                 } else if (v instanceof String s) {
 
                     Map<String, Object> m = new LinkedHashMap<>();

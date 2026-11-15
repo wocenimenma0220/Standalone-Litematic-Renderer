@@ -2,7 +2,7 @@
 /** 信号源和发射器交互只作用于本地二维画布；画布命令绝不能作为系统命令执行。 */
 (function(root){
  const B=typeof module!=='undefined'?require('./board-entities.js'):root.BoardTiming,I=typeof module!=='undefined'?require('./board-item-data.js'):root.BoardItemData;
- const {TimingWorld,DIR,OPP}=B,P=TimingWorld.prototype,clone=x=>JSON.parse(JSON.stringify(x)),at=(p,d,n=1)=>p.map((v,i)=>v+DIR[d][i]*n),key=p=>p.join(',');
+ const {TimingWorld,DIR,OPP,clone}=B,P=TimingWorld.prototype,at=(p,d,n=1)=>p.map((v,i)=>v+DIR[d][i]*n),key=p=>p.join(',');
  const max=B.maxStack;B.maxStack=id=>I[id]?.[0]||max(id);B.itemData=I;
  for(const [id,name]of [['spectral_arrow','光灵箭'],['tipped_arrow','药箭'],['blue_egg','蓝色鸡蛋'],['brown_egg','棕色鸡蛋'],['experience_bottle','附魔之瓶'],['splash_potion','喷溅药水'],['lingering_potion','滞留药水'],['potion','药水'],['glass_bottle','玻璃瓶'],['powder_snow_bucket','细雪桶'],['fire_charge','火焰弹'],['wind_charge','风弹'],['firework_rocket','烟花火箭'],['wheat_seeds','小麦种子'],['wheat','小麦'],['carrot','胡萝卜'],['potato','马铃薯'],['beetroot_seeds','甜菜种子'],['sweet_berries','甜浆果'],['cocoa_beans','可可豆'],['torchflower_seeds','火把花种子'],['pitcher_pod','瓶子草荚果'],['honeycomb','蜜脾'],['honey_bottle','蜂蜜瓶'],['diamond','钻石'],['coal','煤炭'],['charcoal','木炭']])if(!B.extraItems.some(item=>item.id===id))B.extraItems.push({id,name,categories:[]});
  const chance={low:30,low_medium:50,medium:65,medium_high:85,always_add_one:100};B.compostChance=id=>{const m=I[id]?.[2]?.match(/compostable\/([a-z_]+)/);return m?chance[m[1]]||0:0;};

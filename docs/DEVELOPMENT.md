@@ -1,76 +1,86 @@
 # 开发与验证
 
-开发版本由 `webapp/package.json` 的 `version` 统一管理，界面版本、启动器属性和包名由它派生。Java 引擎负责解析和渲染，Electron 界面通过逐行 UTF-8 JSON 调用引擎。
+应用版本号以 `webapp/package.json` 中的 `version` 为准，界面标题、启动器 `.exe` 属性与安装包名称均由 `tools/version.cjs` 统一同步派生。整体架构分为两层：Java 渲染引擎（`src/`）负责解析结构、构建网格和软件渲染导出；Electron 桌面端（`webapp/`）负责 GPU 视图、界面交互和二维画布，通过逐行 UTF-8 JSON-RPC 与 Java 进程通信。
 
-## 环境与启动
+## 环境准备
 
-Windows 开发需要 PowerShell 7、JDK 21 或更新版本、Node.js。执行 `install.bat` 安装 Electron。打包另需 JDK 的 `jlink` 和 Windows 自带的 .NET Framework C# 编译器。
+- **必备工具**：Windows、PowerShell 7（或兼容版本）、JDK 21+、Node.js（打包需使用 JDK 自带的 `jlink` 与 Windows `.NET Framework` 的 `csc.exe`）。
+- **安装前端依赖**：根目录执行 `install.bat`。
+- **提取游戏资源**：完整渲染与 `-Profile Full` 需要原版资产，可从本地 Minecraft Java 客户端 JAR 准备：
+  ```powershell
+  ./tools/prepare-resources.ps1 -ClientJar 'C:/path/to/client.jar'
+  ```
+  如果只跑默认快速校验（`./verify.ps1`），内置的小型夹具即可通过，不必先导完整客户端资源。
 
-完整渲染需要 `assets/vanilla` 和 `assets/builtin`。可执行 `./tools/prepare-resources.ps1 -ClientJar "C:/path/to/client.jar"` 从本地 Minecraft Java 客户端准备原版资源。快速检查使用自有小型资源夹具，无需这些外部资源。
-
-## 检查入口
+## 测试与验证脚本
 
 在项目根目录运行：
 
 ```powershell
-# 编译引擎，并检查模型、时序、编辑、保存与导出队列
+# 编译 Java 引擎并跑基础单测、版本同步、格式解析和渲染管线回归
 ./verify.ps1 -JdkHome 'C:/path/to/jdk'
 
-# 加上真实资源下的编辑、容器和活塞引擎回归
+# 附加完整游戏资源下的三维编辑、背包、活塞和预算回归（需已准备 assets/vanilla）
 ./verify.ps1 -Profile Full -JdkHome 'C:/path/to/jdk'
 
-# 额外执行隐藏浏览器界面回归
+# 附加 Playwright 无头浏览器二维界面检查
 ./verify.ps1 -Ui -JdkHome 'C:/path/to/jdk'
 
-# 真实 Electron：GPU 画面、完整/分块切换、缓存和加载进度
+# 附加真实 Electron 桌面端检查（GPU 画面、完整/分块加载与模型复用）
 ./verify.ps1 -DesktopUi -JdkHome 'C:/path/to/jdk'
 
-# 额外从四个角度导出指定投影
+# 从四个默认角度额外导出一份指定投影用于目视检查
 ./verify.ps1 -Schematic 'C:/models/example.litematic' -JdkHome 'C:/path/to/jdk'
 ```
 
-界面回归依赖 Playwright。在 `tools/verify` 运行 `npm install`；默认使用本机 Edge。已有公共安装可通过 `PLAYWRIGHT_MODULE_PATH` 指定模块目录。
+- 浏览器 `-Ui` 检查依赖 `tools/verify` 下的 Playwright（运行前需在 `tools/verify` 执行 `npm install`）；默认调用系统 Edge，也可通过 `PLAYWRIGHT_MODULE_PATH` 指定已有的 Playwright 目录。
+- `-DesktopUi` 在跑完渲染管线后通过 `./tools/verify/RunHiddenElectron.ps1 -Script tools/verify/editor/direct-preview-ui.cjs` 拉起真实 Electron 验证；可用 `LITEMATIC_DIRECT_SCHEMATIC` 指定测试投影，用 `LITEMATIC_TEST_HOME` 指定独立运行目录。
+- 所有验证临时文件输出到 `tools/verify/verification-output/` 等 `*-output/` 目录（已忽略）。无目录链接权限的 Windows 环境会跳过软链接防护子检查，设置 `$env:LITEMATIC_RENDER_TEST_LINKS = '1'` 可将其转为强制断言。
 
-完整加载回归使用真实桌面应用，在运行完整引擎回归生成测试投影后执行 `./tools/verify/RunHiddenElectron.ps1 -Script tools/verify/direct-preview-ui.cjs`。可用 `LITEMATIC_DIRECT_SCHEMATIC` 指定其他投影，用 `LITEMATIC_TEST_HOME` 指定含资源的独立引擎目录；检查完整加载不调用分块生成、LOD 不影响加载方式，以及切换到相同加载方式时复用模型。
+## 验证目录分类（`tools/verify/`）
 
-验证产物位于 `tools/verify/verification-output`。完整引擎回归先复制资源，在独立目录中生成投影和编辑副本。无目录链接权限时，缓存测试明确跳过链接防护子项；设置 `LITEMATIC_RENDER_TEST_LINKS=1` 可要求该项必须成功。默认检查实际执行模型生成、光照、透明 PNG、旋转 GIF、场景缓存和格式导入，使用自有资源夹具，不能替代真实游戏资源的外观检查。持续集成还执行二维界面和真实 Electron 三维回归，并上传 PNG、GIF 和结果报告。
+| 目录 | 内容 |
+| --- | --- |
+| `board/` | 二维画布时序、红石、活塞、流体、TNT、贴图及原版 26.3 对照脚本 |
+| `editor/` | 三维编辑、选区、材料统计、资源包管理、背包/快捷栏与界面测试 |
+| `render/` | Java 渲染管线、GPU/CPU 后端、LOD 流式、增量缓存、光照及性能基准测试 |
+| `release/` | 版本同步、资源准备、`package.ps1` 产物冒烟及模块校验 |
+| `fixtures/` | 静态回归夹具（如 `tnt-fluid-26.3.json`、`forbidden-city-size.json`） |
+| `research/` | 历史对照基线、旧版引擎快照与采样记录（不参与常规构建） |
 
-## 打包
+## 打包与发版
 
 ```powershell
 ./package.ps1 -JdkHome 'C:/path/to/jdk'
 ```
 
-打包会编译引擎和启动器，准备 Java/Electron 运行时，并输出到 `dist`。参数见脚本开头。README 存在时随包复制，缺失时不会阻止打包。
+打包脚手架会编译 Java、重新构建带版本号属性的 `投影预览.exe`、裁剪精简 Java 运行时并打包 Electron，产物输出至 `dist/`。
 
-修改版本后执行 `node tools/version.cjs --write` 同步锁文件和界面版本；也可用 `node tools/version.cjs --write 1.2.0-test-v3`。验证与打包都会检查一致性，启动器编译时生成版本属性，包名自动派生。便携包附带[二维功能范围](二维微时序测试版说明.md)。
+版本更新流程：
 
-正式版可用 `node tools/version.cjs --write 1.2.0`。打包、检查并推送提交后，使用 `node tools/publish-test-release.cjs <完整提交 SHA>` 发布；工具名保留兼容，正式版会使用非 Pre-release 并标记为 Latest，带后缀的版本发布为 Pre-release。工具先核对提交与附件校验值，上传并验证附件后才公开 Release。更新说明来自 `docs/修复记录.md`。
+1. 修改并同步版本：`node tools/version.cjs --write 1.3.0`（同步 `webapp/package-lock.json` 与 `webapp/renderer/app-version.js`）。
+2. 重新构建打包并跑全套 `./verify.ps1` 检查。
+3. 推送 Git 提交后，运行 `node tools/publish-test-release.cjs <完整提交 SHA>` 自动校验制品 SHA-256 并发布到 GitHub Releases（版本号不带 `-` 后缀视为正式版，自动标为 Latest；更新说明读取自 `docs/修复记录.md`）。
 
-## 代码入口
+## 主要源码入口
 
-| 位置 | 职责 |
+| 路径 | 职责 |
 | --- | --- |
-| `src/.../serve/RenderEngine.java` | 资源、投影、场景缓存和编辑会话 |
-| `src/.../schematic/ProjectionEdits.java` | 保留 NBT 的修改、联动历史和原子写入 |
-| `webapp/main.js`、`preload.js` | 桌面窗口和受限界面接口 |
-| `webapp/renderer/renderer.js`、`gpu-view.js`、`lod-stream.js` | 预览、漫游和分块上传 |
-| `webapp/renderer/projection-edit.js` | 三维编辑交互 |
-| `webapp/renderer/materials-panel.js` | 独立材料统计、换算与导出面板 |
-| `src/.../schematic/SchematicFormats.java` | Java 结构 NBT、Sponge v2/v3 导入，编辑与预览共用 |
-| `webapp/renderer/board-loader.js` | 二维模块按需加载及失败重试 |
-| `webapp/renderer/board-session.js` | 二维延迟保存和历史容量限制 |
-| `board-fluids.js`、`board-explosions.js`、`board-tnt.js` | 二维流体、爆炸和 TNT；行为与边界见[实现说明](二维TNT与流体实现.md) |
-| `tools/verify` | 逻辑、引擎和界面回归 |
+| `src/.../serve/RenderEngine.java` | 资源加载、投影打开、场景缓存管理与编辑会话 |
+| `src/.../schematic/ProjectionEdits.java` | 保留原 NBT 的方块修改、成对/活塞联动、撤销历史与原子写入 |
+| `src/.../schematic/SchematicFormats.java` | Java `.nbt` 与 Sponge v2/v3 `.schem` 统一导入 |
+| `webapp/main.js`、`preload.js` | Electron 主进程窗口、菜单及受限 IPC 接口 |
+| `webapp/renderer/renderer.js`、`gpu-view.js`、`lod-stream.js` | GPU 视图、自由漫游与分块网格传输 |
+| `webapp/renderer/projection-edit.js` | 三维编辑交互与快捷键控制 |
+| `webapp/renderer/materials-panel.js` | 建材与容器统计、水桶换冰与表格导出 |
+| `webapp/renderer/board-loader.js`、`board-session.js` | 二维画布按需加载、历史上限与暂存恢复 |
+| `webapp/renderer/board-fluids.js`、`board-explosions.js`、`board-tnt.js` | 二维流体、爆炸射线与 TNT/矿车物理（详情见[二维实现说明](二维TNT与流体实现.md)） |
 
-## 实现约束
+## 开发约定
 
-- 拾取、邻居查询和提交修改属于同一操作；异步返回后核对编辑会话，切换文件前等待当前编辑收尾。
-- 三维局部预览超过 8192 个邻域单元时提交并重建基础模型。重建清理预览范围，保留历史；后台导出提交快照时保留当前画面依赖的范围。
-- 二维缩放和平移复用世界快照。世界变化使快照失效，关闭画布前即时保存。撤销与重做合计最多 60 条、32 MiB JSON 字符数据。
-- 分块传输保留场景归属、页校验、已发布长度、取消和内存预算，不增加无预算的模型页常驻副本。
-- 完整加载不生成分块模型。较大的完整模型仍分批传输以限制临时内存，这与分块生成、按视角补充细节不同；界面状态和日志需明确区分。
-- 加载阶段由引擎的实际步骤触发，通过 `previewProgress` 事件传递 `progressId`，界面只更新当前任务。缓存命中跳过光照和模型生成提示，关闭光照时不显示光照计算；显卡上传前让界面绘制一次，后台等待有时间上限。
-- 模型、光照和动画变化应检查实际画面。总览出现或无报错不能替代完整材质和近景验证。
+- 三维编辑的拾取、邻居查询与提交操作需绑定到同一编辑会话；切换投影前先等在途修改收尾。局部预览变更超过 8192 个邻域方块时应提交并发起基模型重建，后台导出任务使用提交快照以避免画面撕裂。
+- 二维平移与缩放直接复用已有世界快照，世界结构变化时使缓存失效并在关闭窗口前即时落盘暂存；历史栈上限控制为最多 60 步 / 32 MiB JSON。
+- 分块流式加载与完整加载严格区分路径：完整加载不走分块生成；流式加载保留场景归属校验和显存预算淘汰，不常驻无上限的模型副本。
+- 任务进度事件通过 `previewProgress` 的 `progressId` 匹配当前任务，避免并发/取消任务的阶段文字互相覆盖。
 
-设置位于 `settings`，缓存位于 `cache` 和 `renders/.gpu`，编辑副本位于 `renders/.edit`，日志位于 `logs`。这些目录不纳入源码管理。
+运行期的个人设置位于 `settings/`，磁盘缓存位于 `cache/` 和 `renders/.gpu/`，临时编辑副本在 `renders/.edit/`，运行日志在 `logs/`（均不纳入 Git）。

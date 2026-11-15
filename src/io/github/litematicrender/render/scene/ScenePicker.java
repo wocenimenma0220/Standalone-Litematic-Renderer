@@ -95,7 +95,7 @@ public final class ScenePicker {
         double ex=bx-q.x0,ey=by-q.y0,ez=bz-q.z0,fx=cx-q.x0,fy=cy-q.y0,fz=cz-q.z0;
         double px=d[1]*fz-d[2]*fy,py=d[2]*fx-d[0]*fz,pz=d[0]*fy-d[1]*fx;
         double determinant=ex*px+ey*py+ez*pz;
-        if(determinant<=1e-10)return -1;
+        if(q.doubleSided ? Math.abs(determinant)<=1e-10 : determinant<=1e-10)return -1;
         double tx=o[0]-q.x0,ty=o[1]-q.y0,tz=o[2]-q.z0;
         double u=(tx*px+ty*py+tz*pz)/determinant;if(u< -1e-6||u>1+1e-6)return -1;
         double ax=ty*ez-tz*ey,ay=tz*ex-tx*ez,az=tx*ey-ty*ex;

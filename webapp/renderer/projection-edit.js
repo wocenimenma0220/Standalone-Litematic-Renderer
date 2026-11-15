@@ -2,13 +2,29 @@
 'use strict';
 (() => {
   const el=id=>document.getElementById(id),tools=el('projectionTools'),palette=el('projectionPalette'),info=el('projectionStatus');
-  const catalog=window.BoardCatalog,defs=new Map(catalog.map(b=>['minecraft:'+b.id,b])),atlas=new Image();atlas.src='board-atlas.png';
-  const stick=new ProjectionEditModel.DebugStick(window.DebugStickProperties),audio=new BoardAudio(window.BoardSounds,{onError:()=>{}});
+  const catalog=window.BoardCatalog,defs=new Map(catalog.map(b=>['minecraft:'+b.id,b])),atlas=new Image();
+  const stick=new ProjectionEditModel.DebugStick(window.DebugStickProperties);
+  const blockIcons=new Map(),paletteButtons=new Map();
+  let audioPlayer=null,audioTask=null,paletteBuilt=false,inventoryKey=null,atlasRequested=false;
+  function ensureAtlas(){if(!atlasRequested){atlasRequested=true;atlas.src='board-atlas.png';}}
+  atlas.onload=()=>{inventoryKey=null;drawInventory();};
+  function ensureAudio(){
+    if(audioPlayer)return Promise.resolve(audioPlayer);
+    if(window.BoardAudio&&window.BoardSounds){audioPlayer=new BoardAudio(window.BoardSounds,{onError:()=>{}});return Promise.resolve(audioPlayer);}
+    if(!audioTask&&typeof window.loadBoardAudio==='function'){
+      audioTask=window.loadBoardAudio().then(()=>{
+        if(!audioPlayer&&window.BoardAudio&&window.BoardSounds)audioPlayer=new BoardAudio(window.BoardSounds,{onError:()=>{}});
+        return audioPlayer;
+      }).catch(()=>{audioTask=null;return null;});
+    }
+    return audioTask||Promise.resolve(null);
+  }
+  const audio={play(id){if(audioPlayer)audioPlayer.play(id);else ensureAudio().then(p=>p?.play(id));}};
   const inventory=new EditorInventoryModel.EditorInventory(catalog.map(block=>block.id));
   const inventoryDragType='application/x-litematic-block';let inventoryDrag=null;
   let flyHotbarKey=null;
   let hoverTimer=0,hoverPoint=null,hoverRunning=false,hoverKey=null;
-  let selected=null,category='building_blocks',tool='block',busy=false,session=0,originalFile=null,undo=0,redo=0,rotationGesture=false;
+  let selected=null,category='building_blocks',tool='block',busy=false,session=0,originalFile=null,undo=0,redo=0,rotationGesture=false,cachedPatchAtlas=null;
   const api=window.projectionEditor={enabled:false,dirty:false,target:null,pending:null,settle:()=>api.pending,toggle,reset,refreshHints,refreshVisibility,interact,history,flush,export:exportProjection};
   const categories=[['building_blocks','建筑方块'],['colored_blocks','染色方块'],['natural_blocks','自然方块'],['functional_blocks','功能方块'],['redstone_blocks','红石方块'],['op_blocks','管理员方块'],['special','水 / 岩浆 / 地狱门'],['all','全部']];
   function status(message){info.textContent=message;}
@@ -32,11 +48,31 @@
     if(busy)return;
     if(value&&(!state.viewReady||state.cpuPreview||state.scenePreparing||state.overview)){log('更改投影需要完整材质的 GPU 预览就绪。','err');return;}
     if(value&&!api.enabled){originalFile=originalFile||state.file;if(state.selection.enabled)toggleSelection(false);pauseFlyLook();state.keys.clear();shortcutHeldKeys.clear();closeInspector();}
-    clearInventoryDrag();api.enabled=value;api.target=null;hoverKey=null;clearTimeout(hoverTimer);if(value)hoverTimer=setTimeout(updateTarget,120);dragging=false;flyPress=null;rotationGesture=false;update();drawView();
+    clearInventoryDrag();api.enabled=value;api.target=null;hoverKey=null;clearTimeout(hoverTimer);if(value){ensureAtlas();ensureAudio();hoverTimer=setTimeout(updateTarget,120);}dragging=false;flyPress=null;rotationGesture=false;update();if(value)drawPalette();drawView();
     if(!value&&api.dirty){busy=true;update();try{await flush(true);}catch(error){status('统一更新失败：'+error.message);log(info.textContent,'err');}finally{busy=false;update();}}
   }
-  function reset(){++session;clearInventoryDrag();clearTimeout(hoverTimer);api.target=null;hoverKey=null;api.enabled=false;api.dirty=false;state.view?.clearEditPreview();undo=redo=0;busy=false;originalFile=null;stick.selected.clear();status('选择方块后在三维视图中操作，状态用调试棒修改。导出作者 LiteKinda。');update();}
-  function icon(block){const canvas=document.createElement('canvas');canvas.width=canvas.height=32;const visual=block.visuals.find(v=>Object.entries(v.when).every(([k,v])=>block.defaults[k]===v))||block.visuals[0];if(atlas.naturalWidth&&visual){const index=visual.icon??visual.sprite;canvas.getContext('2d').drawImage(atlas,index%64*32,Math.floor(index/64)*32,32,32,0,0,32,32);}return canvas;}
+  function reset(){++session;clearInventoryDrag();clearTimeout(hoverTimer);api.target=null;hoverKey=null;api.enabled=false;api.dirty=false;state.view?.clearEditPreview();if(cachedPatchAtlas){cachedPatchAtlas.bitmap?.close();cachedPatchAtlas=null;}undo=redo=0;busy=false;originalFile=null;stick.selected.clear();status('选择方块后在三维视图中操作，状态用调试棒修改。导出作者 LiteKinda。');update();}
+  function iconIndex(block){
+    if(blockIcons.has(block.id))return blockIcons.get(block.id);
+    const visual=block.visuals.find(v=>Object.entries(v.when).every(([k,val])=>block.defaults[k]===val))||block.visuals[0];
+    const index=visual?(visual.icon??visual.sprite??0):null;
+    blockIcons.set(block.id,index);
+    return index;
+  }
+  function spriteIcon(block){
+    const index=iconIndex(block),el=document.createElement('i');
+    el.className='projection-atlas-icon';
+    el.setAttribute('aria-hidden','true');
+    if(index!==null){el.style.setProperty('--col',index%64);el.style.setProperty('--row',Math.floor(index/64));}
+    else el.classList.add('is-empty');
+    return el;
+  }
+  function icon(block){
+    const canvas=document.createElement('canvas');canvas.width=canvas.height=32;
+    const index=iconIndex(block);
+    if(atlas.naturalWidth&&index!==null)canvas.getContext('2d').drawImage(atlas,index%64*32,Math.floor(index/64)*32,32,32,0,0,32,32);
+    return canvas;
+  }
   function inventoryChanged(message){
     selected=defs.get('minecraft:'+inventory.selected)||null;tool='block';hoverKey=null;update();
     window.appUi.setEditorInventory(inventory.snapshot()).catch(error=>status('背包保存失败：'+error.message));
@@ -46,13 +82,14 @@
   function selectSlot(slot){inventory.select(slot);inventoryChanged('快捷栏 '+(slot+1)+' · '+(defs.get('minecraft:'+inventory.selected)?.name||'空槽'));}
   function setTool(value){tool=value;hoverKey=null;update();if(value==='debug')status('调试棒：左键选择属性，右键轮换值，Shift 反向；每类方块分别记忆所选属性。');}
   function drawFlyHotbar(){
+    if(!api.enabled)return;
     const items=Array.from({length:9},(_,index)=>inventory.get(EditorInventoryModel.HOTBAR_START+index)),hints=items.map((_,index)=>shortcutHint('editorSlot'+(index+1))),debugHint=shortcutHint('editorDebug');
-    const key=JSON.stringify([items,hints,debugHint,inventory.slot,tool,atlas.naturalWidth]);if(key===flyHotbarKey)return;flyHotbarKey=key;
+    const key=JSON.stringify([items,hints,debugHint,inventory.slot,tool]);if(key===flyHotbarKey)return;flyHotbarKey=key;
     const bar=el('projectionFlySlots');bar.replaceChildren();
     for(let index=0;index<9;index++){
       const block=defs.get('minecraft:'+items[index]),button=document.createElement('button'),hint=document.createElement('span');
       button.type='button';button.className='projection-fly-slot';button.dataset.slot=index;button.dataset.block=items[index]||'';button.title='物品栏 '+(index+1)+' ('+hints[index]+') · '+(block?.name||'空槽');button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(tool==='block'&&inventory.slot===index));
-      if(block)button.append(icon(block));hint.className='projection-fly-key';hint.textContent=hints[index];button.append(hint);button.onclick=()=>selectSlot(index);bar.append(button);
+      if(block)button.append(spriteIcon(block));hint.className='projection-fly-key';hint.textContent=hints[index];button.append(hint);button.onclick=()=>selectSlot(index);bar.append(button);
     }
     const debug=el('projectionFlyDebug');debug.title='调试棒 ('+debugHint+')';debug.setAttribute('aria-label',debug.title);debug.setAttribute('aria-pressed',String(tool==='debug'));debug.querySelector('span').textContent=debugHint;
     el('projectionFlyItemName').textContent=tool==='debug'?'调试棒':selected?.name||'空手';
@@ -86,31 +123,47 @@
   });
   function drawInventory(){
     if(inventoryDrag)return;
-    const bag=el('projectionInventory'),bar=el('projectionHotbar');bag.replaceChildren();bar.replaceChildren();
+    const slots=Array.from({length:36},(_,index)=>inventory.get(index)||''),hints=Array.from({length:9},(_,slot)=>shortcutHint('editorSlot'+(slot+1)));
+    const key=JSON.stringify([slots,hints,inventory.slot,tool,atlas.naturalWidth]);if(key===inventoryKey)return;inventoryKey=key;
+    const bag=el('projectionInventory'),bar=el('projectionHotbar');const bagFrag=document.createDocumentFragment(),barFrag=document.createDocumentFragment();
     for(let index=0;index<36;index++){
-      const id=inventory.get(index),block=defs.get('minecraft:'+id),hotbar=index>=27,slot=index-27,button=document.createElement('button');
-      button.type='button';button.className='projection-slot';button.dataset.slot=index;button.dataset.block=id||'';
-      button.title=(hotbar?'快捷栏 '+(slot+1)+' ('+shortcutHint('editorSlot'+(slot+1))+')':'背包槽位 '+(index+1))+' · '+(block?block.name+' · '+block.id:'空槽');button.setAttribute('aria-label',button.title);
+      const id=slots[index],block=defs.get('minecraft:'+id),hotbar=index>=27,slot=index-27,button=document.createElement('button');
+      button.type='button';button.className='projection-slot';button.dataset.slot=index;button.dataset.block=id;
+      button.title=(hotbar?'快捷栏 '+(slot+1)+' ('+hints[slot]+')':'背包槽位 '+(index+1))+' · '+(block?block.name+' · '+block.id:'空槽');button.setAttribute('aria-label',button.title);
       if(block)button.append(icon(block));dragItem(button,block,index);
       button.title+='；拖动交换位置，右键移除';button.setAttribute('aria-label',button.title);
       button.oncontextmenu=event=>{event.preventDefault();if(block){inventory.set(index,null);inventoryChanged('已移除背包槽位 '+(index+1)+' 的物品。');}};
-      if(hotbar){button.setAttribute('aria-pressed',String(slot===inventory.slot&&tool==='block'));const key=document.createElement('span');key.className='projection-slot-key';key.textContent=shortcutHint('editorSlot'+(slot+1));button.append(key);button.onclick=()=>selectSlot(slot);bar.append(button);}
-      else{button.onclick=()=>{inventory.swap(index);inventoryChanged('已交换背包物品与快捷栏 '+(inventory.slot+1));};bag.append(button);}
+      if(hotbar){button.setAttribute('aria-pressed',String(slot===inventory.slot&&tool==='block'));const keyEl=document.createElement('span');keyEl.className='projection-slot-key';keyEl.textContent=hints[slot];button.append(keyEl);button.onclick=()=>selectSlot(slot);barFrag.append(button);}
+      else{button.onclick=()=>{inventory.swap(index);inventoryChanged('已交换背包物品与快捷栏 '+(inventory.slot+1));};bagFrag.append(button);}
     }
+    bag.replaceChildren(bagFrag);bar.replaceChildren(barFrag);
   }
   function inventoryAction(action){
     if(action==='editorDebug'){setTool(tool==='debug'?'block':'debug');return;}
     const slot=/^editorSlot([1-9])$/.exec(action);if(slot){selectSlot(+slot[1]-1);return;}
     if(action==='editorPrevious'||action==='editorNext'){inventory.cycle(action==='editorNext'?1:-1);inventoryChanged();return;}
   }
+  function buildPalette(){
+    if(paletteBuilt)return;
+    paletteBuilt=true;
+    const frag=document.createDocumentFragment();
+    for(const block of catalog){
+      const button=document.createElement('button');button.type='button';button.dataset.block=block.id;button.title=block.name+' · '+block.id+'；可拖入背包';button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(selected===block&&tool==='block'));button.append(spriteIcon(block));button.onclick=()=>equip(block);dragItem(button,block);
+      paletteButtons.set(block.id,{button,block,search:block.name.toLowerCase()});frag.append(button);
+    }
+    palette.replaceChildren(frag);
+  }
   function drawPalette(){
-    const text=el('projectionSearch').value.trim().toLowerCase();palette.replaceChildren();
-    for(const block of catalog){if(category!=='all'&&!block.categories.includes(category)||text&&!block.id.includes(text)&&!block.name.toLowerCase().includes(text))continue;
-      const button=document.createElement('button');button.type='button';button.dataset.block=block.id;button.title=block.name+' · '+block.id+'；可拖入背包';button.setAttribute('aria-label',button.title);button.setAttribute('aria-pressed',String(selected===block&&tool==='block'));button.append(icon(block));button.onclick=()=>equip(block);dragItem(button,block);palette.append(button);
+    if(!api.enabled)return;
+    buildPalette();
+    const text=el('projectionSearch').value.trim().toLowerCase();
+    for(const entry of paletteButtons.values()){
+      const block=entry.block;
+      entry.button.hidden=(category!=='all'&&!block.categories.includes(category))||(!!text&&!block.id.includes(text)&&!entry.search.includes(text));
     }
   }
   for(const [id,label] of categories){const button=document.createElement('button');button.textContent=label;button.type='button';button.setAttribute('aria-pressed',String(id===category));button.onclick=()=>{category=id;for(const b of el('projectionTabs').children)b.setAttribute('aria-pressed',String(b===button));drawPalette();};el('projectionTabs').append(button);}
-  atlas.onload=()=>{drawPalette();drawInventory();drawFlyHotbar();};el('projectionSearch').oninput=drawPalette;
+  el('projectionSearch').oninput=drawPalette;
   el('projectionPlace').onclick=()=>setTool('block');el('projectionDebug').onclick=()=>setTool('debug');
   el('menuEditProjection').onclick=()=>toggle();el('projectionClose').onclick=()=>toggle(false);
   const handle=el('projectionToolsHandle');let pull=null,suppress=false;
@@ -132,14 +185,24 @@
     }catch{}finally{hoverRunning=false;if(token===session&&api.enabled)hoverTimer=setTimeout(updateTarget,180);}
   }
   async function refreshPatch(token=session){
-    const view=state.view,bounds=state.selection.bounds(selectionWorld()),result=await window.engine.editPatch({selection:bounds||undefined});if(token!==session||view!==state.view||result.empty)return;
+    const view=state.view,bounds=state.selection.bounds(selectionWorld()),knownAtlasRevision=cachedPatchAtlas?.revision||null;
+    const result=await window.engine.editPatch({selection:bounds||undefined,knownAtlasRevision});if(token!==session||view!==state.view||result.empty)return;
     if(result.rebuildRequired){await flush(true);return;}
-    const image=await createImageBitmap(base64ToBlob(result.atlasDataUrl),{premultiplyAlpha:'none',colorSpaceConversion:'none'});let full=null,selected=null;
+    let image=null,full=null,selected=null;
+    if(result.atlasCached&&cachedPatchAtlas&&cachedPatchAtlas.revision===result.atlasRevision){
+      image=cachedPatchAtlas.bitmap;
+    }else{
+      const decoded=await createImageBitmap(atlasBlobFromPayload(result),{premultiplyAlpha:'none',colorSpaceConversion:'none'});
+      if(token!==session||view!==state.view){decoded.close();return;}
+      if(cachedPatchAtlas){cachedPatchAtlas.bitmap?.close();}
+      cachedPatchAtlas=result.atlasRevision?{revision:result.atlasRevision,bitmap:decoded}:null;
+      image=decoded;
+    }
     try{
-      full=new GpuView(els.gl);full.uploadMesh(result.meshArrayBuffer);full.uploadAtlas(image);
-      if(result.selectionArrayBuffer){selected=new GpuView(els.gl);selected.uploadMesh(result.selectionArrayBuffer);selected.uploadAtlas(image);}
+      full=new GpuView(els.gl,view);full.uploadMesh(result.meshArrayBuffer);full.uploadAtlas(image);
+      if(result.selectionArrayBuffer){selected=new GpuView(els.gl,view);selected.uploadMesh(result.selectionArrayBuffer);selected.uploadAtlas(image);}
       if(token!==session||view!==state.view)return;view.clearEditPreview();view.editPreview=full;view.editSelectionPreview=selected;full=null;selected=null;view.setEditMask(result.cells);view.revision++;lastViewKey=null;drawView();
-    }finally{image.close();full?.destroy();selected?.destroy();}
+    }finally{if(cachedPatchAtlas?.bitmap!==image)image.close();full?.destroy();selected?.destroy();}
   }
   async function refresh(result,token){
     if(token!==session)return;undo=result.undo;redo=result.redo;if(!result.changed)return;
@@ -214,6 +277,6 @@
     if(state.fly&&!state.flyLookActive){resumeFlyLook();return;}
     interact(e.button,e)?.catch(error=>status(error.message));
   },true);
-  update();drawPalette();
+  update();
   window.__uiReady.then(async()=>{const settings=await window.appUi.settings();inventory.restore(settings.editorInventory);selected=defs.get('minecraft:'+inventory.selected)||null;update();}).catch(error=>status('背包读取失败：'+error.message));
 })();

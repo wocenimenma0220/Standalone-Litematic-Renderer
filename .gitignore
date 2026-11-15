@@ -32,22 +32,25 @@ tools/verify/lod-large-output/
 
 # Generated verification artifacts and profiling captures
 tools/verify/*-output/
-tools/verify/litetool-analysis/artifacts/
-tools/verify/world-render-profile/current/
-tools/verify/world-render-profile/direct-bsp/
-tools/verify/world-render-profile/frame-electron/
-tools/verify/world-optimization/baseline/
-tools/verify/world-optimization/baseline-classes/
-tools/verify/world-optimization/classes/
-tools/verify/world-optimization/export/
-tools/verify/world-optimization/frame-electron/
-tools/verify/world-optimization/inspection-electron/
-tools/verify/world-optimization/lighting/
-tools/verify/world-optimization/occlusion-electron/
-tools/verify/world-optimization/rooms/
-tools/verify/world-optimization/ui/
-tools/verify/world-optimization/*.bin
-tools/verify/world-optimization/*.png
+tools/verify/progressive-ui-runtime-*/
+tools/verify/copper-statue-runtime/
+tools/verify/large-nbt-ui-*/
+tools/verify/research/litetool-analysis/artifacts/
+tools/verify/research/world-render-profile/current/
+tools/verify/research/world-render-profile/direct-bsp/
+tools/verify/research/world-render-profile/frame-electron/
+tools/verify/research/world-optimization/baseline/
+tools/verify/research/world-optimization/baseline-classes/
+tools/verify/research/world-optimization/classes/
+tools/verify/research/world-optimization/export/
+tools/verify/research/world-optimization/frame-electron/
+tools/verify/research/world-optimization/inspection-electron/
+tools/verify/research/world-optimization/lighting/
+tools/verify/research/world-optimization/occlusion-electron/
+tools/verify/research/world-optimization/rooms/
+tools/verify/research/world-optimization/ui/
+tools/verify/research/world-optimization/*.bin
+tools/verify/research/world-optimization/*.png
 
 # Electron payload and its node_modules
 webapp/node_modules/

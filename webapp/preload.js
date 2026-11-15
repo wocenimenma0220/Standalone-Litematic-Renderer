@@ -116,5 +116,4 @@ contextBridge.exposeInMainWorld('shellApi', {
   saveGif: (suggested) => ipcRenderer.invoke('dialog:saveGif', suggested),
   openPack: (kind) => ipcRenderer.invoke('dialog:openPack', kind),
   reveal: (target) => ipcRenderer.invoke('shell:reveal', target),
-  writeBase64: (file, base64) => ipcRenderer.invoke('file:writeBase64', { file, base64 }),
 });

@@ -2,7 +2,7 @@
 /** TNT 与其他实体共享生成、流体、冲量和保存接口，类型自己的运动参数独立保留。 */
 (function(root){
  function install(B){
-  const P=B.TimingWorld.prototype,F=Math.fround,clone=v=>JSON.parse(JSON.stringify(v)),at=(p,d)=>p.map((v,i)=>v+B.DIR[d][i]);
+  const P=B.TimingWorld.prototype,F=Math.fround,clone=B.clone,at=(p,d)=>p.map((v,i)=>v+B.DIR[d][i]);
   const defaults={primed_tnt:{width:F(.98),height:F(.98),eyeHeight:F(.15),fuse:80,explosionPower:4},item:{width:.25,height:.25,health:5},falling_block:{width:F(.98),height:F(.98)}};
   B.tntVisual=e=>({scale:1+Math.max(0,Math.min(1,1-e.fuse/10))**4*.3,lit:e.fuse>=0&&Math.floor(e.fuse/5)%2===0});
   B.ENTITY_CATALOG.push({id:'primed_tnt',name:'点燃的 TNT',entity:true,categories:['entities'],defaults:{facing:'east'},properties:{facing:['east']},facing:['east'],visuals:[],multipart:[]});

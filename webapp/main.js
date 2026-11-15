@@ -35,7 +35,7 @@ app.setAppUserModelId('io.kindasus.projectionpreview');
 let mainWindow = null;
 let engine = null;
 let renderStopPromise = null;
-let openedSchematic=null,resourceRoot=null,pendingEdits=false;
+let openedSchematic=null,resourceRoot=null;
 const backgroundExports=new BackgroundExports({home:APP_HOME,runtime:resolveRuntime(APP_HOME),onUpdate:job=>{
   if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('exports:update',job);
 }});
@@ -116,16 +116,17 @@ async function loadEngineResources(client, root) {
   requireCurrentEngine(client);
   const result = await client.call('loadResources', { ...(root ? { root } : {}), imports });
   requireCurrentEngine(client);
-  client.resourcesLoaded = true;
-  resourceRoot = root || null;
-  return result;
+  backgroundExports.resetWorker().catch(()=>{});
+  return client.resourcesLoaded = true,
+  resourceRoot = root || null,
+  result;
 }
 
 ipcMain.handle('engine:forceStop', () => {
   if (renderStopPromise) return renderStopPromise;
   const previous = engine;
   const previousPid=previous?.proc?.pid;
-  openedSchematic = null;pendingEdits=false;
+  openedSchematic = null;
   // 先独立终止进程，再等待在途传输和临时资源清理。
   const stopped = previous ? previous.forceStop() : Promise.resolve();
   renderStopPromise = (async () => {
@@ -159,7 +160,7 @@ handleEngine('engine:open', async (client, _e, file) => {
   requireCurrentEngine(client);
   if(!client.resourcesLoaded)await loadEngineResources(client,resourceRoot);
   diagnostic('opening schematic: '+file);
-  try {await sceneTransfer.close();requireCurrentEngine(client);await selectionTransfer.close();await client.call('cancelPreview',{});const result=await client.call('open',{path:file});requireCurrentEngine(client);openedSchematic=file;pendingEdits=false;diagnostic('schematic opened: '+file);return result;}
+  try {await sceneTransfer.close();requireCurrentEngine(client);await selectionTransfer.close();await client.call('cancelPreview',{});const result=await client.call('open',{path:file});requireCurrentEngine(client);openedSchematic=file;diagnostic('schematic opened: '+file);return result;}
   catch(error){diagnostic('schematic open failed: '+file+'; '+error.message);throw error;}
 });
 handleEngine('engine:render', async (client, _e, params) => client.call('render', await uiSettings.renderParams(params)));
@@ -167,7 +168,7 @@ handleEngine('engine:renderPreview', async (client, _e, params) => client.call('
 handleEngine('engine:renderAnimation', async (client, _e, params) => client.call('renderAnimation', await uiSettings.renderParams(params)));
 ipcMain.handle('exports:start',async(_event,{kind,params})=>{
   if(!openedSchematic)throw Error('请先打开投影');
-  const committed=await engine.call('commitEdits',{});if(committed.changed)openedSchematic=committed.path;pendingEdits=false;
+  const committed=await engine.call('commitEdits',{});if(committed.changed)openedSchematic=committed.path;
   const source=openedSchematic;
   return backgroundExports.submit({kind,source,params:await uiSettings.renderParams(params),resources:{...(resourceRoot?{root:resourceRoot}:{}),imports:await packStore.read()}});
 });
@@ -178,7 +179,7 @@ handleEngine('engine:releaseStreaming', async client => {await sceneTransfer.clo
 handleEngine('engine:materials',(client,_event,request)=>client.call('materials',{waterAsIce:request?.waterAsIce===true}));
 handleEngine('engine:exportMaterials',(client,_event,request)=>client.call('exportMaterials',request));
 handleEngine('engine:sceneCacheStats',client=>client.call('sceneCacheStats',{}));
-handleEngine('engine:configureSceneCache',(client,_event,request)=>client.call('configureSceneCache',request));
+handleEngine('engine:configureSceneCache',async(client,_event,request)=>{const res=await client.call('configureSceneCache',request);if(request?.clear)backgroundExports.resetWorker().catch(()=>{});return res;});
 ipcMain.handle('dialog:saveMaterials',async(_event,{suggested,format,scope})=>{
   format=format==='csv'?'csv':'xlsx';
   const res=await dialog.showSaveDialog(mainWindow,{defaultPath:suggested||('材料清单.'+format),filters:[{name:format==='csv'?'CSV 表格':'Excel 工作簿',extensions:[format]}]});
@@ -259,7 +260,7 @@ ipcMain.handle('window:fullscreen', (_e, enabled) => {
 });
 
 handleEngine('skins:settings', client => client.call('skinSettings', {}));
-handleEngine('skins:setOnline', (client, _event, online) => client.call('setSkinOnline', { online: !!online }));
+handleEngine('skins:setOnline', async (client, _event, online) => { const r = await client.call('setSkinOnline', { online: !!online }); backgroundExports.resetWorker().catch(()=>{}); return r; });
 handleEngine('skins:importLocal', async (client, _event, identity) => {
   if (typeof identity !== 'string' || !/^(?:[A-Za-z0-9_]{1,16}|[0-9a-fA-F]{32}|[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$/.test(identity.trim())) {
     throw new Error('请先填写玩家名或 UUID');
@@ -268,7 +269,9 @@ handleEngine('skins:importLocal', async (client, _event, identity) => {
     title: '导入玩家皮肤 PNG', filters: [{ name: 'Minecraft 皮肤 PNG', extensions: ['png'] }], properties: ['openFile'],
   });
   if (choice.canceled) return { imported: false };
-  return client.call('importSkin', { identity: identity.trim(), path: choice.filePaths[0] });
+  const r = await client.call('importSkin', { identity: identity.trim(), path: choice.filePaths[0] });
+  backgroundExports.resetWorker().catch(()=>{});
+  return r;
 });
 
 /** 图集通过数据 URL 传输，网格保持二进制，避免 Base64 膨胀顶点数据。 */
@@ -329,21 +332,26 @@ async function scenePayload(client,event,res,options={}) {
   return {
     ...res,
     ...payload,
-    atlasDataUrl: 'data:image/png;base64,' + atlasBuffer.toString('base64'),
+    atlasArrayBuffer: atlasBuffer.buffer.slice(atlasBuffer.byteOffset, atlasBuffer.byteOffset + atlasBuffer.byteLength),
   };
 }
 ipcMain.handle('engine:previewDiagnostic', (_event, message) => { diagnostic(String(message).slice(0, 1500)); });
 
 handleEngine('engine:searchBlocks',(client,_event,request)=>client.call('searchBlocks',request));
 handleEngine('engine:editPick',(client,_event,request)=>client.call('editPick',request));
-handleEngine('engine:editBlock',async(client,_event,request)=>{const result=await client.call('editBlock',request);requireCurrentEngine(client);if(result.changed)pendingEdits=true;return result;});
+handleEngine('engine:editBlock',(client,_event,request)=>client.call('editBlock',request));
 handleEngine('engine:editStates',(client,_event,positions)=>client.call('editStates',{positions}));
 handleEngine('engine:inspectPosition',(client,_event,position)=>client.call('inspectPosition',{position}));
-handleEngine('engine:commitEdits',async client=>{const result=await client.call('commitEdits',{rebasePreview:true});requireCurrentEngine(client);if(result.changed)openedSchematic=result.path;pendingEdits=false;return result;});
+handleEngine('engine:commitEdits',async client=>{const result=await client.call('commitEdits',{rebasePreview:true});requireCurrentEngine(client);if(result.changed)openedSchematic=result.path;return result;});
 handleEngine('engine:editPatch',async(client,_event,options={})=>{
   const result=await client.call('editPatch',{directory:path.join(APP_HOME,'renders','.edit','preview'),selection:options.selection});requireCurrentEngine(client);if(result.empty||result.rebuildRequired)return result;
-  const buffer=await fs.promises.readFile(result.mesh),atlas=await fs.promises.readFile(result.atlas),selected=result.selectionMesh?await fs.promises.readFile(result.selectionMesh):null;
-  return {cells:result.cells,revision:result.revision,quads:result.quads,meshArrayBuffer:buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.byteLength),selectionArrayBuffer:selected?selected.buffer.slice(selected.byteOffset,selected.byteOffset+selected.byteLength):null,atlasDataUrl:'data:image/png;base64,'+atlas.toString('base64')};
+  const atlasUnchanged=!!(result.atlasRevision&&options.knownAtlasRevision===result.atlasRevision);
+  const [buffer,atlas,selected]=await Promise.all([
+    fs.promises.readFile(result.mesh),
+    atlasUnchanged?null:fs.promises.readFile(result.atlas),
+    result.selectionMesh?fs.promises.readFile(result.selectionMesh):null,
+  ]);
+  return {cells:result.cells,revision:result.revision,quads:result.quads,atlasRevision:result.atlasRevision,atlasCached:atlasUnchanged,meshArrayBuffer:buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.byteLength),selectionArrayBuffer:selected?selected.buffer.slice(selected.byteOffset,selected.byteOffset+selected.byteLength):null,atlasArrayBuffer:atlas?atlas.buffer.slice(atlas.byteOffset,atlas.byteOffset+atlas.byteLength):null};
 });
 handleEngine('engine:exportEdited',async(client,_event,request={})=>{
   const result=await dialog.showSaveDialog(mainWindow,{title:'导出修改后的投影',defaultPath:request.suggested||'更改投影.litematic',filters:[{name:'Litematica 投影',extensions:['litematic']}]});
@@ -472,12 +480,6 @@ ipcMain.handle('dialog:openPack', async (_event, kind) => {
 
 ipcMain.handle('shell:reveal', (_e, target) => {
   if (target && fs.existsSync(target)) shell.showItemInFolder(target);
-});
-
-
-ipcMain.handle('file:writeBase64', async (_e, { file, base64 }) => {
-  await fs.promises.writeFile(file, Buffer.from(base64, 'base64'));
-  return { path: file, bytes: Buffer.from(base64, 'base64').length };
 });
 
 // ---------------------------------------------------------------------------

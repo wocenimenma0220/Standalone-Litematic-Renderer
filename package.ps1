@@ -9,6 +9,7 @@ param(
     [switch]$ReuseRuntime,
     # 即使源码目录的旧 EXE 正被占用，也为分发包构建新启动器。
     [switch]$SkipRootLauncherCopy,
+    [switch]$IncludeSkinCache,
     [ValidatePattern('^[\p{L}\p{N}_-]+$')]
     [string]$PackageName = '投影预览',
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?(-?[A-Za-z][A-Za-z0-9.-]*)?$')]
@@ -84,7 +85,7 @@ Remove-BuildDirectory $binDir
 New-Item -ItemType Directory -Path $binDir | Out-Null
 $sources = Get-ChildItem (Join-Path $ProjectRoot 'src') -Recurse -Filter *.java | ForEach-Object { $_.FullName }
 Write-Host "      $($sources.Count) source files"
-& $javac --release 21 -encoding UTF-8 -nowarn -d $binDir $sources
+& $javac --release 21 -encoding UTF-8 -Xlint:all -d $binDir $sources
 if ($LASTEXITCODE -ne 0) { throw "javac failed" }
 
 
@@ -145,14 +146,15 @@ $evaluationDocs = Join-Path $ProjectRoot '评估与测评'
 if (Test-Path -LiteralPath $evaluationDocs) {
     Copy-Item -LiteralPath $evaluationDocs -Destination $stageDir -Recurse
 }
-# 公共皮肤纹理和资料缓存可以随包保留，以支持离线查看。
-# 本地皮肤覆盖与联网偏好属于个人配置，不复制进分发包。
-foreach ($part in @('textures', 'profiles')) {
-    $cached = Join-Path $ProjectRoot ('skins/' + $part)
-    if (Test-Path -LiteralPath $cached) {
-        $stageSkins = Join-Path $stageDir 'skins'
-        New-Item -ItemType Directory -Path $stageSkins -Force | Out-Null
-        Copy-Item -LiteralPath $cached -Destination $stageSkins -Recurse
+# 默认不复制本地皮肤缓存与个人联网配置，避免开发者缓存随包分发；需要离线携带时显式传入 -IncludeSkinCache。
+if ($IncludeSkinCache) {
+    foreach ($part in @('textures', 'profiles')) {
+        $cached = Join-Path $ProjectRoot ('skins/' + $part)
+        if (Test-Path -LiteralPath $cached) {
+            $stageSkins = Join-Path $stageDir 'skins'
+            New-Item -ItemType Directory -Path $stageSkins -Force | Out-Null
+            Copy-Item -LiteralPath $cached -Destination $stageSkins -Recurse
+        }
     }
 }
 

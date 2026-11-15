@@ -12,6 +12,10 @@ import java.nio.file.Path;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /** 逐行 JSON-RPC：请求携带 id、method 和 params，回复保留相同 id，进度事件不占用请求编号。 */
@@ -20,11 +24,20 @@ public final class JsonRpcServer {
     private final BufferedReader in;
     private final PrintStream out;
     private final AtomicLong seq = new AtomicLong();
+    private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "rpc-worker");
+        t.setDaemon(true);
+        return t;
+    });
+    private volatile Thread activeWorkerThread;
+    private volatile boolean activeWorkerCancelable;
+    private volatile boolean stopping;
 
     public JsonRpcServer(RenderEngine engine, BufferedReader in, PrintStream out) {
         this.engine = engine;
         this.in = in;
         this.out = out;
+        this.engine.setEventSink(this::emit);
     }
 
     public static void main(String[] args) throws Exception {
@@ -59,10 +72,30 @@ public final class JsonRpcServer {
         } catch (Exception e) {
             log("server loop ended: " + e);
         } finally {
+            this.stopping = true;
+            this.engine.cancelPreview();
+            this.engine.cancel();
+            Thread w = this.activeWorkerThread;
+            if (w != null) w.interrupt();
+            this.worker.shutdownNow();
+            try { this.worker.awaitTermination(3, TimeUnit.SECONDS); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             this.engine.close();
         }
     }
 
+    private static boolean isControlMethod(String method) {
+        return switch (method) {
+            case "ping", "cancel", "cancelPreview", "previewStatus", "previewLive", "previewResult", "skinSettings", "shutdown" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isCancelableWorkerMethod(String method) {
+        return switch (method) {
+            case "render", "renderPreview", "renderAnimation", "exportScene", "exportCachedScene", "exportSelectionScene" -> true;
+            default -> false;
+        };
+    }
 
     private boolean handle(String line) {
         long id = -1;
@@ -74,9 +107,32 @@ public final class JsonRpcServer {
             Map<String, Object> params = MiniJson.asObject(req.get("params"));
             if (params == null) params = Map.of();
 
-            Map<String, Object> result = dispatch(method, params);
-            if (result == SHUTDOWN) return false;
-            reply(id, result);
+            if (isControlMethod(method)) {
+                Map<String, Object> result = dispatch(method, params);
+                if (result == SHUTDOWN) return false;
+                reply(id, result);
+                return true;
+            }
+            final long reqId = id;
+            final Map<String, Object> reqParams = params;
+            this.worker.execute(() -> {
+                if (this.stopping) {
+                    fail(reqId, new CancellationException("应用正在退出"));
+                    return;
+                }
+                this.activeWorkerThread = Thread.currentThread();
+                this.activeWorkerCancelable = isCancelableWorkerMethod(method);
+                try {
+                    Map<String, Object> result = dispatch(method, reqParams);
+                    reply(reqId, result);
+                } catch (Exception e) {
+                    fail(reqId, e);
+                } finally {
+                    this.activeWorkerCancelable = false;
+                    this.activeWorkerThread = null;
+                    Thread.interrupted();
+                }
+            });
         } catch (Exception e) {
             fail(id, e);
         }
@@ -179,13 +235,21 @@ public final class JsonRpcServer {
                 });
             }
 
-            case "cancel":
+            case "cancel": {
                 this.engine.cancel();
+                Thread w = this.activeWorkerThread;
+                if (w != null && this.activeWorkerCancelable) w.interrupt();
                 return Map.of("cancelled", true);
+            }
             case "releaseStreaming":
                 this.engine.releaseStreaming();return Map.of("released",true);
 
             case "shutdown":
+                this.stopping = true;
+                this.engine.cancelPreview();
+                this.engine.cancel();
+                Thread w = this.activeWorkerThread;
+                if (w != null && this.activeWorkerCancelable) w.interrupt();
                 return SHUTDOWN;
 
             default:
@@ -276,6 +340,8 @@ public final class JsonRpcServer {
     private static void write(StringBuilder sb, Object o) {
         if (o == null) { sb.append("null"); return; }
         if (o instanceof String s) { writeString(sb, s); return; }
+        if (o instanceof Double d) { sb.append(Double.isFinite(d) ? d : "null"); return; }
+        if (o instanceof Float f) { sb.append(Float.isFinite(f) ? f : "null"); return; }
         if (o instanceof Boolean || o instanceof Number) { sb.append(o); return; }
         if (o instanceof Map<?, ?> m) {
             sb.append('{');

@@ -53,6 +53,9 @@ public final class RenderEngine implements AutoCloseable {
     private BlockInspector inspector;
     private String sceneKey;
     private SceneBuilder streamBuilder;
+    private final Map<io.github.litematicrender.render.scene.SectionVisibility.Position,io.github.litematicrender.render.scene.ScenePicker> streamPickCache=new java.util.LinkedHashMap<>(64,0.75f,true){
+        @Override protected boolean removeEldestEntry(Map.Entry<io.github.litematicrender.render.scene.SectionVisibility.Position,io.github.litematicrender.render.scene.ScenePicker> eldest){return size()>64;}
+    };
     private StreamMeshExporter.Index streamIndex;
     private String streamKey;
     private boolean streamRealLighting;
@@ -77,11 +80,12 @@ public final class RenderEngine implements AutoCloseable {
     private SceneCache diskCache;
     private String rendererFingerprint;
     private io.github.litematicrender.render.skin.SkinResolver streamSkins;
+    private volatile java.util.function.Consumer<Map<String,Object>> eventSink = evt -> {};
     private volatile PreviewJob previewJob;
     private static final class PreviewJob {
         final String id=java.util.UUID.randomUUID().toString();
         volatile boolean cancelled,finished;volatile Thread thread;volatile String stage="queued",error="";volatile Map<String,Object> overview,full;volatile Path directory;
-        volatile Map<String,Object> live;volatile long committedBytes,viewRevision;volatile int total;volatile PreviewPriority view;
+        volatile Map<String,Object> live;volatile long committedBytes,viewRevision;volatile int total,lastNotifiedPublished=-1;volatile String lastNotifiedStage="";volatile PreviewPriority view;
         final List<StreamMeshExporter.Entry> entries=new ArrayList<>();
     }
     @FunctionalInterface private interface BeforeBuild {io.github.litematicrender.render.scene.OverviewMesh run()throws Exception;}
@@ -115,8 +119,8 @@ public final class RenderEngine implements AutoCloseable {
     public Path home() {
         return this.home;
     }
-    public synchronized void invalidateScene() { this.scene=null;this.sceneKey=null; }
-    public synchronized void releaseStreaming(){clearStream();}
+    public void invalidateScene() { cancelPreview(); synchronized(this) { this.scene=null;this.sceneKey=null; } }
+    public void releaseStreaming(){ cancelPreview(); synchronized(this) { clearStream(); } }
     /** 分页返回搜索位置，避免保留数百万匹配坐标。 */
     public synchronized Map<String,Object> searchBlocks(String query,int offset)throws Exception {
         ensureResources();if(schematic==null)throw new IllegalStateException("请先打开投影");
@@ -176,7 +180,7 @@ public final class RenderEngine implements AutoCloseable {
                 for(var entry:planned.entrySet()){var p=entry.getKey();changed|=edits.set(new int[]{p.x(),p.y(),p.z()},entry.getValue());}edits.squash(checkpoint,changed);
             }else throw new IllegalArgumentException("未知编辑操作");
             var result=new LinkedHashMap<String,Object>(edits.status());result.put("changed",changed);result.put("path",schematicPath.toAbsolutePath().toString());
-            if(changed){schematic=io.github.litematicrender.schematic.LitematicaSchematic.fromData(edits.data());schematic.materialize(registry);editsDirty=true;editRevision++;materialKey=null;result.put("revision",editRevision);result.put("info",editInfo());}
+            if(changed){schematic=io.github.litematicrender.schematic.LitematicaSchematic.fromData(edits.data());schematic.materialize(registry);editsDirty=true;editRevision++;materialKey=null;inspector=null;result.put("revision",editRevision);result.put("info",editInfo());}
             return result;
         }catch(Exception error){edits.restore(checkpoint);schematic=previous;throw error;}
     }
@@ -198,10 +202,11 @@ public final class RenderEngine implements AutoCloseable {
         if(edits==null)return Map.of("empty",true);Files.createDirectories(directory);var cells=edits.previewCells();
         // 基础模型重建后接替补丁，避免连续编辑无限扩大局部模型。
         if(cells.size()>8192)return Map.of("rebuildRequired",true,"cells",cells.size(),"revision",editRevision);
-        var builder=new SceneBuilder(registry,baker,colormaps,atlas);for(var r:schematic.regions().values()){var o=r.blockOrigin();builder.addRegion(r,new int[]{o.x(),o.y(),o.z()});}
+        var shapes=editBaseBuilder!=null?editBaseBuilder.shapes():null;
+        var builder=new SceneBuilder(registry,baker,colormaps,atlas,shapes);for(var r:schematic.regions().values()){var o=r.blockOrigin();builder.addRegion(r,new int[]{o.x(),o.y(),o.z()});}
         var mesh=builder.buildEditing(cells,editBaseBuilder,null,null);Path full=directory.resolve("patch.bin"),image=directory.resolve("atlas.png");MeshExporter.write(mesh,atlas,full);
-        var result=new LinkedHashMap<String,Object>();result.put("mesh",full.toString());result.put("atlas",image.toString());result.put("quads",mesh.quadCount);result.put("cells",cells.stream().map(p->List.of(p.x(),p.y(),p.z())).toList());result.put("revision",editRevision);
-        if(min!=null){var selected=new SceneBuilder(registry,baker,colormaps,atlas);for(var r:schematic.regions().values()){var o=r.blockOrigin();selected.addRegion(r,new int[]{o.x(),o.y(),o.z()});}var selectedMesh=selected.buildEditing(cells,builder,min,max);Path path=directory.resolve("selection.bin");MeshExporter.write(selectedMesh,atlas,path);result.put("selectionMesh",path.toString());}
+        var result=new LinkedHashMap<String,Object>();result.put("mesh",full.toString());result.put("atlas",image.toString());result.put("atlasRevision",atlas.bakedTick()+"|"+System.identityHashCode(atlas.stitched));result.put("quads",mesh.quadCount);result.put("cells",cells.stream().map(p->List.of(p.x(),p.y(),p.z())).toList());result.put("revision",editRevision);
+        if(min!=null){var selected=new SceneBuilder(registry,baker,colormaps,atlas,builder.shapes());for(var r:schematic.regions().values()){var o=r.blockOrigin();selected.addRegion(r,new int[]{o.x(),o.y(),o.z()});}var selectedMesh=selected.buildEditing(cells,builder,min,max);Path path=directory.resolve("selection.bin");MeshExporter.write(selectedMesh,atlas,path);result.put("selectionMesh",path.toString());}
         if(editAtlasImage!=atlas.stitched||editAtlasTick!=atlas.bakedTick()||!image.equals(editAtlasPath)||!Files.isRegularFile(image)){
             atlas.stitched.writePng(image);editAtlasImage=atlas.stitched;editAtlasTick=atlas.bakedTick();editAtlasPath=image;
         }
@@ -241,9 +246,12 @@ public final class RenderEngine implements AutoCloseable {
         }
         return this.inspector.inspect(this.picker.pick(origin,direction,maximum));
     }
+    private io.github.litematicrender.render.scene.ScenePicker streamPicker(io.github.litematicrender.render.scene.SectionVisibility.Position position) {
+        return streamPickCache.computeIfAbsent(position,p->new io.github.litematicrender.render.scene.ScenePicker(streamBuilder.buildSection(p),atlas));
+    }
     private Map<String,Object> pickStream(double[] origin,double[] direction,double maximum)throws Exception {
         if(streamBuilder==null){
-            scene=null;sceneKey=null;
+            scene=null;sceneKey=null;streamPickCache.clear();
             streamBuilder=new SceneBuilder(registry,baker,colormaps,atlas).realLighting(streamRealLighting).lightingEnabled(streamLightingEnabled);
             if(streamSkins!=null)streamBuilder.skinSnapshot(streamSkins);
             for(var region:schematic.regions().values()){var p=region.blockOrigin();streamBuilder.addRegion(region,new int[]{p.x(),p.y(),p.z()});}
@@ -252,20 +260,24 @@ public final class RenderEngine implements AutoCloseable {
         double length=0;for(double value:direction){if(!Double.isFinite(value))throw new IllegalArgumentException("无效的点选方向");length+=value*value;}
         length=Math.sqrt(length);if(!Double.isFinite(length)||length<1e-12||!Double.isFinite(maximum)||maximum<=0)throw new IllegalArgumentException("无效的点选距离");
         double[] dir={direction[0]/length,direction[1]/length,direction[2]/length};
-        var candidates=new ArrayList<StreamMeshExporter.Entry>();
-        for(var entry:streamIndex.sections())if(rayBox(entry.bounds(),origin,dir,maximum)!=Double.POSITIVE_INFINITY)candidates.add(entry);
-        candidates.sort(java.util.Comparator.comparingDouble(e->rayBox(e.bounds(),origin,dir,maximum)));
+        record Candidate(StreamMeshExporter.Entry entry,double enter){}
+        var candidates=new ArrayList<Candidate>();
+        for(var entry:streamIndex.sections()){
+            double enter=rayBox(entry.bounds(),origin,dir,maximum);
+            if(enter!=Double.POSITIVE_INFINITY)candidates.add(new Candidate(entry,enter));
+        }
+        candidates.sort(java.util.Comparator.comparingDouble(Candidate::enter));
         double mask=Double.POSITIVE_INFINITY;
-        for(var entry:candidates)if(entry.levels().get(0).stream().anyMatch(p->p.layer()==5)) {
-            var local=new ScenePicker(streamBuilder.buildSection(entry.position()),atlas);mask=Math.min(mask,local.maskDistance(origin,dir,maximum));
+        for(var candidate:candidates)if(candidate.entry().levels().get(0).stream().anyMatch(p->p.layer()==5)) {
+            mask=Math.min(mask,streamPicker(candidate.entry().position()).maskDistance(origin,dir,maximum));
         }
         ScenePicker.Hit best=null;
-        for(var entry:candidates) {
-            if(best!=null&&rayBox(entry.bounds(),origin,dir,maximum)>best.distance())break;
-            var local=new ScenePicker(streamBuilder.buildSection(entry.position()),atlas);
-            var hit=local.pick(origin,dir,best==null?maximum:best.distance(),mask);if(hit!=null)best=hit;
+        for(var candidate:candidates) {
+            if(best!=null&&candidate.enter()>best.distance())break;
+            var hit=streamPicker(candidate.entry().position()).pick(origin,dir,best==null?maximum:best.distance(),mask);if(hit!=null)best=hit;
         }
-        return new BlockInspector(schematic,resources).inspect(best);
+        if(this.inspector==null)this.inspector=new BlockInspector(schematic,resources);
+        return this.inspector.inspect(best);
     }
     private static double rayBox(float[] bounds,double[] origin,double[] direction,double maximum) {
         double near=0,far=maximum;
@@ -313,7 +325,9 @@ public final class RenderEngine implements AutoCloseable {
 
 
     /** 资源加载顺序为原版、内置包、用户导入包；列表末尾优先级最高。 */
-    public synchronized Map<String, Object> loadResources(Path packRoot, List<String> imports) throws Exception {
+    public Map<String, Object> loadResources(Path packRoot, List<String> imports) throws Exception {
+        cancelPreview();
+        synchronized(this) {
         long resourceStart=System.nanoTime(),resourceStep=resourceStart;
         Map<String,Object> timings=new LinkedHashMap<>();
         List<Path> builtin = builtinPacks();
@@ -384,15 +398,18 @@ public final class RenderEngine implements AutoCloseable {
         out.put("imageCacheHit",images.hit());
         timings.put("totalMillis",(System.nanoTime()-resourceStart)/1e6);out.put("timings",timings);
         return out;
+        }
     }
 
 
-    public synchronized Map<String, Object> loadResources(Path packRoot) throws Exception {
+    public Map<String, Object> loadResources(Path packRoot) throws Exception {
         return loadResources(packRoot, List.of());
     }
 
 
-    public synchronized Map<String, Object> open(Path file) throws Exception {
+    public Map<String, Object> open(Path file) throws Exception {
+        cancelPreview();
+        synchronized(this) {
         ensureResources();
         selectedScene=null;selectedSceneKey=null;
         if(edits!=null&&!file.toAbsolutePath().normalize().equals(editWorkingPath)){edits=null;editWorkingPath=null;editsDirty=false;editBaseBuilder=null;this.schematic=null;}
@@ -426,16 +443,20 @@ public final class RenderEngine implements AutoCloseable {
         }
         out.put("regions", regions);
         return out;
+        }
     }
 
 
-    public synchronized Map<String, Object> render(Path outPng, RenderSettings settings, boolean reportDiagnostics)
+    public Map<String, Object> render(Path outPng, RenderSettings settings, boolean reportDiagnostics)
             throws Exception {
+        cancelPreview();
+        synchronized(this) {
         ensureResources();
         if (this.schematic == null) {
             throw new IllegalStateException("no schematic open; call open first");
         }
         this.cancelled.set(false);
+        settings.cancelSignal = this::isRenderAborted;
         RenderDiagnostics.reset();
         try {
         long t0 = System.currentTimeMillis();
@@ -463,7 +484,8 @@ public final class RenderEngine implements AutoCloseable {
             if (!diag.isEmpty()) out.put("unresolved", diag);
         }
         return out;
-        }finally{if(streamIndex!=null){scene=null;sceneKey=null;pickedScene=null;picker=null;}}
+        }finally{settings.cancelSignal=null;if(streamIndex!=null){scene=null;sceneKey=null;pickedScene=null;picker=null;}}
+        }
     }
 
     /** 场景缓存覆盖全部烘焙输入，相机参数不参与缓存键。 */
@@ -526,21 +548,23 @@ public final class RenderEngine implements AutoCloseable {
     }
 
     /** 导出 WebGL 场景时统一完成模型、光照、材质分层和半透明细分。 */
-    public synchronized Map<String, Object> exportScene(Path atlasOut, Path meshOut) throws Exception {
+    public Map<String, Object> exportScene(Path atlasOut, Path meshOut) throws Exception {
         return exportScene(atlasOut,meshOut,false);
     }
 
-    public synchronized Map<String, Object> exportScene(Path atlasOut, Path meshOut, boolean force) throws Exception {
+    public Map<String, Object> exportScene(Path atlasOut, Path meshOut, boolean force) throws Exception {
         return exportScene(atlasOut,meshOut,force,false);
     }
 
-    public synchronized Map<String, Object> exportScene(Path atlasOut, Path meshOut, boolean force, boolean realLighting) throws Exception {
+    public Map<String, Object> exportScene(Path atlasOut, Path meshOut, boolean force, boolean realLighting) throws Exception {
         return exportScene(atlasOut,meshOut,force,realLighting,true);
     }
-    public synchronized Map<String,Object> exportScene(Path atlasOut,Path meshOut,boolean force,boolean realLighting,boolean lightingEnabled)throws Exception {
+    public Map<String,Object> exportScene(Path atlasOut,Path meshOut,boolean force,boolean realLighting,boolean lightingEnabled)throws Exception {
         return exportScene(atlasOut,meshOut,force,realLighting,lightingEnabled,stage->{});
     }
-    public synchronized Map<String,Object> exportScene(Path atlasOut,Path meshOut,boolean force,boolean realLighting,boolean lightingEnabled,java.util.function.Consumer<String> progress)throws Exception {
+    public Map<String,Object> exportScene(Path atlasOut,Path meshOut,boolean force,boolean realLighting,boolean lightingEnabled,java.util.function.Consumer<String> progress)throws Exception {
+        cancelPreview();
+        synchronized(this) {
         clearStream();
         progress.accept("resources");
         ensureResources();
@@ -575,6 +599,7 @@ public final class RenderEngine implements AutoCloseable {
         out.put("min", List.of(b[0], b[1], b[2]));
         out.put("max", List.of(b[3], b[4], b[5]));
         return out;
+        }
     }
 
     /** GPU 分块路径保留压缩世界与光照，不保留完整面片对象图。 */
@@ -607,7 +632,7 @@ public final class RenderEngine implements AutoCloseable {
         result.put("sections",index.sections().size());result.put("lodLevels",4);result.put("vertexBytes",20);result.put("maximumSectionQuads",index.maximumSectionQuads());result.put("fullMeshResident",false);result.put("coarseOverview",overview!=null);
         var b=index.bounds();result.put("min",List.of(b[0],b[1],b[2]));result.put("max",List.of(b[3],b[4],b[5]));return result;
     }
-    private void clearStream(){streamBuilder=null;streamIndex=null;streamKey=null;streamSkins=null;if(diskCache!=null)diskCache.protect(null);}
+    private void clearStream(){streamBuilder=null;streamIndex=null;streamKey=null;streamSkins=null;streamPickCache.clear();if(diskCache!=null)diskCache.protect(null);}
     private SceneCache diskCache()throws java.io.IOException {if(diskCache==null){diskCache=new SceneCache(home);rendererFingerprint=CacheFingerprint.tree(home.resolve("bin"));}return diskCache;}
     private io.github.litematicrender.render.skin.SkinResolver preparedSkins() {
         var snapshot=new io.github.litematicrender.render.skin.SkinResolver(home);var heads=new java.util.ArrayList<io.github.litematicrender.nbt.NbtCompound>();
@@ -639,13 +664,14 @@ public final class RenderEngine implements AutoCloseable {
         try {
             Path atlasFile=liveJob==null?work.resolve("atlas.png"):liveJob.directory.resolve("detail-atlas.png"),meshFile=liveJob==null?work.resolve("mesh.lmesh"):liveJob.directory.resolve("detail.lmesh");
             StreamMeshExporter.Progress progress=liveJob==null?null:new StreamMeshExporter.Progress(){
-                public void stage(String stage){liveJob.stage=stage;}
+                public void stage(String stage){liveJob.stage=stage;emitPreviewEvent(liveJob);}
                 public void prepared(List<io.github.litematicrender.render.scene.SectionVisibility.Position> positions,long committed)throws IOException{
                     if(liveJob.cancelled)throw new java.io.InterruptedIOException("预览已取消");atlas.stitched.writePng(atlasFile);liveJob.total=positions.size();liveJob.committedBytes=committed;
-                    var b=overview.bounds();liveJob.live=Map.of("atlas",atlasFile.toString(),"mesh",meshFile.toString(),"meshFormat","LMESH7","committedBytes",committed,"sections",positions.size(),"min",List.of(b[0],b[1],b[2]),"max",List.of(b[3],b[4],b[5]),"skins",snapshot.summary());liveJob.stage="details-building";
+                    var b=overview.bounds();liveJob.live=Map.of("atlas",atlasFile.toString(),"mesh",meshFile.toString(),"meshFormat","LMESH7","committedBytes",committed,"sections",positions.size(),"min",List.of(b[0],b[1],b[2]),"max",List.of(b[3],b[4],b[5]),"skins",snapshot.summary());liveJob.stage="details-building";emitPreviewEvent(liveJob);
                 }
                 public void section(StreamMeshExporter.Entry entry,long committed,int completed)throws IOException{
-                    if(liveJob.cancelled)throw new java.io.InterruptedIOException("预览已取消");synchronized(liveJob){liveJob.entries.add(entry);liveJob.committedBytes=committed;}
+                    if(liveJob.cancelled)throw new java.io.InterruptedIOException("预览已取消");int count;synchronized(liveJob){liveJob.entries.add(entry);liveJob.committedBytes=committed;count=liveJob.entries.size();}
+                    if(count==1||count==liveJob.total||count-liveJob.lastNotifiedPublished>=16)emitPreviewEvent(liveJob);
                 }
                 public long viewRevision(){return liveJob.viewRevision;}
                 public void prioritize(List<io.github.litematicrender.render.scene.SectionVisibility.Position> pending){var view=liveJob.view;if(view!=null)view.sort(pending);}
@@ -674,12 +700,22 @@ public final class RenderEngine implements AutoCloseable {
                     Path mesh=job.directory.resolve("mesh.lmesh"),png=job.directory.resolve("atlas.png");var index=StreamMeshExporter.write(overview,colorAtlas,mesh);colorAtlas.stitched.writePng(png);
                     if(job.cancelled)throw new java.util.concurrent.CancellationException();var b=overview.bounds();var metadata=new LinkedHashMap<String,Object>();
                     metadata.put("atlas",png.toString());metadata.put("mesh",mesh.toString());metadata.put("meshFormat","LMESH7");metadata.put("meshBytes",index.bytes());metadata.put("quads",index.quads());metadata.put("sections",index.sections().size());metadata.put("overview",true);metadata.put("overviewStep",overview.step());metadata.put("exportMillis",System.currentTimeMillis()-started);metadata.put("min",List.of(b[0],b[1],b[2]));metadata.put("max",List.of(b[3],b[4],b[5]));
-                    job.overview=Map.copyOf(metadata);job.stage="full-building";return overview;
+                    job.overview=Map.copyOf(metadata);job.stage="full-building";emitPreviewEvent(job);return overview;
                 },job);
-                if(job.cancelled)throw new java.util.concurrent.CancellationException();job.full=Map.copyOf(result);job.stage="ready";
-            }}catch(Throwable error){if(job.cancelled||Thread.currentThread().isInterrupted()){job.cancelled=true;job.stage="cancelled";}else{job.error=error.getMessage()==null?error.toString():error.getMessage();job.stage="failed";}}
+                if(job.cancelled)throw new java.util.concurrent.CancellationException();job.full=Map.copyOf(result);job.stage="ready";emitPreviewEvent(job);
+            }}catch(Throwable error){if(job.cancelled||Thread.currentThread().isInterrupted()){job.cancelled=true;job.stage="cancelled";}else{job.error=error.getMessage()==null?error.toString():error.getMessage();job.stage="failed";}emitPreviewEvent(job);}
             finally{job.finished=true;if(job.cancelled)discardPreview(job);}
         });job.thread.start();return Map.of("id",job.id);
+    }
+    public void setEventSink(java.util.function.Consumer<Map<String,Object>> sink){this.eventSink=sink==null?evt->{}:sink;}
+    private void emitPreviewEvent(PreviewJob job){
+        int published;long committed;synchronized(job){published=job.entries.size();committed=job.committedBytes;job.lastNotifiedPublished=published;}
+        job.lastNotifiedStage=job.stage;
+        var evt=new LinkedHashMap<String,Object>();
+        evt.put("event","previewStatus");evt.put("id",job.id);evt.put("stage",job.stage);
+        evt.put("hasOverview",job.overview!=null);evt.put("hasFull",job.full!=null);evt.put("hasLive",job.live!=null);
+        evt.put("error",job.error);evt.put("total",job.total);evt.put("published",published);evt.put("committedBytes",committed);
+        this.eventSink.accept(evt);
     }
     private PreviewJob preview(String id){var job=previewJob;if(job==null||!job.id.equals(id)||job.cancelled)throw new IllegalStateException("预览任务已更新");return job;}
     public Map<String,Object> previewStatus(String id){return previewStatus(id,-1,null);}
@@ -716,16 +752,20 @@ public final class RenderEngine implements AutoCloseable {
     }
 
 
-    public synchronized Map<String, Object> renderAnimation(Path outGif, RenderSettings settings,
+    public Map<String, Object> renderAnimation(Path outGif, RenderSettings settings,
                                                             int ticks, int delayCs) throws Exception {
         return renderAnimation(outGif,settings,ticks,delayCs,(stage,completed,total)->{});
     }
 
-    public synchronized Map<String,Object> renderAnimation(Path outGif,RenderSettings settings,int ticks,int delayCs,GifWriter.Progress progress)throws Exception {
+    public Map<String,Object> renderAnimation(Path outGif,RenderSettings settings,int ticks,int delayCs,GifWriter.Progress progress)throws Exception {
+        cancelPreview();
+        synchronized(this) {
         ensureResources();
         if (this.schematic == null) {
             throw new IllegalStateException("no schematic open; call open first");
         }
+        this.cancelled.set(false);
+        settings.cancelSignal = this::isRenderAborted;
         RenderDiagnostics.reset();
         try {
         long t0 = System.currentTimeMillis();
@@ -752,6 +792,7 @@ public final class RenderEngine implements AutoCloseable {
             s.selectionMin=settings.selectionMin;s.selectionMax=settings.selectionMax;
             s.selectionMesh=settings.selectionMesh;
             s.animationTick = settings.animationTick + (int)(i * (long)delayCs / 5);
+            s.cancelSignal = this::isRenderAborted;
             camera.rotationDeg=s.rotationDeg;
             camera.update();
             Image frame=SchematicRenderer.renderWithCamera(mesh,this.atlas,s,camera);
@@ -775,7 +816,12 @@ public final class RenderEngine implements AutoCloseable {
         Map<String, Long> diag = RenderDiagnostics.snapshot();
         if (!diag.isEmpty()) out.put("unresolved", diag);
         return out;
-        }finally{if(streamIndex!=null){scene=null;sceneKey=null;pickedScene=null;picker=null;}}
+        }finally{settings.cancelSignal=null;if(streamIndex!=null){scene=null;sceneKey=null;pickedScene=null;picker=null;}}
+        }
+    }
+
+    private boolean isRenderAborted() {
+        return this.cancelled.get() || Thread.currentThread().isInterrupted();
     }
 
     public void cancel() {

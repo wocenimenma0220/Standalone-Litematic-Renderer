@@ -78,12 +78,21 @@ public final class SchematicRenderer {
         s.selectionMin=settings.selectionMin;s.selectionMax=settings.selectionMax;
         s.selectionMesh=settings.selectionMesh;
         s.animationTick = settings.animationTick;
+        s.cancelSignal = settings.cancelSignal;
         return s;
+    }
+
+    private static void checkCancelled(RenderSettings settings) {
+        if ((settings.cancelSignal != null && settings.cancelSignal.getAsBoolean())
+                || Thread.currentThread().isInterrupted()) {
+            throw new java.util.concurrent.CancellationException("渲染已取消");
+        }
     }
 
     /** 使用已适配的相机渲染，不改变中心、缩放或偏移。 */
     public static Image renderWithCamera(SceneMesh mesh, SpriteAtlas atlas,
                                          RenderSettings settings, Camera cam) {
+        checkCancelled(settings);
         // 动态纹理只更新图集像素，网格和 UV 保持不变。
 
         atlas.rebakeAtTick(settings.animationTick);
@@ -96,23 +105,37 @@ public final class SchematicRenderer {
         // 先绘制写入深度的不透明和裁剪层，正确遮挡后方半透明几何。
 
         SceneMesh foreground=settings.selectionMesh!=null?settings.selectionMesh:mesh;
-        for (SceneMesh.MeshQuad q : foreground.solid) draw(raster, q, settings, false);
-        for (SceneMesh.MeshQuad q : foreground.cutout) draw(raster, q, settings, false);
+        int n = 0;
+        for (SceneMesh.MeshQuad q : foreground.solid) {
+            if ((++n & 1023) == 0) checkCancelled(settings);
+            draw(raster, q, settings, false);
+        }
+        checkCancelled(settings);
+        for (SceneMesh.MeshQuad q : foreground.cutout) {
+            if ((++n & 1023) == 0) checkCancelled(settings);
+            draw(raster, q, settings, false);
+        }
         raster.writeColor=false;
         for(SceneMesh.MeshQuad q:foreground.waterMask)draw(raster,q,settings,false);
         raster.writeColor=true;
+        checkCancelled(settings);
 
         // 玻璃、水和传送门统一按深度排序，避免固定材质顺序造成穿插。
         if(foreground.translucentBsp!=null) {
             double[] origin=new double[3],point=new double[3],towardEye=new double[3];cam.toView(0,0,0,origin);
             for(int axis=0;axis<3;axis++){cam.toView(axis==0?1:0,axis==1?1:0,axis==2?1:0,point);towardEye[axis]=point[2]-origin[2];}
-            foreground.translucentBsp.visit(towardEye,true,q->draw(raster,q,settings,true));
+            int[] visited = {0};
+            foreground.translucentBsp.visit(towardEye,true,q->{
+                if ((++visited[0] & 1023) == 0) checkCancelled(settings);
+                draw(raster,q,settings,true);
+            });
         } else {
             List<SceneMesh.MeshQuad> blended = new ArrayList<>(foreground.portalSorted);
             blended.addAll(foreground.fluidSorted);blended.addAll(foreground.translucentSorted);drawSorted(raster,blended,cam,settings);
         }
 
         if(settings.selectionMin!=null){
+            checkCancelled(settings);
             raster.selectionPass=2;
             var ghosts=new ArrayList<SceneMesh.MeshQuad>(mesh.solid);ghosts.addAll(mesh.cutout);
             if(mesh.translucentBsp!=null)ghosts.addAll(mesh.translucentBsp.faces);
@@ -128,7 +151,11 @@ public final class SchematicRenderer {
         if (quads.isEmpty()) return;
         List<SceneMesh.MeshQuad> sorted = new ArrayList<>(quads);
         sorted.sort(Comparator.comparingDouble(q -> cam.viewDepth(q.cx, q.cy, q.cz)));
-        for (SceneMesh.MeshQuad q : sorted) draw(raster, q, settings, true);
+        int n = 0;
+        for (SceneMesh.MeshQuad q : sorted) {
+            if ((++n & 1023) == 0) checkCancelled(settings);
+            draw(raster, q, settings, true);
+        }
     }
 
     private static void draw(Rasterizer r, SceneMesh.MeshQuad q, RenderSettings s, boolean translucent) {

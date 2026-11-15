@@ -1,4 +1,4 @@
-# 从用户指定的本地 Java 客户端准备资源；不需要复制旧版便携包。
+﻿# 从用户指定的本地 Java 客户端准备资源；不需要复制旧版便携包。
 param([Parameter(Mandatory=$true)][string]$ClientJar)
 $ErrorActionPreference='Stop'
 $resourceRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../assets'))

@@ -27,6 +27,9 @@ public final class RenderSettings {
     /** 拖动时限制图像长边，0 表示原尺寸；停止拖动后恢复完整分辨率。 */
     public int interactiveMaxEdge = 0;
 
+    /** 可选取消信号；后台关闭或用户取消时用于提前终止 CPU 光栅化。 */
+    public transient java.util.function.BooleanSupplier cancelSignal;
+
     public RenderSettings() {}
 
     public RenderSettings(float rotationDeg, float slantDeg, int width, int height) {

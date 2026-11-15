@@ -16,8 +16,9 @@ public final class PackedLongArray {
     private static final int PAGE_BYTES = PAGE_WORDS * Long.BYTES;
     // 缓存键只引用页数据，不持有整个投影，避免旧投影无法回收。
     private static final class DecodedPages extends LinkedHashMap<Page,long[]> {
-        Page lastPage;
-        long[] lastWords;
+        private static final long serialVersionUID = 1L;
+        transient Page lastPage;
+        transient long[] lastWords;
         DecodedPages(){super(64,.75f,true);}
         @Override protected boolean removeEldestEntry(java.util.Map.Entry<Page,long[]> entry){return size()>64;}
         long[] remember(Page page,long[] words){lastPage=page;lastWords=words;return words;}

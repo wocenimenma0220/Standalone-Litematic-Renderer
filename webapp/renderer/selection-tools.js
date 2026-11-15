@@ -126,14 +126,14 @@ async function prepareSelectionMesh(){
   try{
     const result=await window.engine.exportSelectionScene({selection:job.bounds,realLighting:job.realLighting,lightingEnabled:job.lightingEnabled});
     if(!current())return;
-    bitmap=await createImageBitmap(base64ToBlob(result.atlasDataUrl),{premultiplyAlpha:'none',colorSpaceConversion:'none'});if(!current())return;
-    selected=new GpuView(els.gl);
+    bitmap=await createImageBitmap(atlasBlobFromPayload(result),{premultiplyAlpha:'none',colorSpaceConversion:'none'});if(!current())return;
+    selected=new GpuView(els.gl,job.view);
     if(result.meshTransfer)await selected.uploadMeshStream((offset,length)=>{
       if(!current())throw Error('选区已更新');return window.engine.readSelectionChunk(result.meshTransfer.id,offset,length);
     },result.meshTransfer.size,undefined,current);
     else selected.uploadMesh(result.meshArrayBuffer);
     selected.uploadAtlas(bitmap);if(!current())return;
-    job.view.disposeSelection();job.view.selectionView=selected;job.view.selectionBoundsKey=JSON.stringify(job.bounds);selected=null;job.view.revision++;
+    job.view.disposeSelection();job.view.selectionView=selected;job.view.selectionBounds=job.bounds;job.view.selectionBoundsKey=JSON.stringify(job.bounds);selected=null;job.view.revision++;
     $('selectionMeshInfo').textContent=`选区独立网格：${result.quads.toLocaleString()} 面，六面与光照已独立计算。`;
     lastViewKey=null;drawView();
   }catch(error){if(current()){$('selectionMeshInfo').textContent='选区网格生成失败：'+error.message;log('选区渲染失败：'+error.message,'err');selectionMeshWanted=null;}}

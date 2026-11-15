@@ -6,7 +6,21 @@
   const NC=['west','east','down','up','north','south'], PP=['west','east','north','south','down','up'];
   const OPP={west:'east',east:'west',down:'up',up:'down',north:'south',south:'north'};
   const PHASES=['WTU','TT','CT','BE','EU','TE','AT'];
-  const clone=value=>JSON.parse(JSON.stringify(value)), key=p=>p.join(','), same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  function clone(value){
+    if(value===null||typeof value!=='object')return value;
+    if(Array.isArray(value)){const out=new Array(value.length);for(let i=0;i<value.length;i++){const v=value[i];out[i]=v===undefined?null:clone(v);}return out;}
+    const out={};for(const k of Object.keys(value)){const v=value[k];if(v!==undefined)out[k]=clone(v);}return out;
+  }
+  function same(a,b){
+    if(a===b)return true;
+    if(a===null||b===null||typeof a!=='object'||typeof b!=='object')return false;
+    if(Array.isArray(a)){if(!Array.isArray(b)||a.length!==b.length)return false;for(let i=0;i<a.length;i++)if(!same(a[i],b[i]))return false;return true;}
+    if(Array.isArray(b))return false;
+    const ka=Object.keys(a),kb=Object.keys(b);if(ka.length!==kb.length)return false;
+    for(let i=0;i<ka.length;i++){const k=ka[i];if(!Object.hasOwn(b,k)||!same(a[k],b[k]))return false;}
+    return true;
+  }
+  const key=p=>p.join(',');
   const sameCell=(a,b)=>!a&&!b||!!a&&!!b&&a.id===b.id&&Object.keys(a.states).length===Object.keys(b.states).length&&Object.entries(a.states).every(([k,v])=>b.states[k]===v);
   const offset=(p,d)=>p.map((v,i)=>v+DIR[d][i]);
   const bulb=id=>id?.endsWith('copper_bulb');
@@ -131,5 +145,5 @@
   }
   const to3=(x,y,view)=>view==='top'?[x,0,y]:[x,-y,0];
   const to2=(p,view)=>view==='top'?(p[1]===0?[p[0],p[2]]:null):(p[2]===0?[p[0],-p[1]]:null);
-  const api={TimingWorld,NC,PP,PHASES,DIR,OPP,SUPPORTED,to3,to2,diode};if(typeof module!=='undefined')module.exports=api;else root.BoardTiming=api;
+  const api={TimingWorld,NC,PP,PHASES,DIR,OPP,SUPPORTED,to3,to2,diode,clone};if(typeof module!=='undefined')module.exports=api;else root.BoardTiming=api;
 })(typeof window!=='undefined'?window:globalThis);

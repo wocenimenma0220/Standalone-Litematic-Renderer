@@ -2,10 +2,29 @@
 const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:os'),{randomUUID}=require('node:crypto');
 const {EngineClient}=require('./engine-client');
 
+async function moveFile(source,target){
+  try{
+    await fs.rename(source,target);
+  }catch(error){
+    if(error?.code!=='EXDEV')throw error;
+    const staging=path.join(path.dirname(target),`.tmp-export-${randomUUID()}`);
+    try{await fs.copyFile(source,staging);await fs.rename(staging,target);await fs.unlink(source).catch(()=>{});}
+    catch(copyErr){await fs.unlink(staging).catch(()=>{});throw copyErr;}
+  }
+}
+
 /** 后台导出每次只运行一个独立引擎，预览继续使用自己的引擎和投影。 */
 class BackgroundExports {
   constructor({home,runtime,onUpdate=()=>{},Client=EngineClient}){
     this.home=home;this.runtime=runtime;this.onUpdate=onUpdate;this.Client=Client;this.jobs=[];this.running=null;this.closed=false;
+    this.reuseWorker=Client===EngineClient;this.warmWorker=null;this.warmTimer=null;this.activeJob=null;this.workerEpoch=0;
+  }
+  clearWarmTimer(){if(this.warmTimer){clearTimeout(this.warmTimer);this.warmTimer=null;}}
+  async resetWorker(){
+    this.workerEpoch++;
+    this.clearWarmTimer();
+    const worker=this.warmWorker;this.warmWorker=null;
+    if(worker)await worker.stop().catch(()=>{});
   }
   status(job){return {id:job.id,kind:job.kind,name:path.basename(job.out),path:job.out,state:job.state,stage:job.stage,completed:job.completed||0,total:job.total||0,error:job.error,result:job.result};}
   list(){return this.jobs.map(job=>this.status(job));}
@@ -14,7 +33,9 @@ class BackgroundExports {
     if(this.closed)throw Error('应用正在退出');
     if(!['png','gif'].includes(kind)||!source||!params?.out||!path.isAbsolute(params.out))throw Error('导出参数无效');
     if(this.jobs.some(job=>!['completed','failed','cancelled'].includes(job.state)&&path.resolve(job.out).toLowerCase()===path.resolve(params.out).toLowerCase()))throw Error('这个文件已有导出任务，请选择其他文件名');
-    const out=path.resolve(params.out),directory=await fs.mkdtemp(path.join(path.dirname(out),'.projection-export-'));
+    const out=path.resolve(params.out),stagingRoot=path.join(this.home,'cache','exports');
+    await fs.mkdir(stagingRoot,{recursive:true});
+    const directory=await fs.mkdtemp(path.join(stagingRoot,'export-'));
     try{
       const input=path.join(directory,'source.litematic');await fs.copyFile(source,input);
       params=structuredClone(params);resources=structuredClone(resources);
@@ -35,24 +56,45 @@ class BackgroundExports {
   }
   async run(job){
     const alive=()=>{if(job.cancelled||this.closed)throw Error('导出已取消');};
+    this.clearWarmTimer();
     job.state='running';job.stage='resources';this.publish(job);
-    const worker=job.worker=new this.Client({...this.runtime,home:this.home,onEvent:event=>{
-      if(event.event==='exportProgress'&&!job.cancelled){job.stage=event.stage;job.completed=event.completed;job.total=event.total;this.publish(job);}
-    }});
+    this.activeJob=job;
+    const epoch=this.workerEpoch;
+    let worker=this.reuseWorker&&this.warmWorker?.isRunning()?this.warmWorker:null;
+    this.warmWorker=null;
+    const fresh=!worker;
+    if(fresh){
+      worker=new this.Client({...this.runtime,home:this.home,onEvent:event=>{
+        const current=this.activeJob;
+        if(event.event==='exportProgress'&&current&&!current.cancelled){current.stage=event.stage;current.completed=event.completed;current.total=event.total;this.publish(current);}
+      }});
+    }
+    job.worker=worker;
+    let healthy=false;
     try{
-      await worker.start();alive();
-      try{os.setPriority(worker.proc.pid,os.constants.priority.PRIORITY_BELOW_NORMAL);}catch{ }
+      if(fresh){
+        await worker.start();alive();
+        try{os.setPriority(worker.proc.pid,os.constants.priority.PRIORITY_BELOW_NORMAL);}catch{ }
+      }
       await worker.call('loadResources',job.resources);alive();
       job.stage='opening';this.publish(job);await worker.call('open',{path:job.input});alive();
       job.stage='building';this.publish(job);
       const output=path.join(job.directory,'result.'+job.kind);
       const result=await worker.call(job.kind==='gif'?'renderAnimation':'render',{...job.params,out:output});alive();
       job.stage='saving';this.publish(job);
-      await fs.rename(output,job.out);
+      await moveFile(output,job.out);
       job.result={...result,path:job.out};job.state='completed';job.stage='completed';
+      healthy=true;
     }catch(error){job.state=job.cancelled||this.closed?'cancelled':'failed';job.stage=job.state;if(job.state==='failed')job.error=error.message;}
     finally{
-      await worker.stop();job.worker=null;
+      this.activeJob=null;job.worker=null;
+      const keepWarm=this.reuseWorker&&healthy&&!this.closed&&!job.cancelled&&epoch===this.workerEpoch&&!this.warmWorker;
+      if(!keepWarm){
+        await (this.reuseWorker&&typeof worker.forceStop==='function'?(job.cancelled?worker.forceStop():worker.stop()):worker.stop()).catch(()=>{});
+      }else{
+        this.warmWorker=worker;
+        this.warmTimer=setTimeout(()=>this.resetWorker(),60000);this.warmTimer.unref?.();
+      }
       try{await fs.rm(job.directory,{recursive:true,force:true});}catch{/** 临时目录被占用不能把已成功的导出改为失败。 */}
       this.publish(job);
     }
@@ -64,13 +106,14 @@ class BackgroundExports {
     job.cancelled=true;
     if(job.state==='queued'){
       job.state=job.stage='cancelled';await fs.rm(job.directory,{recursive:true,force:true});
-    }else {job.state=job.stage='cancelling';if(job.worker)await job.worker.stop();}
+    }else {job.state=job.stage='cancelling';if(job.worker){if(this.reuseWorker&&typeof job.worker.forceStop==='function')await job.worker.forceStop();else await job.worker.stop();}}
     this.publish(job);return this.status(job);
   }
   async close(){
     this.closed=true;
     await Promise.all(this.jobs.filter(j=>!['completed','failed','cancelled'].includes(j.state)).map(j=>this.cancel(j.id)));
     if(this.running)await this.running;
+    await this.resetWorker();
   }
 }
 module.exports={BackgroundExports};
