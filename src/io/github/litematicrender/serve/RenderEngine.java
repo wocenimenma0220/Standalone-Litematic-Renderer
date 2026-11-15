@@ -449,6 +449,11 @@ public final class RenderEngine implements AutoCloseable {
 
     public Map<String, Object> render(Path outPng, RenderSettings settings, boolean reportDiagnostics)
             throws Exception {
+        return render(outPng, settings, reportDiagnostics, (stage, completed, total) -> {});
+    }
+
+    public Map<String, Object> render(Path outPng, RenderSettings settings, boolean reportDiagnostics,
+                                      GifWriter.Progress progress) throws Exception {
         cancelPreview();
         synchronized(this) {
         ensureResources();
@@ -460,25 +465,30 @@ public final class RenderEngine implements AutoCloseable {
         RenderDiagnostics.reset();
         try {
         long t0 = System.currentTimeMillis();
+        if (progress != null) progress.update("building", 0, 1);
         SceneMesh mesh = sceneMesh(settings.realLighting,settings.lightingEnabled);
         settings.selectionMesh=selectionScene(settings);
 
         RenderSettings effective = settings.interactiveMaxEdge > 0
             ? SchematicRenderer.interactiveScale(settings, settings.interactiveMaxEdge)
             : settings;
-        Image image = SchematicRenderer.render(this.schematic, mesh, this.colormaps,
-            this.atlas, effective);
-        long t1 = System.currentTimeMillis();
-        image.writePng(outPng);
+        long[] timings = {0, 0};
+        GifWriter.Progress timedProgress = (stage, completed, total) -> {
+            if ("encoding".equals(stage) && timings[0] == 0) timings[0] = System.currentTimeMillis();
+            if (progress != null) progress.update(stage, completed, total);
+        };
+        int[] outSize = SchematicRenderer.renderToPng(mesh, this.atlas, effective, outPng, timedProgress);
         long t2 = System.currentTimeMillis();
+        long encStart = timings[0] != 0 ? timings[0] : t2;
 
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("path", outPng.toAbsolutePath().toString());
-        out.put("width", image.width);
-        out.put("height", image.height);
-        out.put("renderMillis", t1 - t0);
+        out.put("width", outSize[0]);
+        out.put("height", outSize[1]);
+        out.put("lossless", effective.lossless);
+        out.put("renderMillis", encStart - t0);
         out.put("sceneCached", this.sceneFromMesh);
-        out.put("encodeMillis", t2 - t1);
+        out.put("encodeMillis", Math.max(0, t2 - encStart));
         if (reportDiagnostics) {
             Map<String, Long> diag = RenderDiagnostics.snapshot();
             if (!diag.isEmpty()) out.put("unresolved", diag);
@@ -658,7 +668,7 @@ public final class RenderEngine implements AutoCloseable {
                 metadata.put("skins",snapshot.summary());metadata.put("sceneBuildMillis",0);metadata.put("meshBuildCount",0);metadata.put("exportMillis",System.currentTimeMillis()-begin);metadata.put("cacheValidationMillis",System.currentTimeMillis()-begin);metadata.put("cacheStored",true);return metadata;
             }catch(Exception damaged){cache.discard(entry.directory());entry=null;}
         }
-        var overview=beforeBuild!=null?beforeBuild.run():new io.github.litematicrender.render.scene.OverviewMesh(schematic,baker,atlas);
+        var overview=beforeBuild!=null?beforeBuild.run():new io.github.litematicrender.render.scene.OverviewMesh(schematic,baker,colormaps,atlas);
         if(Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
         Path work=cache.begin();boolean success=false;
         try {
@@ -696,7 +706,7 @@ public final class RenderEngine implements AutoCloseable {
                 var result=exportCachedStreamScene(force,realLighting,lightingEnabled,()->{
                     if(job.cancelled)throw new java.util.concurrent.CancellationException();job.stage="overview-building";long started=System.currentTimeMillis();
                     Path root=home.resolve("cache/previews");Files.createDirectories(root);if(!root.toRealPath().startsWith(home.toRealPath()))throw new IOException("临时总览路径不在软件目录内");prunePreviews(root);job.directory=Files.createTempDirectory(root,"preview-"+ProcessHandle.current().pid()+"-");
-                    var overview=new io.github.litematicrender.render.scene.OverviewMesh(schematic,baker,atlas);var colorAtlas=SpriteAtlas.overview();
+                    var overview=new io.github.litematicrender.render.scene.OverviewMesh(schematic,baker,colormaps,atlas);var colorAtlas=SpriteAtlas.overview();
                     Path mesh=job.directory.resolve("mesh.lmesh"),png=job.directory.resolve("atlas.png");var index=StreamMeshExporter.write(overview,colorAtlas,mesh);colorAtlas.stitched.writePng(png);
                     if(job.cancelled)throw new java.util.concurrent.CancellationException();var b=overview.bounds();var metadata=new LinkedHashMap<String,Object>();
                     metadata.put("atlas",png.toString());metadata.put("mesh",mesh.toString());metadata.put("meshFormat","LMESH7");metadata.put("meshBytes",index.bytes());metadata.put("quads",index.quads());metadata.put("sections",index.sections().size());metadata.put("overview",true);metadata.put("overviewStep",overview.step());metadata.put("exportMillis",System.currentTimeMillis()-started);metadata.put("min",List.of(b[0],b[1],b[2]));metadata.put("max",List.of(b[3],b[4],b[5]));
@@ -763,6 +773,10 @@ public final class RenderEngine implements AutoCloseable {
         ensureResources();
         if (this.schematic == null) {
             throw new IllegalStateException("no schematic open; call open first");
+        }
+        if (settings.lossless || settings.width < 1 || settings.height < 1
+                || settings.width > RenderSettings.MAX_GIF_EDGE || settings.height > RenderSettings.MAX_GIF_EDGE) {
+            throw new IllegalArgumentException("GIF 动画最大支持 " + RenderSettings.MAX_GIF_EDGE + " × " + RenderSettings.MAX_GIF_EDGE);
         }
         this.cancelled.set(false);
         settings.cancelSignal = this::isRenderAborted;

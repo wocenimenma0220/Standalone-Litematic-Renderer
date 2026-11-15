@@ -358,6 +358,9 @@ public final class ModelBaker {
         Resolved resolved = this.resolveChain(modelId);
         BakedModel out = new BakedModel();
         if (resolved == null || resolved.elements == null) {
+            if ("minecraft:block/missingno".equals(modelId)) {
+                return bakeMissingCube();
+            }
             out.particleSprite = "minecraft:missingno";
             return out;
         }
@@ -367,6 +370,19 @@ public final class ModelBaker {
         Transform t = Transform.of(xRot, yRot, zRot);
         for (ModelDefinition.Element el : resolved.elements) {
             this.bakeElement(out, modelId, resolved.textures, resolved.forceTranslucentSlots, el, t, uvlock);
+        }
+        return out;
+    }
+
+    /** 当缺少 missingno 块模型 JSON 时直接生成可视的粉黑棋盘格方块，避免未知版本方块隐形。 */
+    private BakedModel bakeMissingCube() {
+        BakedModel out = new BakedModel();
+        out.useAmbientOcclusion = false;
+        out.particleSprite = "minecraft:missingno";
+        float[] from = {0f, 0f, 0f}, to = {16f, 16f, 16f}, uv = {0f, 0f, 16f, 16f};
+        Transform identity = Transform.of(0, 0, 0);
+        for (int dir = 0; dir < 6; dir++) {
+            out.addCulled(dir, bakeQuad(from, to, uv, dir, "minecraft:missingno", -1, null, identity, false, 0, false));
         }
         return out;
     }

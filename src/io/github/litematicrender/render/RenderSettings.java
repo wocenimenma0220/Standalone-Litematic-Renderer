@@ -5,10 +5,13 @@ public final class RenderSettings {
     public static final int DEFAULT_ANIMATION_FRAMES = 480;
     public static final int DEFAULT_ANIMATION_DELAY_CS = 2;
     public static final int MAX_ANIMATION_FRAMES = 3600;
+    public static final int MAX_GIF_EDGE = 4096;
+    public static final int MAX_EXPORT_EDGE = 81920;
     public float rotationDeg = 45f;
     public float slantDeg = 30f;
     public int width = 1024;
     public int height = 1024;
+    public boolean lossless = false;
     public boolean transparentBackground = true;
     public int backgroundColor = 0x00000000;
     public String backgroundMode = "color";

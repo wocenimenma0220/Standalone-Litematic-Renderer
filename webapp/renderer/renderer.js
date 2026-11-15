@@ -1502,12 +1502,19 @@ els.skinImport.addEventListener('click', async () => {
 
 async function exportPng() {
   if (!state.file || state.rendering || state.scenePreparing) return;
-  const size = Number(els.size.value);
-  const suggested = ((state.info && state.info.name) || 'render') + `_${size}.png`;
+  const rawSize = els.size.value;
+  const lossless = rawSize === 'lossless';
+  const size = lossless ? 1024 : (Number(rawSize) || 1024);
+  const suggested = ((state.info && state.info.name) || 'render') + `_${lossless ? 'lossless' : size}.png`;
   const out = await window.shellApi.savePng(suggested);
   if (!out) return;
   try {
-    await startBackgroundExport('png',{...renderParams(size,size),out,diagnostics:true});
+    await startBackgroundExport('png', {
+      ...renderParams(size, size),
+      ...(lossless ? { lossless: true } : {}),
+      out,
+      diagnostics: true,
+    });
   } catch (err) {
     log('导出失败：' + err.message, 'err');
   }
@@ -1515,12 +1522,17 @@ async function exportPng() {
 
 async function exportGif() {
   if (!state.file || state.rendering || state.scenePreparing) return;
+  const rawSize = els.size.value;
+  const requested = rawSize === 'lossless' ? 4096 : (Number(rawSize) || 1024);
+  const size = Math.min(4096, Math.max(64, requested));
+  if (rawSize === 'lossless' || requested > 4096) {
+    log('GIF 动画最高支持 4096 × 4096，当前已自动按 4096 × 4096 导出。');
+  }
   const suggested = ((state.info && state.info.name) || 'animation') + '.gif';
   const out = await window.shellApi.saveGif(suggested);
   if (!out) return;
-  const size = Number(els.size.value);
   try {
-    await startBackgroundExport('gif',{
+    await startBackgroundExport('gif', {
       ...renderParams(size, size),
       out,
       frames: 480,

@@ -9,21 +9,77 @@ public final class Rasterizer {
     public final float[] depth;
     public final Camera camera;
     private final SpriteAtlas atlas;
+    public final int fullWidth, fullHeight, tileWidth;
+    public int tileX0, tileY0, tileHeight;
     public boolean writeColor=true;
     public double[] selectionMin,selectionMax;
     public int selectionPass;
 
     public Rasterizer(int width, int height, Camera camera, SpriteAtlas atlas) {
-        this.color = new Image(width, height);
-        this.depth = new float[width * height];
+        this(width, height, 0, 0, width, height, camera, atlas);
+    }
+
+    public Rasterizer(int fullWidth, int fullHeight, int tileX0, int tileY0,
+                      int tileWidth, int tileHeight, Camera camera, SpriteAtlas atlas) {
+        this.fullWidth = fullWidth;
+        this.fullHeight = fullHeight;
+        this.tileX0 = tileX0;
+        this.tileY0 = tileY0;
+        this.tileWidth = tileWidth;
+        this.tileHeight = tileHeight;
+        this.color = new Image(tileWidth, tileHeight);
+        this.depth = new float[tileWidth * tileHeight];
         java.util.Arrays.fill(this.depth, Float.NEGATIVE_INFINITY);
         this.camera = camera;
         this.atlas = atlas;
     }
 
+    public void reposition(int tileX0, int tileY0, int activeHeight) {
+        this.tileX0 = tileX0;
+        this.tileY0 = tileY0;
+        this.tileHeight = Math.max(0, Math.min(this.color.height, activeHeight));
+    }
+
     public void clear(int argb) {
-        java.util.Arrays.fill(this.color.pixels(), argb);
-        java.util.Arrays.fill(this.depth, Float.NEGATIVE_INFINITY);
+        int count = this.tileWidth * this.tileHeight;
+        java.util.Arrays.fill(this.color.pixels(), 0, count, argb);
+        java.util.Arrays.fill(this.depth, 0, count, Float.NEGATIVE_INFINITY);
+    }
+
+    /** 预投影并裁剪四边面到流式水平条带区间；不可见或背面剔除时返回 false。 */
+    public boolean projectBandRange(io.github.litematicrender.render.scene.SceneMesh.MeshQuad q,
+                                    int bandHeight, int bandCount, int[] outBandRange) {
+        Camera cam = this.camera;
+        cam.toView(q.x0, q.y0, q.z0, V0);
+        cam.toView(q.x1, q.y1, q.z1, V1);
+        cam.toView(q.x2, q.y2, q.z2, V2);
+        cam.toView(q.x3, q.y3, q.z3, V3);
+
+        double cx = this.fullWidth / 2.0 + cam.offsetX, cy = this.fullHeight / 2.0 + cam.offsetY;
+        double z = cam.zoom;
+        double sx0 = cx + V0[0] * z, sy0 = cy - V0[1] * z;
+        double sx1 = cx + V1[0] * z, sy1 = cy - V1[1] * z;
+        double sx2 = cx + V2[0] * z, sy2 = cy - V2[1] * z;
+        double sx3 = cx + V3[0] * z, sy3 = cy - V3[1] * z;
+
+        double minX = Math.min(Math.min(sx0, sx1), Math.min(sx2, sx3));
+        double maxX = Math.max(Math.max(sx0, sx1), Math.max(sx2, sx3));
+        double minY = Math.min(Math.min(sy0, sy1), Math.min(sy2, sy3));
+        double maxY = Math.max(Math.max(sy0, sy1), Math.max(sy2, sy3));
+        int x0 = Math.max(0, (int) Math.floor(minX));
+        int x1 = Math.min(this.fullWidth - 1, (int) Math.ceil(maxX));
+        int y0 = Math.max(0, (int) Math.floor(minY));
+        int y1 = Math.min(this.fullHeight - 1, (int) Math.ceil(maxY));
+        if (x1 < x0 || y1 < y0) return false;
+
+        double d1 = (sy1 - sy2) * (sx0 - sx2) + (sx2 - sx1) * (sy0 - sy2);
+        double d2 = (sy2 - sy3) * (sx0 - sx3) + (sx3 - sx2) * (sy0 - sy3);
+        if (Math.abs(d1) < 1e-9 && Math.abs(d2) < 1e-9) return false;
+        if (!q.doubleSided && ((sx1 - sx0) * (sy2 - sy0) - (sy1 - sy0) * (sx2 - sx0)) >= 0) return false;
+
+        outBandRange[0] = Math.max(0, Math.min(bandCount - 1, y0 / bandHeight));
+        outBandRange[1] = Math.max(outBandRange[0], Math.min(bandCount - 1, y1 / bandHeight));
+        return true;
     }
 
     private final double[] V0 = new double[3];
@@ -83,7 +139,7 @@ public final class Rasterizer {
         cam.toView(wx2, wy2, wz2, V2);
         cam.toView(wx3, wy3, wz3, V3);
 
-        int w = this.color.width, h = this.color.height;
+        int w = this.fullWidth, h = this.fullHeight;
         double cx = w / 2.0 + cam.offsetX, cy = h / 2.0 + cam.offsetY;
         double z = cam.zoom;
 
@@ -102,10 +158,10 @@ public final class Rasterizer {
         double maxX = Math.max(Math.max(sx0, sx1), Math.max(sx2, sx3));
         double minY = Math.min(Math.min(sy0, sy1), Math.min(sy2, sy3));
         double maxY = Math.max(Math.max(sy0, sy1), Math.max(sy2, sy3));
-        int x0 = Math.max(0, (int) Math.floor(minX));
-        int x1 = Math.min(w - 1, (int) Math.ceil(maxX));
-        int y0 = Math.max(0, (int) Math.floor(minY));
-        int y1 = Math.min(h - 1, (int) Math.ceil(maxY));
+        int x0 = Math.max(this.tileX0, (int) Math.floor(minX));
+        int x1 = Math.min(this.tileX0 + this.tileWidth - 1, (int) Math.ceil(maxX));
+        int y0 = Math.max(this.tileY0, (int) Math.floor(minY));
+        int y1 = Math.min(this.tileY0 + this.tileHeight - 1, (int) Math.ceil(maxY));
         if (x1 < x0 || y1 < y0) return;
 
         double d1 = (sy1 - sy2) * (sx0 - sx2) + (sx2 - sx1) * (sy0 - sy2);
@@ -215,7 +271,7 @@ public final class Rasterizer {
                     argb = Image.argb(255, tr, tg, tb);
                 }
 
-                int idx = y * w + x;
+                int idx = (y - this.tileY0) * this.tileWidth + (x - this.tileX0);
                 if(selectionPass==2)argb=(Math.round((argb>>>24)*.1f)<<24)|(argb&0xffffff);
                 int srcA = argb >>> 24;
                 if (!translucent) {

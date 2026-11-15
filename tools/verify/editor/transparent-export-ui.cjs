@@ -22,10 +22,14 @@ const {EngineClient}=require(path.join(root,'webapp/engine-client')),original=En
 let engine;const animations=[];EngineClient.prototype.call=function(method,params){if(!engine)engine=this;return original.call(this,method,params).then(result=>{if(method==='renderAnimation')animations.push({params,result});return result;});};
 app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish-load',async()=>{
  const run=code=>win.webContents.executeJavaScript('(async()=>{'+code+'})()');
- const exportAndWait=action=>run(`await ${action}();if(state.rendering||!els.busy.classList.contains('hidden'))throw Error('Export blocked the preview');const id=[...exportJobs.keys()].at(-1),end=Date.now()+120000;while(!['completed','failed','cancelled'].includes(exportJobs.get(id)?.state)){if(Date.now()>end)throw Error('Background export timeout');await new Promise(r=>setTimeout(r,25));}if(exportJobs.get(id).state!=='completed')throw Error('Background export failed: '+exportJobs.get(id).error);`);
+ const exportAndWait=action=>run(`await ${action}();if(state.rendering||!els.busy.classList.contains('hidden'))throw Error('Export blocked the preview');const id=[...exportJobs.keys()].at(-1),end=Date.now()+120000;while(!['completed','failed','cancelled'].includes(exportJobs.get(id)?.state)){if(Date.now()>end)throw Error('Background export timeout');await new Promise(r=>setTimeout(r,25));}if(exportJobs.get(id).state!=='completed')throw Error('Background export failed: '+exportJobs.get(id).error);return exportJobs.get(id);`);
  try{
+  const sizeOptions=await run(`return Array.from(els.size.options).map(o=>o.value);`);
+  if(!['8192','16384','32768','40960','65536','81920'].every(v=>sizeOptions.includes(v))||sizeOptions.at(-1)!=='lossless')throw Error('Export size options missing 8192..81920 or bottom lossless: '+JSON.stringify(sizeOptions));
+  const schematicFile=process.env.LITEMATIC_TEST_SCHEMATIC||[path.join(repo,'tools/verify/fly-output/inspection.litematic'),path.join(repo,'tools/verify/verification-output/pipeline-home/pipeline.litematic'),path.join(repo,'docs/examples/功能演示.litematic')].find(p=>fs.existsSync(p));
+  if(!schematicFile)throw Error('No test schematic found');
   const first=await run(`await window.__uiReady;await window.engine.loadResources(null);
-   await loadFile(${JSON.stringify(path.join(repo,'tools/verify/fly-output/inspection.litematic'))});
+   await loadFile(${JSON.stringify(schematicFile)});
    if(!state.viewReady)throw Error('GPU preview unavailable');
    els.size.add(new Option('192 × 192','192'));els.size.value='192';
    if(!els.transparent.checked||!els.transparent.disabled||!els.viewport.classList.contains('checker'))throw Error('Default grid is not transparently exported');
@@ -34,7 +38,10 @@ app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish
   saves.push(path.join(out,'grid-export.gif'));await exportAndWait('exportGif');
   if(animations.length!==1||animations[0].params.delay!==2||animations[0].result.delayCentiseconds!==2||animations[0].result.frames!==480)throw Error('UI GIF must rotate once at 50 FPS with 480 frames over 9.6 seconds');
   if(!(await run("return document.querySelector('#btnExportGif').disabled===false&&document.body.textContent.includes('缩放固定')&&document.body.textContent.includes('9.6 秒');")))throw Error('fixed-scale GIF controls or duration hint missing');
-  await run(`els.bgMode.value='white';els.bgMode.dispatchEvent(new Event('change'));
+  await run(`els.size.value='lossless';`);
+  saves.push(path.join(out,'lossless-export.png'));const losslessJob=await exportAndWait('exportPng');
+  if(!losslessJob.result?.lossless||!(losslessJob.result.width>0&&losslessJob.result.height>0))throw Error('UI lossless PNG export failed: '+JSON.stringify(losslessJob));
+  await run(`els.size.value='192';els.bgMode.value='white';els.bgMode.dispatchEvent(new Event('change'));
    if(els.transparent.checked||els.transparent.disabled)throw Error('Selecting white did not enable opaque export');`);
   saves.push(path.join(out,'white.png'));await exportAndWait('exportPng');
   await run(`els.transparent.checked=true;els.transparent.dispatchEvent(new Event('change'));`);
@@ -52,7 +59,7 @@ app.once('browser-window-created',(_event,win)=>win.webContents.once('did-finish
 
   await original.call(engine,'render',{width:192,height:192,transparent:true,background:0xFFFFFF,out:path.join(out,'rpc-override.png')});
   await original.call(engine,'render',{width:192,height:192,transparent:false,backgroundMode:'checker',background:0xFFFFFF,out:path.join(out,'rpc-checker.png')});
-  for(const name of ['grid-export.png','grid-export.gif','white.png','override.png','image-export.png','image-export.gif','cpu-grid.png','rpc-override.png','rpc-checker.png'])if(!fs.existsSync(path.join(out,name)))throw Error('Missing export: '+name);
+  for(const name of ['grid-export.png','grid-export.gif','lossless-export.png','white.png','override.png','image-export.png','image-export.gif','cpu-grid.png','rpc-override.png','rpc-checker.png'])if(!fs.existsSync(path.join(out,name)))throw Error('Missing export: '+name);
   const result={pass:true,version:require(path.join(root,'webapp/package.json')).version,defaultParams:first,actualSaveDialogs:true,gpuAndCpu:true,gridPngGif:true,opaqueBackgrounds:true,explicitTransparent:true,rawRpc:true,rotationDurationMillis:animations[0].result.frames*animations[0].result.delayCentiseconds*10,fixedScaleHint:true};
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));app.quit();
  }catch(error){restore();fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({pass:false,error:error.stack}));console.error(error);app.exit(1);}

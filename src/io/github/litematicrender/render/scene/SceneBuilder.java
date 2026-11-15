@@ -742,7 +742,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
 
         float tr = 1, tg = 1, tb = 1;
         if (q.tintIndex >= 0) {
-            int tint = io.github.litematicrender.render.BlockTints.colorFor(state, q.spriteId, q.tintIndex);
+            int tint = io.github.litematicrender.render.BlockTints.colorFor(state, q.spriteId, q.tintIndex, this.colormaps);
             if (tint >= 0) {
                 tr = ((tint >> 16) & 0xFF) / 255f;
                 tg = ((tint >> 8) & 0xFF) / 255f;

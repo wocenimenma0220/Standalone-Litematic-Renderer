@@ -193,6 +193,17 @@
             <option value="1024" selected>1024 × 1024</option>
             <option value="2048">2048 × 2048</option>
             <option value="4096">4096 × 4096</option>
+            <option value="8192">8192 × 8192</option>
+            <option value="16384">16384 × 16384</option>
+            <option value="24576">24576 × 24576</option>
+            <option value="32768">32768 × 32768</option>
+            <option value="40960">40960 × 40960</option>
+            <option value="49152">49152 × 49152</option>
+            <option value="57344">57344 × 57344</option>
+            <option value="65536">65536 × 65536</option>
+            <option value="73728">73728 × 73728</option>
+            <option value="81920">81920 × 81920</option>
+            <option value="lossless">无损（贴图最高清晰）</option>
           </select>
         </div>
         <label class="check">
@@ -200,7 +211,7 @@
           <span>导出透明背景</span>
         </label>
         <p class="muted small">网格仅用于预览，导出时自动透明。</p>
-        <p class="muted small">GIF 围绕模型中心轴匀速旋转一周，缩放固定，50 帧/秒、共 480 帧，时长 9.6 秒；俯仰角、分辨率和背景沿用以上设置。</p>
+        <p class="muted small">PNG 支持 512～81920 及「无损」（按当前材质包贴图分辨率自动计算最高清晰尺寸）；GIF 围绕模型中心轴匀速旋转一周，缩放固定，50 帧/秒、共 480 帧，时长 9.6 秒，最高支持 4096 × 4096，背景沿用以上设置。</p>
         <p class="muted small">PNG / GIF 在后台导出，可继续预览和选点；退出软件会停止未完成的任务。透明 GIF 使用透明抖动保留半透明细节；选择颜色或图片背景可获得平滑的淡化效果。</p>
         <div class="field">
           <label for="bg">背景色</label>

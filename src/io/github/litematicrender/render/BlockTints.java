@@ -34,27 +34,32 @@ public final class BlockTints {
 
     /** 返回面片的染色值；没有注册染色来源时返回 -1。 */
     public static int colorFor(BlockState state, String spriteId, int layer) {
+        return colorFor(state, spriteId, layer, null);
+    }
+
+    /** 按已加载资源包的色图返回面片染色值；没有注册染色来源时返回 -1。 */
+    public static int colorFor(BlockState state, String spriteId, int layer, Colormaps colormaps) {
         if (layer < 0) return -1;
         String id = state.blockId;
-
+        int grass = colormaps != null ? colormaps.grassColor() : Colormaps.GRASS_DEFAULT;
+        int foliage = colormaps != null ? colormaps.foliageColor() : Colormaps.FOLIAGE_DEFAULT;
+        int dryFoliage = colormaps != null ? colormaps.dryFoliageColor() : Colormaps.DRY_FOLIAGE_DEFAULT;
 
         if (id.equals("minecraft:redstone_wire")) {
             return redstoneColor(state);
         }
 
-
         if (id.equals("minecraft:grass_block")) {
-            // 草方块只染顶面，侧面保持原色。
-            return layer == 0 && spriteId != null && spriteId.contains("grass_block_top")
-                ? Colormaps.GRASS_DEFAULT : -1;
+            // 原版模型只在顶面与侧面覆盖层声明 tintindex=0，泥土底图保持 -1。
+            return layer == 0 ? grass : -1;
         }
         if (id.equals("minecraft:short_grass") || id.equals("minecraft:tall_grass")
             || id.equals("minecraft:fern") || id.equals("minecraft:large_fern")
             || id.equals("minecraft:potted_fern") || id.equals("minecraft:bush")) {
-            return Colormaps.GRASS_DEFAULT;
+            return grass;
         }
         if (id.equals("minecraft:pink_petals") || id.equals("minecraft:wildflowers")) {
-            return layer == 1 ? Colormaps.GRASS_DEFAULT : -1;
+            return layer == 1 ? grass : -1;
         }
 
 
@@ -63,21 +68,24 @@ public final class BlockTints {
                 case "minecraft:spruce_leaves" -> SPRUCE;
                 case "minecraft:birch_leaves" -> BIRCH;
                 case "minecraft:oak_leaves", "minecraft:jungle_leaves", "minecraft:acacia_leaves",
-                     "minecraft:dark_oak_leaves", "minecraft:mangrove_leaves" -> Colormaps.FOLIAGE_DEFAULT;
+                     "minecraft:dark_oak_leaves", "minecraft:mangrove_leaves" -> foliage;
                 default -> -1;                                     // 樱花、杜鹃和苍白橡树树叶不染色。
             };
         }
-        if (id.equals("minecraft:vine") || id.equals("minecraft:leaf_litter")) {
-            return Colormaps.FOLIAGE_DEFAULT;
+        if (id.equals("minecraft:vine")) {
+            return foliage;
+        }
+        if (id.equals("minecraft:leaf_litter")) {
+            return dryFoliage;
         }
         if (id.equals("minecraft:sugar_cane")) {
-            return Colormaps.GRASS_DEFAULT;
+            return grass;
         }
 
 
         if (id.equals("minecraft:water") || id.equals("minecraft:bubble_column")
             || id.equals("minecraft:water_cauldron")) {
-            return Colormaps.WATER_DEFAULT;
+            return colormaps != null ? colormaps.waterColor() : Colormaps.WATER_DEFAULT;
         }
 
 

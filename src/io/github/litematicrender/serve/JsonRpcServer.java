@@ -186,7 +186,8 @@ public final class JsonRpcServer {
                 RenderSettings s = settingsFrom(p);
                 Path out = Path.of(require(p, "out"));
                 boolean diag = MiniJson.asBool(p.get("diagnostics"), true);
-                return this.engine.render(out, s, diag);
+                return this.engine.render(out, s, diag, (stage, completed, total) ->
+                    emit(Map.of("event", "exportProgress", "stage", stage, "completed", completed, "total", total)));
             }
 
             case "renderPreview": {
@@ -282,6 +283,7 @@ public final class JsonRpcServer {
         s.realLighting = MiniJson.asBool(p.get("realLighting"),false);
         s.animationTick = MiniJson.asInt(p.get("tick"), s.animationTick);
         s.interactiveMaxEdge = MiniJson.asInt(p.get("interactive"), s.interactiveMaxEdge);
+        s.lossless = s.interactiveMaxEdge == 0 && MiniJson.asBool(p.get("lossless"), false);
         return s;
     }
 

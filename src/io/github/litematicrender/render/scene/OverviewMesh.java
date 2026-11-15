@@ -19,13 +19,16 @@ public final class OverviewMesh implements StreamMeshExporter.Source {
     private final int step;
     private final float[] bounds={Float.POSITIVE_INFINITY,Float.POSITIVE_INFINITY,Float.POSITIVE_INFINITY,Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY,Float.NEGATIVE_INFINITY};
     public OverviewMesh(LitematicaSchematic schematic,ModelBaker baker,SpriteAtlas atlas) {
+        this(schematic,baker,null,atlas);
+    }
+    public OverviewMesh(LitematicaSchematic schematic,ModelBaker baker,Colormaps colormaps,SpriteAtlas atlas) {
         long[] lo={Long.MAX_VALUE,Long.MAX_VALUE,Long.MAX_VALUE},hi={Long.MIN_VALUE,Long.MIN_VALUE,Long.MIN_VALUE};
         for(var r:schematic.regions().values()){var p=r.blockOrigin();int[] a={p.x(),p.y(),p.z()},n={r.blocks.sizeX,r.blocks.sizeY,r.blocks.sizeZ};for(int i=0;i<3;i++){lo[i]=Math.min(lo[i],a[i]);hi[i]=Math.max(hi[i],(long)a[i]+n[i]-1);}}
         double volume=1;for(int i=0;i<3;i++)volume*=Math.max(1,Math.floorDiv(hi[i],8)-Math.floorDiv(lo[i],8)+1);
         step=volume<=1_000_000?8:16;var palette=new HashMap<BlockState,Integer>();
         for(var r:schematic.regions().values()) {var origin=r.blockOrigin();Cell[] previous={null};
             r.blocks.forEachNonAir((x,y,z,state)->{
-                int rgb=palette.computeIfAbsent(state,s->color(s,baker,atlas));if(rgb<0)return;
+                int rgb=palette.computeIfAbsent(state,s->color(s,baker,colormaps,atlas));if(rgb<0)return;
                 int wx=origin.x()+x,wy=origin.y()+y,wz=origin.z()+z,cx=Math.floorDiv(wx,step),cy=Math.floorDiv(wy,step),cz=Math.floorDiv(wz,step);Cell cell=previous[0];
                 if(cell==null||cell.position.x()!=cx||cell.position.y()!=cy||cell.position.z()!=cz){var key=new SectionVisibility.Position(cx,cy,cz);cell=cells.computeIfAbsent(key,Cell::new);previous[0]=cell;}
                 cell.count++;cell.red+=rgb>>16&255;cell.green+=rgb>>8&255;cell.blue+=rgb&255;
@@ -43,14 +46,50 @@ public final class OverviewMesh implements StreamMeshExporter.Source {
         if(!Float.isFinite(bounds[0]))Arrays.fill(bounds,0);
     }
     private static int color(BlockState state,ModelBaker baker,SpriteAtlas atlas) {
+        return color(state,baker,null,atlas);
+    }
+    private static String qualifySprite(String id) {
+        if(id==null||id.isEmpty())return "minecraft:missingno";
+        return id.contains(":")?id:"minecraft:"+id;
+    }
+    private static int color(BlockState state,ModelBaker baker,Colormaps colormaps,SpriteAtlas atlas) {
         if(Set.of("minecraft:barrier","minecraft:light","minecraft:structure_void").contains(state.blockId))return -1;
-        if(state.blockId.equals("minecraft:water"))return 0x3f76e4;if(state.blockId.equals("minecraft:lava"))return 0xef6a13;
-        var variants=baker.selectVariants(state.blockId,state);if(variants.isEmpty())return 0x999999;
-        var model=baker.bake(variants.getFirst());String particle=model.particleSprite==null?"minecraft:missingno":model.particleSprite;if(!particle.contains(":"))particle="minecraft:"+particle;
+        if(state.blockId.equals("minecraft:water"))return colormaps!=null?colormaps.waterColor():Colormaps.WATER_DEFAULT;
+        if(state.blockId.equals("minecraft:lava"))return 0xef6a13;
+        var variants=baker.selectVariants(state.blockId,state);if(variants.isEmpty())return 0x7c007c;
+        var model=baker.bake(variants.getFirst());
+        String particle=qualifySprite(model.particleSprite);
         var sprite=atlas.getOrMissing(particle);
-        if(sprite.name.equals("minecraft:missingno"))for(var face:model.all){String id=face.spriteId.contains(":")?face.spriteId:"minecraft:"+face.spriteId;var candidate=atlas.getOrMissing(id);if(!candidate.name.equals("minecraft:missingno")){sprite=candidate;break;}}
-        if(sprite.name.equals("minecraft:missingno"))return 0x999999;var image=sprite.sheet;
-        long red=0,green=0,blue=0,n=0;int stride=Math.max(1,image.pixels().length/1024);for(int i=0;i<image.pixels().length;i+=stride){int p=image.pixels()[i];if((p>>>24)<32)continue;red+=p>>16&255;green+=p>>8&255;blue+=p&255;n++;}return n==0?0x999999:(int)(red/n)<<16|(int)(green/n)<<8|(int)(blue/n);
+        int tint=-1;
+        var top=model.quadsForFace(io.github.litematicrender.model.Quad.UP).stream()
+            .filter(q->!atlas.getOrMissing(qualifySprite(q.spriteId)).name.equals("minecraft:missingno"))
+            .findFirst().orElse(null);
+        boolean genericParticle=sprite.name.equals("minecraft:missingno")||"minecraft:block/dirt".equals(particle)||"minecraft:block/netherrack".equals(particle);
+        if(top!=null&&(top.tintIndex>=0||genericParticle)) {
+            sprite=atlas.getOrMissing(qualifySprite(top.spriteId));
+            tint=top.tintIndex>=0?BlockTints.colorFor(state,sprite.name,top.tintIndex,colormaps):-1;
+        } else {
+            for(var face:model.all) {
+                var candidate=atlas.getOrMissing(qualifySprite(face.spriteId));
+                if(sprite.name.equals("minecraft:missingno")&&!candidate.name.equals("minecraft:missingno")) {
+                    sprite=candidate;
+                    if(face.tintIndex>=0)tint=BlockTints.colorFor(state,sprite.name,face.tintIndex,colormaps);
+                    break;
+                }
+                if(candidate.name.equals(sprite.name)&&face.tintIndex>=0) {
+                    tint=BlockTints.colorFor(state,sprite.name,face.tintIndex,colormaps);
+                    break;
+                }
+            }
+        }
+        if(sprite.name.equals("minecraft:missingno"))return 0x7c007c;
+        var image=sprite.sheet;
+        long red=0,green=0,blue=0,n=0;int stride=Math.max(1,image.pixels().length/1024);
+        for(int i=0;i<image.pixels().length;i+=stride){int p=image.pixels()[i];if((p>>>24)<32)continue;red+=p>>16&255;green+=p>>8&255;blue+=p&255;n++;}
+        if(n==0)return 0x999999;
+        int avgR=(int)(red/n),avgG=(int)(green/n),avgB=(int)(blue/n);
+        if(tint>=0){avgR=Math.round(avgR*(((tint>>16)&255)/255f));avgG=Math.round(avgG*(((tint>>8)&255)/255f));avgB=Math.round(avgB*((tint&255)/255f));}
+        return (Math.min(255,avgR)<<16)|(Math.min(255,avgG)<<8)|Math.min(255,avgB);
     }
     public int step(){return step;}
     public float[] bounds(){return bounds.clone();}

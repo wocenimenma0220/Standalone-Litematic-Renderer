@@ -57,12 +57,15 @@ public final class CliRenderer {
             ModelBaker baker = new ModelBaker(resources, registry);
 
             long t3 = System.currentTimeMillis();
-            Image image = SchematicRenderer.render(schem, baker, registry, colormaps, atlas, settings);
-            long t4 = System.currentTimeMillis();
-
+            Image image = null;
             if (outPng != null) {
-                image.writePng(outPng);
+                SchematicRenderer.renderToPng(
+                    SchematicRenderer.buildScene(schem, baker, registry, colormaps, atlas, settings.realLighting, settings.lightingEnabled),
+                    atlas, settings, outPng, null);
+            } else {
+                image = SchematicRenderer.render(schem, baker, registry, colormaps, atlas, settings);
             }
+            long t4 = System.currentTimeMillis();
 
             if (verbose) {
                 System.out.println("load: " + (t1 - t0) + "ms, block kinds=" + registry.blockCount());
@@ -138,11 +141,13 @@ public final class CliRenderer {
                 + "[width] [height] [rotationDeg] [slantDeg]");
             System.exit(2);
         }
-        int width = args.length > 3 ? Integer.parseInt(args[3]) : 1024;
-        int height = args.length > 4 ? Integer.parseInt(args[4]) : 1024;
+        boolean lossless = args.length > 3 && "lossless".equalsIgnoreCase(args[3]);
+        int width = !lossless && args.length > 3 ? Integer.parseInt(args[3]) : 1024;
+        int height = !lossless && args.length > 4 ? Integer.parseInt(args[4]) : width;
         float rotation = args.length > 5 ? Float.parseFloat(args[5]) : 45f;
         float slant = args.length > 6 ? Float.parseFloat(args[6]) : 30f;
         RenderSettings settings = new RenderSettings(rotation, slant, width, height);
+        settings.lossless = lossless;
         renderToFile(Path.of(args[0]), Path.of(args[1]), Path.of(args[2]), settings, true);
     }
 }

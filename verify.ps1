@@ -43,8 +43,8 @@ Invoke-Check -Name '版本一致性' -Executable $node -Arguments @('tools/versi
 Invoke-Check -Name '版本与文件入口' -Executable $node -Arguments @('tools/verify/release/version-regression.cjs')
 & ./tools/verify/release/resource-preparation-regression.ps1
 $sources=@(Get-ChildItem src -Recurse -Filter '*.java' | ForEach-Object FullName)
-$javaChecks=@('render/PreviewCheckpointRegression','render/RenderingPipelineRegression','render/GifTransparencyRegression','render/SavedEntityDataRegression','render/SchematicFormatsRegression')
-if($Profile -eq 'Full'){$javaChecks+=@('editor/ProjectionEditRegression','editor/PlacementInventoryRegression','editor/PistonEditRegression','editor/EditPreviewBudgetRegression')}
+$javaChecks=@('render/PreviewCheckpointRegression','render/RenderingPipelineRegression','render/GifTransparencyRegression','render/SavedEntityDataRegression','render/SchematicFormatsRegression','render/LosslessAndHighResRegression')
+if($Profile -eq 'Full'){$javaChecks+=@('editor/ProjectionEditRegression','editor/PlacementInventoryRegression','editor/PistonEditRegression','editor/EditPreviewBudgetRegression','render/GrassAndVersionRegression')}
 $testSources=@($javaChecks | ForEach-Object {Join-Path $PSScriptRoot "tools/verify/$_.java"})
 Invoke-Check -Name 'Java 编译' -Executable $javac -Arguments (@('--release','21','-encoding','UTF-8','-Xlint:all','-d',$classes)+$sources+$testSources)
 Invoke-Check -Name '预览检查点' -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-cp',$classes,'PreviewCheckpointRegression',$output)
@@ -56,6 +56,7 @@ if(Test-Path -LiteralPath $pipelineHome){
 }
 Invoke-Check -Name '三维渲染与导出' -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-Xmx1g','-cp',$classes,'RenderingPipelineRegression',$pipelineHome)
 Invoke-Check -Name 'GIF 透明度' -Executable $java -Arguments @('-cp',$classes,'GifTransparencyRegression',$output)
+Invoke-Check -Name '高分辨率与无损导出' -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-Xmx1g','-cp',$classes,'LosslessAndHighResRegression',$output)
 Invoke-Check -Name '实体数据' -Executable $java -Arguments @('-cp',$classes,'io.github.litematicrender.schematic.SavedEntityDataRegression')
 Invoke-Check -Name '结构格式导入' -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-cp',$classes,'SchematicFormatsRegression',$output)
 
@@ -66,7 +67,7 @@ if($Profile -eq 'Full'){
     if(Test-Path -LiteralPath $sandbox){Remove-Item -LiteralPath $sandbox -Recurse -Force}
     New-Item -ItemType Directory -Path $sandbox | Out-Null
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'assets') -Destination $sandbox -Recurse
-    foreach($check in @('ProjectionEditRegression','PlacementInventoryRegression','PistonEditRegression','EditPreviewBudgetRegression')){Invoke-Check -Name $check -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-Xmx2g',"-Dlitematicrender.home=$sandbox",'-Dlitematicrender.skins.offline=true','-cp',$classes,$check,$sandbox)}
+    foreach($check in @('ProjectionEditRegression','PlacementInventoryRegression','PistonEditRegression','EditPreviewBudgetRegression','GrassAndVersionRegression')){Invoke-Check -Name $check -Executable $java -Arguments @('-Dstdout.encoding=UTF-8','-Xmx2g',"-Dlitematicrender.home=$sandbox",'-Dlitematicrender.skins.offline=true','-cp',$classes,$check,$sandbox)}
 }
 if($Ui){foreach($check in @('board-loading-ui','board-unified-ui','board-entities-ui','board-tnt-ui')){Invoke-Check -Name $check -Executable $node -Arguments @("tools/verify/board/$check.cjs")}}
 if($DesktopUi){

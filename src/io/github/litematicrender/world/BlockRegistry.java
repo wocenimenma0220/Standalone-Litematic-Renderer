@@ -315,8 +315,85 @@ public final class BlockRegistry {
     }
 
 
-    private static final Map<String, String> LEGACY_RENAMES = Map.of(
-        "minecraft:chain", "minecraft:iron_chain"
+    private static final Map<String, String> LEGACY_RENAMES = Map.ofEntries(
+        Map.entry("minecraft:chain", "minecraft:iron_chain"),
+        Map.entry("minecraft:grass", "minecraft:short_grass"),
+        Map.entry("minecraft:grass_path", "minecraft:dirt_path"),
+        Map.entry("minecraft:sign", "minecraft:oak_sign"),
+        Map.entry("minecraft:wall_sign", "minecraft:oak_wall_sign"),
+        Map.entry("minecraft:standing_sign", "minecraft:oak_sign"),
+        Map.entry("minecraft:tallgrass", "minecraft:short_grass"),
+        Map.entry("minecraft:deadbush", "minecraft:dead_bush"),
+        Map.entry("minecraft:reeds", "minecraft:sugar_cane"),
+        Map.entry("minecraft:waterlily", "minecraft:lily_pad"),
+        Map.entry("minecraft:noteblock", "minecraft:note_block"),
+        Map.entry("minecraft:golden_rail", "minecraft:powered_rail"),
+        Map.entry("minecraft:yellow_flower", "minecraft:dandelion"),
+        Map.entry("minecraft:red_flower", "minecraft:poppy"),
+        Map.entry("minecraft:double_plant", "minecraft:sunflower"),
+        Map.entry("minecraft:web", "minecraft:cobweb"),
+        Map.entry("minecraft:magma", "minecraft:magma_block"),
+        Map.entry("minecraft:red_nether_brick", "minecraft:red_nether_bricks"),
+        Map.entry("minecraft:end_bricks", "minecraft:end_stone_bricks"),
+        Map.entry("minecraft:brick_block", "minecraft:bricks"),
+        Map.entry("minecraft:quartz_ore", "minecraft:nether_quartz_ore"),
+        Map.entry("minecraft:hardened_clay", "minecraft:terracotta"),
+        Map.entry("minecraft:stained_hardened_clay", "minecraft:white_terracotta"),
+        Map.entry("minecraft:silver_glazed_terracotta", "minecraft:light_gray_glazed_terracotta"),
+        Map.entry("minecraft:silver_shulker_box", "minecraft:light_gray_shulker_box"),
+        Map.entry("minecraft:slime", "minecraft:slime_block"),
+        Map.entry("minecraft:melon_block", "minecraft:melon"),
+        Map.entry("minecraft:lit_pumpkin", "minecraft:jack_o_lantern"),
+        Map.entry("minecraft:snow_layer", "minecraft:snow"),
+        Map.entry("minecraft:mob_spawner", "minecraft:spawner"),
+        Map.entry("minecraft:ender_portal", "minecraft:end_portal"),
+        Map.entry("minecraft:portal", "minecraft:nether_portal"),
+        Map.entry("minecraft:workbench", "minecraft:crafting_table"),
+        Map.entry("minecraft:lit_furnace", "minecraft:furnace"),
+        Map.entry("minecraft:unlit_redstone_torch", "minecraft:redstone_torch"),
+        Map.entry("minecraft:unlit_redstone_wall_torch", "minecraft:redstone_wall_torch"),
+        Map.entry("minecraft:lit_redstone_lamp", "minecraft:redstone_lamp"),
+        Map.entry("minecraft:lit_redstone_ore", "minecraft:redstone_ore"),
+        Map.entry("minecraft:powered_repeater", "minecraft:repeater"),
+        Map.entry("minecraft:unpowered_repeater", "minecraft:repeater"),
+        Map.entry("minecraft:powered_comparator", "minecraft:comparator"),
+        Map.entry("minecraft:unpowered_comparator", "minecraft:comparator"),
+        Map.entry("minecraft:daylight_detector_inverted", "minecraft:daylight_detector"),
+        Map.entry("minecraft:piston_extension", "minecraft:moving_piston"),
+        Map.entry("minecraft:flowing_water", "minecraft:water"),
+        Map.entry("minecraft:flowing_lava", "minecraft:lava"),
+        Map.entry("minecraft:standing_banner", "minecraft:white_banner"),
+        Map.entry("minecraft:wall_banner", "minecraft:white_wall_banner"),
+        Map.entry("minecraft:fence", "minecraft:oak_fence"),
+        Map.entry("minecraft:fence_gate", "minecraft:oak_fence_gate"),
+        Map.entry("minecraft:wooden_door", "minecraft:oak_door"),
+        Map.entry("minecraft:trapdoor", "minecraft:oak_trapdoor"),
+        Map.entry("minecraft:wooden_pressure_plate", "minecraft:oak_pressure_plate"),
+        Map.entry("minecraft:wooden_button", "minecraft:oak_button"),
+        Map.entry("minecraft:wooden_stairs", "minecraft:oak_stairs"),
+        Map.entry("minecraft:wooden_slab", "minecraft:oak_slab"),
+        Map.entry("minecraft:double_wooden_slab", "minecraft:oak_slab"),
+        Map.entry("minecraft:double_stone_slab", "minecraft:smooth_stone_slab"),
+        Map.entry("minecraft:double_stone_slab2", "minecraft:red_sandstone_slab"),
+        Map.entry("minecraft:stone_slab2", "minecraft:red_sandstone_slab"),
+        Map.entry("minecraft:purpur_double_slab", "minecraft:purpur_slab"),
+        Map.entry("minecraft:bed", "minecraft:red_bed"),
+        Map.entry("minecraft:skull", "minecraft:skeleton_skull"),
+        Map.entry("minecraft:stonebrick", "minecraft:stone_bricks"),
+        Map.entry("minecraft:nether_brick", "minecraft:nether_bricks"),
+        Map.entry("minecraft:monster_egg", "minecraft:infested_stone"),
+        Map.entry("minecraft:planks", "minecraft:oak_planks"),
+        Map.entry("minecraft:sapling", "minecraft:oak_sapling"),
+        Map.entry("minecraft:leaves", "minecraft:oak_leaves"),
+        Map.entry("minecraft:leaves2", "minecraft:acacia_leaves"),
+        Map.entry("minecraft:log", "minecraft:oak_log"),
+        Map.entry("minecraft:log2", "minecraft:acacia_log"),
+        Map.entry("minecraft:wool", "minecraft:white_wool"),
+        Map.entry("minecraft:carpet", "minecraft:white_carpet"),
+        Map.entry("minecraft:stained_glass", "minecraft:white_stained_glass"),
+        Map.entry("minecraft:stained_glass_pane", "minecraft:white_stained_glass_pane"),
+        Map.entry("minecraft:concrete", "minecraft:white_concrete"),
+        Map.entry("minecraft:concrete_powder", "minecraft:white_concrete_powder")
     );
 
     public BlockInfo getOrMissing(String blockId) {
@@ -360,6 +437,6 @@ public final class BlockRegistry {
     }
 
     public Optional<BlockInfo> lookup(String blockId) {
-        return Optional.ofNullable(this.blocks.get(blockId));
+        return Optional.ofNullable(this.get(blockId));
     }
 }

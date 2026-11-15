@@ -276,12 +276,45 @@ public final class LitematicaSchematic {
     }
 
     private static BlockState resolve(UnresolvedBlockState raw, BlockRegistry registry) {
-        BlockRegistry.BlockInfo info = registry.getOrMissing(raw.blockId());
+        String rawId = raw.blockId();
+        if ("minecraft:cauldron".equals(rawId)) {
+            String level = raw.properties().get("level");
+            if ("1".equals(level) || "2".equals(level) || "3".equals(level)) {
+                rawId = "minecraft:water_cauldron";
+            }
+        }
+        BlockRegistry.BlockInfo info = registry.getOrMissing(rawId);
         BlockState state = info.defaultState;
         for (Map.Entry<String, String> e : raw.properties().entrySet()) {
-            state = state.tryWith(e.getKey(), e.getValue());
+            state = state.tryWith(e.getKey(), adaptLegacyProperty(info, e.getKey(), e.getValue()));
         }
-        return state;
+        return applyLegacyDefaults(rawId, state);
+    }
+
+    /** 兼容旧版墙体连接等属性命名变化。 */
+    private static String adaptLegacyProperty(BlockRegistry.BlockInfo info, String key, String value) {
+        var prop = info.properties.get(key);
+        if (prop == null || prop.indexOf(value).isPresent()) return value;
+        if ("true".equals(value) && prop.indexOf("low").isPresent()) return "low";
+        if ("false".equals(value) && prop.indexOf("none").isPresent()) return "none";
+        return value;
+    }
+
+    private static BlockState applyLegacyDefaults(String rawId, BlockState state) {
+        return switch (rawId) {
+            case "minecraft:lit_furnace", "minecraft:lit_redstone_lamp", "minecraft:lit_redstone_ore" ->
+                state.tryWith("lit", "true");
+            case "minecraft:unlit_redstone_torch", "minecraft:unlit_redstone_wall_torch" ->
+                state.tryWith("lit", "false");
+            case "minecraft:powered_repeater", "minecraft:powered_comparator" ->
+                state.tryWith("powered", "true");
+            case "minecraft:unpowered_repeater", "minecraft:unpowered_comparator" ->
+                state.tryWith("powered", "false");
+            case "minecraft:double_wooden_slab", "minecraft:double_stone_slab",
+                 "minecraft:double_stone_slab2", "minecraft:purpur_double_slab" ->
+                state.tryWith("type", "double");
+            default -> state;
+        };
     }
 
     /** TileEntities 的 x/y/z 已相对区域原点，不能再次扣除原点。 */

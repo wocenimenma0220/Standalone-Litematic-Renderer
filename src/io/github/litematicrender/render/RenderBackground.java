@@ -11,19 +11,41 @@ public final class RenderBackground {
         return settings.transparentBackground || "checker".equals(settings.backgroundMode);
     }
     public static void fill(Image target, RenderSettings settings) {
-        if (isTransparent(settings)) return;
+        fillRegion(target, target.width, target.height, 0, 0, target.height, settings, null, null);
+    }
+
+    public static BufferedImage prepareSource(RenderSettings settings) {
+        if (isTransparent(settings) || !"image".equals(settings.backgroundMode) || settings.backgroundImage == null) {
+            return null;
+        }
+        return settings.backgroundImage.toBuffered();
+    }
+
+    public static void fillRegion(Image target, int fullWidth, int fullHeight, int tileX0, int tileY0,
+                                  int activeHeight, RenderSettings settings,
+                                  BufferedImage preparedSource, BufferedImage[] scratch) {
+        if (isTransparent(settings) || activeHeight <= 0) return;
         if ("image".equals(settings.backgroundMode) && settings.backgroundImage != null) {
             Image source = settings.backgroundImage;
-            double scale = Math.max((double)target.width/source.width, (double)target.height/source.height);
-            int width = (int)Math.ceil(source.width*scale), height = (int)Math.ceil(source.height*scale);
-            BufferedImage background = new BufferedImage(target.width,target.height,BufferedImage.TYPE_INT_ARGB);
+            BufferedImage srcBuf = preparedSource != null ? preparedSource : source.toBuffered();
+            double scale = Math.max((double) fullWidth / source.width, (double) fullHeight / source.height);
+            int width = (int) Math.ceil(source.width * scale), height = (int) Math.ceil(source.height * scale);
+            BufferedImage background = scratch != null && scratch[0] != null
+                    && scratch[0].getWidth() == target.width && scratch[0].getHeight() == activeHeight
+                ? scratch[0]
+                : new BufferedImage(target.width, activeHeight, BufferedImage.TYPE_INT_ARGB);
+            if (scratch != null) scratch[0] = background;
             var graphics = background.createGraphics();
             try {
-                graphics.setColor(new Color(0x22262E)); graphics.fillRect(0,0,target.width,target.height);
-                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                graphics.drawImage(source.toBuffered(),(target.width-width)/2,(target.height-height)/2,width,height,null);
-            } finally { graphics.dispose(); }
-            background.getRGB(0,0,target.width,target.height,target.pixels(),0,target.width);
+                graphics.setColor(new Color(0x22262E));
+                graphics.fillRect(0, 0, target.width, activeHeight);
+                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                graphics.drawImage(srcBuf, (fullWidth - width) / 2 - tileX0, (fullHeight - height) / 2 - tileY0,
+                    width, height, null);
+            } finally {
+                graphics.dispose();
+            }
+            background.getRGB(0, 0, target.width, activeHeight, target.pixels(), 0, target.width);
         }
     }
 }
