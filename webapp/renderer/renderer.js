@@ -3,7 +3,10 @@
 /** 预览界面通过预加载桥调用 Java；相机变化留在 GPU，导出按所选分辨率重新渲染。拖动旋转参考 quickcraft，俯仰限制为 ±85 度，缩放采用指数变化。 */
 
 const $ = (id) => document.getElementById(id);
-document.title=AppVersion.title;document.querySelector('.appname').textContent=AppVersion.title;
+document.title=AppVersion.title;
+document.querySelector('.appname').textContent='投影预览';
+const appVersionBadge=$('appVersionBadge');
+if(appVersionBadge)appVersionBadge.textContent=AppVersion.display.toUpperCase();
 function entitySummary(report){
   if(!report?.saved)return '';
   return ` · 实体 ${report.rendered} / ${report.saved}`+(report.unsupported?` · ${report.unsupported} 个实体暂未显示`:'');
@@ -558,7 +561,7 @@ function backdropColor() {
   switch (els.bgMode.value) {
     case 'sky':  return [0.55, 0.70, 1.00, 1];
     case 'white': return [1, 1, 1, 1];
-    case 'dark':  return [0.16, 0.18, 0.21, 1];
+    case 'dark':  return [0.14, 0.14, 0.15, 1];
     case 'color': {
       const color = hexToInt(els.bg.value);
       return [(color >>> 16 & 255)/255,(color >>> 8 & 255)/255,(color & 255)/255,1];
@@ -706,9 +709,14 @@ function flyTick(time) {
 
 
 function syncAngleLabels() {
-  els.rotationVal.textContent = Math.round(els.rotation.value) + '°';
-  els.slantVal.textContent = Math.round(els.slant.value) + '°';
-  els.zoomVal.textContent = state.zoom.toFixed(2) + '×';
+  const yaw = Math.round(els.rotation.value);
+  const pitch = Math.round(els.slant.value);
+  const zoom = state.zoom.toFixed(2);
+  els.rotationVal.textContent = yaw + '°';
+  els.slantVal.textContent = pitch + '°';
+  els.zoomVal.textContent = zoom + '×';
+  const hudCamera = $('hudCamera');
+  if (hudCamera) hudCamera.textContent = `Yaw: ${yaw}° | Pitch: ${pitch}° | Zoom: ${zoom}×`;
 }
 
 
@@ -905,7 +913,7 @@ function cssColor(mode) {
   switch (mode) {
     case 'sky':   return '#8cb3ff';
     case 'white': return '#ffffff';
-    case 'dark':  return '#292e36';
+    case 'dark':  return '#242427';
     case 'color': return els.bg.value;
     default:      return '';
   }
@@ -1354,6 +1362,12 @@ function updatePreviewBackend() {
   els.previewBackendInfo.textContent=state.previewBackend==='cpu'
     ?'CPU 支持旋转和缩放；漫游与方块点选请切换 GPU。'
     :state.cpuPreview?'GPU 不可用，当前使用 CPU 预览。':'GPU 支持实时旋转、缩放和漫游。';
+  const hudRenderer = $('hudRenderer');
+  if (hudRenderer) {
+    hudRenderer.textContent = (state.previewBackend === 'cpu' || state.cpuPreview)
+      ? 'Renderer: CPU · 软件渲染'
+      : 'Renderer: WebGL2 / Isometric Voxel';
+  }
   updateButtons();
 }
 els.previewBackend.addEventListener('change',async()=>{

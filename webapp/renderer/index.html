@@ -15,6 +15,7 @@
   <div class="titlebar">
     <img class="brand-icon" src="../icon.png" alt="" />
     <span class="appname">投影预览</span>
+    <span class="version-badge" id="appVersionBadge"></span>
     <nav class="menu">
       <button class="menubtn" id="menuFile">文件</button>
       <button class="menubtn" id="menuKeys">按键</button>
@@ -51,21 +52,21 @@
       </div>
 
       <section class="group">
-        <h2>投影文件</h2>
+        <h2><img class="section-icon" src="icons/file-chest.png" width="16" height="16" alt="" aria-hidden="true" />投影文件</h2>
         <button id="btnOpen" class="primary">打开投影 / 结构…</button>
         <div id="fileInfo" class="fileinfo hidden"></div>
       </section>
 
-      <section class="group" id="blockSearchPanel"><h2>方块搜索与定位</h2>
+      <section class="group" id="blockSearchPanel"><h2><img class="section-icon" src="icons/search-redstone.png" width="16" height="16" alt="" aria-hidden="true" />方块搜索与定位</h2>
         <input id="blockSearchQuery" type="search" maxlength="128" placeholder="中文名称或方块 ID" aria-label="搜索投影中的方块" />
         <div class="block-search-actions"><button id="blockSearchRun">搜索</button><button id="blockSearchClear">清除</button></div>
         <label class="check"><input id="blockSearchDim" type="checkbox" checked />淡化模型，突出匹配位置</label>
         <p id="blockSearchStatus" class="muted small" aria-live="polite">打开投影后搜索。</p>
         <div class="block-search-actions"><button id="blockSearchLocate" disabled>定位当前</button><button id="blockSearchPrev" disabled>上一个</button><button id="blockSearchNext" disabled>下一个</button></div>
       </section>
-      <section class="group"><h2>投影材料</h2><button id="btnMaterials" disabled>查看 / 导出材料清单…</button></section>
+      <section class="group"><h2><img class="section-icon" src="icons/materials-book.png" width="16" height="16" alt="" aria-hidden="true" />投影材料</h2><button id="btnMaterials" disabled>查看 / 导出材料清单…</button></section>
       <section class="group">
-        <h2>玩家头颅</h2>
+        <h2><img class="section-icon" src="icons/player-steve.png" width="16" height="16" alt="" aria-hidden="true" />玩家头颅</h2>
         <label class="check"><input id="skinOnline" type="checkbox" checked />允许联网获取皮肤</label>
         <p class="muted small" id="skinInfo">优先使用本地缓存，获取失败时显示 Steve。</p>
         <input class="skinplayer" id="skinPlayer" type="text" placeholder="玩家名或 UUID" aria-label="导入皮肤对应的玩家名或 UUID" />
@@ -73,13 +74,13 @@
       </section>
 
       <section class="group">
-        <h2>材质包</h2>
+        <h2><img class="section-icon" src="icons/packs-painting.png" width="16" height="16" alt="" aria-hidden="true" />材质包</h2>
         <p class="muted small">内置材质包可删除；导入包可调整顺序，越靠下优先级越高。</p>
         <ul id="packList" class="packlist"></ul>
       </section>
 
       <section class="group">
-        <h2>预览渲染</h2>
+        <h2><img class="section-icon" src="icons/render-eye.png" width="16" height="16" alt="" aria-hidden="true" />预览渲染</h2>
         <div class="field">
           <label for="previewBackend">渲染方式</label>
           <select id="previewBackend">
@@ -123,7 +124,7 @@
       </section>
 
       <section class="group">
-        <h2>磁盘场景缓存</h2>
+        <h2><img class="section-icon" src="icons/cache-command.png" width="16" height="16" alt="" aria-hidden="true" />磁盘场景缓存</h2>
         <div class="field"><label for="sceneCacheLimit">缓存限额（MB）</label><input id="sceneCacheLimit" type="number" min="0" max="131072" step="256" value="4096" /></div>
         <p class="muted small">再次打开大投影时复用完整画面。0 为关闭；256–131072 MB。使用期间保留当前场景。</p>
         <label class="check"><input id="clearCacheOnExit" type="checkbox" checked />关闭应用时清理渲染缓存</label>
@@ -131,14 +132,14 @@
         <button id="sceneCacheClear">清理未使用缓存</button><p id="sceneCacheInfo" class="muted small"></p>
       </section>
       <section class="group">
-        <h2>光照</h2>
+        <h2><img class="section-icon" src="icons/lighting-glowstone.png" width="16" height="16" alt="" aria-hidden="true" />光照</h2>
         <div class="lighting-controls"><label class="check"><input id="lightingEnabled" type="checkbox" checked />开启光照渲染</label>
         <label class="check"><input id="realLighting" type="checkbox" checked />平滑光照</label></div>
         <p class="muted small">开启光照渲染后计算明暗；平滑光照让顶点之间自然过渡。关闭平滑光照使用明亮效果，关闭光照渲染直接显示材质。</p>
       </section>
 
       <section class="group">
-        <h2>视角</h2>
+        <h2><img class="section-icon" src="icons/camera-compass.png" width="16" height="16" alt="" aria-hidden="true" />视角</h2>
         <div class="field">
           <label for="rotation">水平旋转 <span id="rotationVal" class="val">45°</span></label>
           <input type="range" id="rotation" min="0" max="360" step="1" value="45" />
@@ -169,7 +170,7 @@
       </section>
 
       <section class="group">
-        <h2>查看内部</h2>
+        <h2><img class="section-icon" src="icons/selection-axe.png" width="16" height="16" alt="" aria-hidden="true" />查看内部</h2>
         <label class="check"><input id="selectionRenderEnabled" type="checkbox" disabled />启用选择渲染</label>
         <label class="check"><input id="selectionEnabled" type="checkbox" disabled />选择渲染工具 (B)</label>
         <p class="muted small">选择渲染控制显示；工具只负责选点。关闭工具仍保留选区显示。</p>
@@ -185,7 +186,7 @@
         </div>
       </section>
       <section class="group">
-        <h2>输出</h2>
+        <h2><img class="section-icon" src="icons/output-map.png" width="16" height="16" alt="" aria-hidden="true" />输出</h2>
         <div class="field">
           <label for="size">分辨率</label>
           <select id="size">
@@ -233,7 +234,6 @@
 
     <main class="stage">
       <div class="toolbar">
-        <span id="stats" class="muted small">—</span>
         <span class="spacer"></span>
         <button id="btnStopRender" class="toolbar-button stop-render" title="强制停止当前预览；拖入新投影时会自动停止当前任务" disabled><span aria-hidden="true">■</span> 停止渲染</button>
         <label class="check small">
@@ -253,7 +253,14 @@
       </div>
       <div id="viewport" class="viewport checker" tabindex="-1">
         <canvas id="gl" class="glcanvas"></canvas>
-        <div id="coordinates" class="coordinates hidden" aria-live="off"></div>
+        <div class="viewport-hud-stack">
+          <div id="viewportHud" class="viewport-hud">
+            <div id="hudRenderer" class="hud-renderer">Renderer: WebGL2 / Isometric Voxel</div>
+            <div id="hudCamera" class="hud-camera">Yaw: 45° | Pitch: 30° | Zoom: 1.00×</div>
+            <div id="stats" class="hud-stats">—</div>
+          </div>
+          <div id="coordinates" class="coordinates hidden" aria-live="off"></div>
+        </div>
         <img id="crosshair" src="crosshair.png" class="crosshair hidden" alt="" aria-hidden="true" draggable="false" />
         <img id="preview" alt="渲染预览" class="hidden" />
         <div id="placeholder" class="placeholder">还没有渲染结果</div>

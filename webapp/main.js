@@ -50,7 +50,7 @@ function createWindow() {
     height: 900,
     minWidth: 980,
     minHeight: 660,
-    backgroundColor: '#14161a',
+    backgroundColor: '#18181a',
     show: false,
     title: '投影预览',
     icon: path.join(__dirname, 'app.ico'),
