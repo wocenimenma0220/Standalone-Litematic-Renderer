@@ -2,9 +2,12 @@
 
 /** Electron 主进程持有窗口、Java 子进程和串行请求队列。 */
 
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, ClipboardItem, nativeImage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const zlib = require('node:zlib');
+const { randomUUID } = require('node:crypto');
+const { spawn } = require('node:child_process');
 const { EngineClient } = require('./engine-client');
 const { resolveRuntime } = require('./runtime');
 const { UiSettings, AUTHOR_URL } = require('./ui-settings');
@@ -12,6 +15,7 @@ const { SceneTransfer, INLINE_LIMIT } = require('./scene-transfer');
 const { clearRenderingCache,clearInterruptedCache } = require('./cache-cleanup');
 const {BackgroundExports}=require('./background-exports');
 const schematicFormats=require('./schematic-formats');
+const { AppUpdater } = require('./updater');
 
 
 const APP_HOME = path.resolve(__dirname, '..');
@@ -41,8 +45,56 @@ const backgroundExports=new BackgroundExports({home:APP_HOME,runtime:resolveRunt
 }});
 let shutdownPromise = null;
 let shutdownComplete = false;
+let pendingPostQuitLaunch = null;
+
+const appUpdater = new AppUpdater({
+  home: APP_HOME,
+  onStatus: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('updater:status', status);
+    }
+  },
+});
 
 let startupFile = null;
+
+function setupDevHotReload(win) {
+  const isDev = process.argv.includes('--dev') || process.env.LITEMATIC_HOT_RELOAD === '1';
+  if (!isDev || app.isPackaged) return;
+  const rendererDir = path.join(__dirname, 'renderer');
+  let reloadTimer = null;
+  const cssTimers = new Map();
+  let watcher = null;
+  try {
+    watcher = fs.watch(rendererDir, { recursive: false }, (_eventType, filename) => {
+      if (!filename || typeof filename !== 'string') return;
+      if (win.isDestroyed()) return;
+      if (/\.css$/i.test(filename)) {
+        clearTimeout(cssTimers.get(filename));
+        cssTimers.set(filename, setTimeout(() => {
+          cssTimers.delete(filename);
+          if (!win.isDestroyed()) win.webContents.send('dev:reloadCss', filename);
+        }, 70));
+        return;
+      }
+      if (/\.(html|js)$/i.test(filename)) {
+        clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(() => {
+          reloadTimer = null;
+          if (!win.isDestroyed()) win.webContents.reloadIgnoringCache();
+        }, 120);
+      }
+    });
+    win.once('closed', () => {
+      clearTimeout(reloadTimer);
+      for (const timer of cssTimers.values()) clearTimeout(timer);
+      cssTimers.clear();
+      try { watcher?.close(); } catch { }
+    });
+  } catch (err) {
+    diagnostic('dev hot reload watcher failed: ' + err.message);
+  }
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -50,6 +102,7 @@ function createWindow() {
     height: 900,
     minWidth: 980,
     minHeight: 660,
+    frame: false,
     backgroundColor: '#18181a',
     show: false,
     title: '投影预览',
@@ -70,7 +123,10 @@ function createWindow() {
   mainWindow.webContents.once('destroyed', () => { sceneTransfer.close().catch(() => {});selectionTransfer.close().catch(()=>{}); });
   mainWindow.on('enter-full-screen', () => mainWindow.webContents.send('window:fullscreen', true));
   mainWindow.on('leave-full-screen', () => mainWindow.webContents.send('window:fullscreen', false));
+  mainWindow.on('maximize', () => mainWindow.webContents.send('window:maximized', true));
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:maximized', false));
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  setupDevHotReload(mainWindow);
   if (process.argv.includes('--dev')) mainWindow.webContents.openDevTools({ mode: 'detach' });
 }
 
@@ -172,8 +228,224 @@ ipcMain.handle('exports:start',async(_event,{kind,params})=>{
   const source=openedSchematic;
   return backgroundExports.submit({kind,source,params:await uiSettings.renderParams(params),resources:{...(resourceRoot?{root:resourceRoot}:{}),imports:await packStore.read()}});
 });
-ipcMain.handle('exports:list',()=>backgroundExports.list());
-ipcMain.handle('exports:cancel',(_event,id)=>backgroundExports.cancel(id));
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function pngChunk(type, data) {
+  const len = data.length, buf = Buffer.allocUnsafe(12 + len);
+  buf.writeUInt32BE(len, 0);
+  buf.write(type, 4, 4, 'ascii');
+  if (len > 0) data.copy(buf, 8);
+  let crc = 0xffffffff;
+  for (let i = 4; i < 8 + len; i++) crc = CRC32_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  buf.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 8 + len);
+  return buf;
+}
+function encodeRgbaPng(rgba, width, height) {
+  const rowBytes = width * 4, stride = 1 + rowBytes;
+  const raw = Buffer.allocUnsafe(stride * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * stride] = 0;
+    rgba.copy(raw, y * stride + 1, y * rowBytes, (y + 1) * rowBytes);
+  }
+  const ihdr = Buffer.allocUnsafe(13);
+  ihdr.writeUInt32BE(width, 0); ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  const idat = zlib.deflateSync(raw, { level: 3 });
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', idat),
+    pngChunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+const gpuGifSpools = new Map();
+function emitGpuGifJob(session, state, stage, extra = {}) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('exports:update', {
+      id: session.id, kind: 'gif', name: path.basename(session.out), path: session.out,
+      state, stage, completed: session.completed || 0, total: session.frames, ...extra,
+    });
+  }
+}
+
+ipcMain.handle('exports:list', () => [
+  ...backgroundExports.list(),
+  ...Array.from(gpuGifSpools.values(), s => ({ id: s.id, kind: 'gif', name: path.basename(s.out), path: s.out, state: 'running', stage: 'rendering', completed: s.completed || 0, total: s.frames })),
+]);
+ipcMain.handle('exports:cancel', async (_event, id) => {
+  const spool = gpuGifSpools.get(id);
+  if (spool) {
+    spool.aborted = true;
+    gpuGifSpools.delete(id);
+    try { await spool.handle.close(); } catch { }
+    try { await fs.promises.rm(spool.directory, { recursive: true, force: true }); } catch { }
+    emitGpuGifJob(spool, 'cancelled', 'cancelled');
+    return { id, state: 'cancelled', stage: 'cancelled' };
+  }
+  return backgroundExports.cancel(id);
+});
+ipcMain.handle('exports:saveGpuPng', async (_event, { out, width, height, rgbaBuffer }) => {
+  if (!out || !path.isAbsolute(out) || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || !rgbaBuffer) {
+    throw Error('GPU PNG 导出参数无效');
+  }
+  const resolved = path.resolve(out);
+  const rgba = Buffer.from(rgbaBuffer);
+  if (rgba.byteLength !== width * height * 4) throw Error('GPU 像素缓冲大小不匹配');
+  const png = encodeRgbaPng(rgba, width, height);
+  await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
+  const tmp = path.join(path.dirname(resolved), `.gpu-export-${randomUUID()}.tmp`);
+  try {
+    await fs.promises.writeFile(tmp, png);
+    await fs.promises.rename(tmp, resolved);
+  } catch (err) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    throw err;
+  }
+  return backgroundExports.recordExternal({ kind: 'png', out: resolved, result: { width, height, bytes: png.byteLength, mode: 'gpu' } });
+});
+function formatSheetTimestamp(date = new Date()) {
+  const pad = (n, len = 2) => String(n).padStart(len, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`;
+}
+async function uniqueSheetPath(sourceFile, configuredDir = '') {
+  const parsed = path.parse(path.resolve(sourceFile || 'projection.litematic'));
+  const stemBase = `${parsed.name || 'projection'}-双视图-${formatSheetTimestamp()}`;
+  const dirs = [];
+  if (configuredDir && path.isAbsolute(configuredDir)) dirs.push(path.resolve(configuredDir));
+  if (sourceFile) dirs.push(parsed.dir);
+  try { dirs.push(path.join(app.getPath('pictures'), '投影预览')); } catch { }
+  for (const dir of dirs) {
+    try {
+      await fs.promises.mkdir(dir, { recursive: true });
+      let candidate = path.join(dir, stemBase + '.png');
+      for (let suffix = 2; fs.existsSync(candidate); suffix++) {
+        candidate = path.join(dir, `${stemBase}-${suffix}.png`);
+      }
+      const probe = path.join(dir, `.write-test-${randomUUID()}.tmp`);
+      await fs.promises.writeFile(probe, '');
+      await fs.promises.unlink(probe).catch(() => {});
+      return candidate;
+    } catch { }
+  }
+  throw Error('无法在指定位置或图片文件夹创建展示图文件');
+}
+ipcMain.handle('exports:saveSheetPng', async (_event, { sourceFile, out, pngBuffer, width, height, copyClipboard }) => {
+  if (!pngBuffer) throw Error('展示图内容为空');
+  const buf = Buffer.from(pngBuffer);
+  if (!buf.byteLength) throw Error('展示图内容为空');
+  const settings = await uiSettings.read();
+  const resolved = out && path.isAbsolute(out)
+    ? path.resolve(out)
+    : await uniqueSheetPath(sourceFile, settings.sheetOutputDir);
+  await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
+  const tmp = path.join(path.dirname(resolved), `.sheet-export-${randomUUID()}.tmp`);
+  try {
+    await fs.promises.writeFile(tmp, buf);
+    await fs.promises.rename(tmp, resolved);
+  } catch (err) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    throw err;
+  }
+  let copied = false;
+  if (copyClipboard !== false) {
+    try {
+      if (typeof clipboard.write === 'function' && typeof ClipboardItem === 'function') {
+        await clipboard.write([new ClipboardItem({ 'image/png': new Blob([buf], { type: 'image/png' }) })]);
+        copied = true;
+      } else if (typeof clipboard.writeImage === 'function') {
+        const img = nativeImage.createFromBuffer(buf);
+        if (img.isEmpty()) diagnostic('clipboard copy skipped: empty nativeImage');
+        else { clipboard.writeImage(img); copied = true; }
+      }
+    } catch (clipErr) {
+      diagnostic('clipboard copy failed: ' + (clipErr?.message || clipErr));
+    }
+  }
+  const job = backgroundExports.recordExternal({
+    kind: 'png',
+    out: resolved,
+    result: { width: Number(width) || 0, height: Number(height) || 0, bytes: buf.byteLength, sheet: true, copied },
+  });
+  return { out: resolved, copied, job };
+});
+handleEngine('exports:renderCpuPanel', async (client, _event, params) => {
+  const stagingRoot = path.join(APP_HOME, 'cache', 'exports');
+  await fs.promises.mkdir(stagingRoot, { recursive: true });
+  const dir = await fs.promises.mkdtemp(path.join(stagingRoot, 'sheet-cpu-'));
+  const tmpPng = path.join(dir, 'panel.png');
+  try {
+    const rendered = await client.call('render', { ...(await uiSettings.renderParams(params)), transparent: true, out: tmpPng });
+    requireCurrentEngine(client);
+    const bytes = await fs.promises.readFile(tmpPng);
+    return {
+      arrayBuffer: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+      width: rendered.width,
+      height: rendered.height,
+    };
+  } finally {
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+ipcMain.handle('exports:gpuGifBegin', async (_event, { out, width, height, frames, delay }) => {
+  if (!out || !path.isAbsolute(out) || !Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0 || !Number.isInteger(frames) || frames < 2) {
+    throw Error('GPU GIF 导出参数无效');
+  }
+  const resolved = path.resolve(out);
+  const dup = backgroundExports.list().some(j => !['completed', 'failed', 'cancelled'].includes(j.state) && path.resolve(j.path).toLowerCase() === resolved.toLowerCase())
+    || Array.from(gpuGifSpools.values()).some(s => path.resolve(s.out).toLowerCase() === resolved.toLowerCase());
+  if (dup) throw Error('这个文件已有导出任务，请选择其他文件名');
+  const stagingRoot = path.join(APP_HOME, 'cache', 'exports');
+  await fs.promises.mkdir(stagingRoot, { recursive: true });
+  const directory = await fs.promises.mkdtemp(path.join(stagingRoot, 'gpu-gif-'));
+  const spoolPath = path.join(directory, 'frames.argb');
+  const handle = await fs.promises.open(spoolPath, 'w');
+  const session = { id: randomUUID(), out: resolved, directory, spoolPath, handle, width, height, frames, delay: Math.max(1, Number(delay) || 2), completed: 0, aborted: false };
+  gpuGifSpools.set(session.id, session);
+  emitGpuGifJob(session, 'running', 'rendering');
+  return { id: session.id };
+});
+ipcMain.handle('exports:gpuGifChunk', async (_event, { id, chunk, completed }) => {
+  const session = gpuGifSpools.get(id);
+  if (!session || session.aborted) return { aborted: true };
+  const buf = Buffer.from(chunk);
+  await session.handle.write(buf);
+  session.completed = Math.min(session.frames, Number(completed) || session.completed);
+  emitGpuGifJob(session, 'running', 'rendering');
+  return { aborted: false };
+});
+ipcMain.handle('exports:gpuGifFinish', async (_event, { id }) => {
+  const session = gpuGifSpools.get(id);
+  if (!session) throw Error('GIF 缓冲会话不存在或已取消');
+  gpuGifSpools.delete(id);
+  await session.handle.close();
+  if (session.aborted) {
+    await fs.promises.rm(session.directory, { recursive: true, force: true }).catch(() => {});
+    return { aborted: true };
+  }
+  return backgroundExports.submitSpoolGif({
+    id: session.id,
+    directory: session.directory,
+    spoolPath: session.spoolPath,
+    params: { out: session.out, width: session.width, height: session.height, frames: session.frames, delay: session.delay },
+  });
+});
+ipcMain.handle('exports:gpuGifAbort', async (_event, id) => {
+  const session = gpuGifSpools.get(id);
+  if (!session) return { ok: true };
+  session.aborted = true;
+  gpuGifSpools.delete(id);
+  try { await session.handle.close(); } catch { }
+  try { await fs.promises.rm(session.directory, { recursive: true, force: true }); } catch { }
+  emitGpuGifJob(session, 'cancelled', 'cancelled');
+  return { ok: true };
+});
 handleEngine('engine:cancel', client => client.call('cancel', {}));
 handleEngine('engine:releaseStreaming', async client => {await sceneTransfer.close();await client.call('cancelPreview',{});return client.call('releaseStreaming', {});});
 handleEngine('engine:materials',(client,_event,request)=>client.call('materials',{waterAsIce:request?.waterAsIce===true}));
@@ -194,7 +466,46 @@ ipcMain.handle('dialog:saveMaterials',async(_event,{suggested,format,scope})=>{
 });
 handleEngine('engine:pickBlock', (client, _e, ray) => client.call('pickBlock', ray));
 
-ipcMain.handle('ui:settings', () => uiSettings.settings());
+function readResourceGameVersion() {
+  for (const base of [resourceRoot, APP_HOME]) {
+    if (!base) continue;
+    try {
+      const file = path.join(base, 'assets', 'vanilla', 'assets', 'version.json');
+      if (fs.existsSync(file)) {
+        const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (json?.id || json?.name) return String(json.name || json.id);
+      }
+    } catch { }
+  }
+  return '';
+}
+ipcMain.handle('ui:settings', async () => ({ ...(await uiSettings.settings()), defaultGameVersion: readResourceGameVersion() }));
+ipcMain.handle('ui:sheetSettings', async (_event, patch = {}) => {
+  const next = {};
+  if (typeof patch.sheetMode === 'boolean') next.sheetMode = patch.sheetMode;
+  if (typeof patch.sheetView1 === 'string' && /^[a-z0-9_]{1,48}$/i.test(patch.sheetView1)) next.sheetView1 = patch.sheetView1;
+  if (typeof patch.sheetView2 === 'string' && /^[a-z0-9_]{1,48}$/i.test(patch.sheetView2)) next.sheetView2 = patch.sheetView2;
+  if (typeof patch.sheetOutputDir === 'string') {
+    const clean = patch.sheetOutputDir.trim();
+    if (clean !== '' && !path.isAbsolute(clean)) throw Error('默认导出文件夹必须是绝对路径');
+    next.sheetOutputDir = clean ? path.resolve(clean) : '';
+  }
+  if (typeof patch.sheetCopyClipboard === 'boolean') next.sheetCopyClipboard = patch.sheetCopyClipboard;
+  await uiSettings.save(next);
+  return next;
+});
+ipcMain.handle('dialog:chooseSheetDir', async () => {
+  const cur = (await uiSettings.read()).sheetOutputDir;
+  const choice = await dialog.showOpenDialog(mainWindow, {
+    title: '选择导出模式默认保存文件夹',
+    properties: ['openDirectory', 'createDirectory'],
+    ...(cur && fs.existsSync(cur) ? { defaultPath: cur } : {}),
+  });
+  if (choice.canceled || !choice.filePaths.length) return null;
+  const dir = path.resolve(choice.filePaths[0]);
+  await uiSettings.save({ sheetOutputDir: dir });
+  return { dir };
+});
 ipcMain.handle('ui:editorInventory',async(_event,inventory)=>{
   const {cleanInventory}=require('./renderer/editor-inventory');
   const editorInventory=cleanInventory(inventory);await uiSettings.save({editorInventory});return {editorInventory};
@@ -207,6 +518,11 @@ ipcMain.handle('ui:previewBackend', async (_event, backend) => {
   if (backend !== 'cpu' && backend !== 'gpu') throw new Error('未知的预览渲染方式。');
   await uiSettings.save({ previewBackend: backend });
   return { previewBackend: backend };
+});
+ipcMain.handle('ui:exportMode', async (_event, mode) => {
+  if (mode !== 'gpu' && mode !== 'cpu') throw new Error('未知的导出模式。');
+  await uiSettings.save({ exportMode: mode });
+  return { exportMode: mode };
 });
 for(const key of ['largeProjection','lightingEnabled','showCoordinates','clearCacheOnExit','consoleHidden']) {
   ipcMain.handle('ui:'+key,async(_event,enabled)=>{await uiSettings.save({[key]:enabled===true,...(key==='largeProjection'?{projectionMode:enabled?'streaming':'full'}:{})});return {[key]:enabled===true};});
@@ -257,6 +573,20 @@ ipcMain.handle('window:fullscreen', (_e, enabled) => {
   const fullscreen = typeof enabled === 'boolean' ? enabled : !mainWindow.isFullScreen();
   mainWindow.setFullScreen(fullscreen);
   return { fullscreen };
+});
+ipcMain.handle('window:minimize', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
+});
+ipcMain.handle('window:toggleMaximize', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { maximized: false };
+  if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false);
+  else if (mainWindow.isMaximized()) mainWindow.unmaximize();
+  else mainWindow.maximize();
+  return { maximized: mainWindow.isMaximized() };
+});
+ipcMain.handle('window:isMaximized', () => ({ maximized: !!mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized() }));
+ipcMain.handle('window:close', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
 });
 
 handleEngine('skins:settings', client => client.call('skinSettings', {}));
@@ -340,6 +670,8 @@ ipcMain.handle('engine:previewDiagnostic', (_event, message) => { diagnostic(Str
 handleEngine('engine:searchBlocks',(client,_event,request)=>client.call('searchBlocks',request));
 handleEngine('engine:editPick',(client,_event,request)=>client.call('editPick',request));
 handleEngine('engine:editBlock',(client,_event,request)=>client.call('editBlock',request));
+handleEngine('engine:editRegion',(client,_event,request)=>client.call('editRegion',request));
+handleEngine('engine:selectionStats',(client,_event,request)=>client.call('selectionStats',request));
 handleEngine('engine:editStates',(client,_event,positions)=>client.call('editStates',{positions}));
 handleEngine('engine:inspectPosition',(client,_event,position)=>client.call('inspectPosition',{position}));
 handleEngine('engine:commitEdits',async client=>{const result=await client.call('commitEdits',{rebasePreview:true});requireCurrentEngine(client);if(result.changed)openedSchematic=result.path;return result;});
@@ -482,6 +814,61 @@ ipcMain.handle('shell:reveal', (_e, target) => {
   if (target && fs.existsSync(target)) shell.showItemInFolder(target);
 });
 
+ipcMain.handle('updater:status', async () => {
+  const settings = await uiSettings.read();
+  return { ...appUpdater.snapshot(), ignoredVersion: settings.ignoredUpdateVersion || '' };
+});
+ipcMain.handle('updater:check', async (_e, options = {}) => {
+  const res = await appUpdater.check(options && typeof options === 'object' ? options : {});
+  const settings = await uiSettings.read();
+  return { ...res, ignoredVersion: settings.ignoredUpdateVersion || '' };
+});
+ipcMain.handle('updater:downloadPatch', async () => appUpdater.downloadAndStagePatch());
+ipcMain.handle('updater:downloadInstaller', async () => appUpdater.downloadInstaller());
+ipcMain.handle('updater:ignoreVersion', async (_e, version) => {
+  const clean = typeof version === 'string' ? version.trim().slice(0, 64) : '';
+  await uiSettings.save({ ignoredUpdateVersion: clean });
+  return { ignoredVersion: clean };
+});
+ipcMain.handle('updater:openExternal', async (_e, url) => {
+  if (typeof url !== 'string' || !/^https:\/\/[a-z0-9.-]+/i.test(url)) {
+    throw Error('无效的外部下载链接');
+  }
+  await shell.openExternal(url);
+  return { ok: true };
+});
+ipcMain.handle('updater:applyAndRestart', async () => {
+  const launcher = path.join(APP_HOME, '投影预览.exe');
+  if (!fs.existsSync(launcher)) {
+    throw Error('未找到安装目录启动器：' + launcher);
+  }
+  if (!appUpdater.snapshot().pending) {
+    throw Error('当前没有待应用的更新补丁');
+  }
+  pendingPostQuitLaunch = {
+    exe: launcher,
+    args: ['--apply-update', '--wait-pid', String(process.pid)],
+  };
+  setImmediate(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    else app.quit();
+  });
+  return { scheduled: true };
+});
+ipcMain.handle('updater:launchInstaller', async (_e, file) => {
+  const downloadsRoot = path.resolve(APP_HOME, 'updates', 'downloads') + path.sep;
+  const resolved = typeof file === 'string' ? path.resolve(file) : '';
+  if (!resolved.startsWith(downloadsRoot) || !resolved.toLowerCase().endsWith('.exe') || !fs.existsSync(resolved)) {
+    throw Error('未找到已校验的安装程序文件');
+  }
+  pendingPostQuitLaunch = { exe: resolved, args: [] };
+  setImmediate(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+    else app.quit();
+  });
+  return { scheduled: true };
+});
+
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(async () => {
@@ -506,6 +893,13 @@ app.whenReady().then(async () => {
     });
   }
 
+  if (process.env.LITEMATIC_DISABLE_AUTO_UPDATE !== '1') {
+    const timer = setTimeout(() => {
+      appUpdater.check().catch(() => {});
+    }, 2800);
+    timer.unref?.();
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -522,6 +916,12 @@ app.on('before-quit', event => {
     try {
       await sceneTransfer.close();
       await selectionTransfer.close();
+      for (const session of gpuGifSpools.values()) {
+        session.aborted = true;
+        try { await session.handle.close(); } catch { }
+        try { await fs.promises.rm(session.directory, { recursive: true, force: true }); } catch { }
+      }
+      gpuGifSpools.clear();
       await backgroundExports.close();
       if(renderStopPromise)await renderStopPromise.catch(()=>{});
       // 提交排在在途修改之后，不依赖界面是否已收到修改回复。
@@ -530,6 +930,21 @@ app.on('before-quit', event => {
       await uiSettings.queue;
       if((await uiSettings.read()).clearCacheOnExit){await clearRenderingCache(APP_HOME);diagnostic('render cache cleared on exit');}
     }catch(error){diagnostic('exit cleanup failed: '+(error.stack||error.message));}
-    finally{shutdownComplete=true;app.quit();}
+    finally{
+      if (pendingPostQuitLaunch && fs.existsSync(pendingPostQuitLaunch.exe)) {
+        try {
+          const child = spawn(pendingPostQuitLaunch.exe, pendingPostQuitLaunch.args, {
+            cwd: APP_HOME,
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: false,
+          });
+          child.unref();
+        } catch (err) {
+          diagnostic('post-quit update launch failed: ' + (err?.message || err));
+        }
+      }
+      shutdownComplete=true;app.quit();
+    }
   })();
 });

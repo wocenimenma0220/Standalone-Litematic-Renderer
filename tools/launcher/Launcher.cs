@@ -19,6 +19,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Web.Script.Serialization;
+using Microsoft.Win32;
 
 [assembly: AssemblyTitle("投影预览")]
 [assembly: AssemblyProduct("投影预览")]
@@ -134,6 +137,29 @@ internal static class Launcher
         {
             NormalizeInheritedEnvironment();
 
+
+            if (!cli)
+            {
+                bool explicitApply = false;
+                int waitPid = 0;
+                var passThrough = new List<string>();
+                for (int i = 0; i < argv.Length; i++)
+                {
+                    if (string.Equals(argv[i], "--apply-update", StringComparison.OrdinalIgnoreCase))
+                    {
+                        explicitApply = true;
+                        continue;
+                    }
+                    if (string.Equals(argv[i], "--wait-pid", StringComparison.OrdinalIgnoreCase) && i + 1 < argv.Length)
+                    {
+                        int.TryParse(argv[++i], out waitPid);
+                        continue;
+                    }
+                    passThrough.Add(argv[i]);
+                }
+                argv = passThrough.ToArray();
+                ApplyPendingUpdateIfPresent(waitPid, explicitApply);
+            }
 
             return cli ? RunCli(argv) : RunGui(AbsolutizeArguments(argv, callerCwd));
         }
@@ -464,6 +490,231 @@ internal static class Launcher
         catch (Exception) {   }
     }
 
+
+    private static void ApplyPendingUpdateIfPresent(int waitPid, bool explicitRequest)
+    {
+        string pendingFile = Path.Combine(_root, @"updates\pending-update.json");
+        if (!File.Exists(pendingFile)) return;
+
+        string backupDir = null;
+        try
+        {
+            var serializer = new JavaScriptSerializer();
+            var pending = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(pendingFile, System.Text.Encoding.UTF8));
+            if (pending == null) { TryDeleteFile(pendingFile); return; }
+
+            string manifestPath = Path.Combine(_root, "install-manifest.json");
+            if (!File.Exists(manifestPath))
+            {
+                Log("skip update apply: portable distribution without install-manifest.json");
+                TryDeleteFile(pendingFile);
+                return;
+            }
+            var manifest = serializer.Deserialize<Dictionary<string, object>>(File.ReadAllText(manifestPath, System.Text.Encoding.UTF8));
+            string dist = manifest != null && manifest.ContainsKey("distribution") ? Convert.ToString(manifest["distribution"]) : "";
+            if (!string.Equals(dist, "installer", StringComparison.OrdinalIgnoreCase))
+            {
+                Log("skip update apply: distribution is not installer");
+                TryDeleteFile(pendingFile);
+                return;
+            }
+
+            string payloadDir = pending.ContainsKey("payloadDir") ? Convert.ToString(pending["payloadDir"]) : "";
+            string toVersion = pending.ContainsKey("toVersion") ? Convert.ToString(pending["toVersion"]) : "";
+            if (string.IsNullOrEmpty(payloadDir) || !Directory.Exists(payloadDir))
+            {
+                Log("skip update apply: missing payload directory " + payloadDir);
+                TryDeleteFile(pendingFile);
+                return;
+            }
+
+            WaitForProcessExit(waitPid, 20000);
+            WaitForOwnElectronExit(8000);
+
+            string stamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+            backupDir = Path.Combine(_root, @"updates\backup\" + stamp);
+            Directory.CreateDirectory(backupDir);
+
+            string payloadBin = Path.Combine(payloadDir, "bin");
+            string payloadWebapp = Path.Combine(payloadDir, "webapp");
+            string payloadAssets = Path.Combine(payloadDir, "assets");
+
+            string targetBin = Path.Combine(_root, "bin");
+            string targetWebapp = Path.Combine(_root, "webapp");
+            string targetAssets = Path.Combine(_root, "assets");
+
+            if (Directory.Exists(payloadBin))
+            {
+                if (Directory.Exists(targetBin)) CopyDirectory(targetBin, Path.Combine(backupDir, "bin"), null);
+                ReplaceDirectoryContents(payloadBin, targetBin, null);
+            }
+            if (Directory.Exists(payloadWebapp))
+            {
+                var preserve = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" };
+                if (Directory.Exists(targetWebapp)) CopyDirectory(targetWebapp, Path.Combine(backupDir, "webapp"), preserve);
+                ReplaceDirectoryContents(payloadWebapp, targetWebapp, preserve);
+            }
+            if (Directory.Exists(payloadAssets))
+            {
+                if (Directory.Exists(targetAssets)) BackupOverwrittenFiles(payloadAssets, targetAssets, Path.Combine(backupDir, "assets"));
+                CopyDirectory(payloadAssets, targetAssets, null);
+            }
+
+            manifest["installedVersion"] = toVersion;
+            manifest["updatedAt"] = DateTime.UtcNow.ToString("o");
+            File.WriteAllText(manifestPath, serializer.Serialize(manifest), new System.Text.UTF8Encoding(false));
+
+            try
+            {
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteKindaProjectionPreview", true))
+                {
+                    if (key != null && !string.IsNullOrEmpty(toVersion)) key.SetValue("DisplayVersion", toVersion);
+                }
+            }
+            catch (Exception) { }
+
+            TryDeleteFile(pendingFile);
+            TryDeleteDirectory(Path.Combine(_root, @"updates\staging"));
+            PruneOldBackups(Path.Combine(_root, @"updates\backup"), 1);
+            Log("patch applied cleanly -> version " + toVersion);
+        }
+        catch (Exception ex)
+        {
+            Log("update apply failed: " + ex);
+            try
+            {
+                if (!string.IsNullOrEmpty(backupDir) && Directory.Exists(backupDir))
+                {
+                    string bBin = Path.Combine(backupDir, "bin");
+                    string bWebapp = Path.Combine(backupDir, "webapp");
+                    string bAssets = Path.Combine(backupDir, "assets");
+                    if (Directory.Exists(bBin)) ReplaceDirectoryContents(bBin, Path.Combine(_root, "bin"), null);
+                    if (Directory.Exists(bWebapp)) ReplaceDirectoryContents(bWebapp, Path.Combine(_root, "webapp"), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "node_modules" });
+                    if (Directory.Exists(bAssets)) CopyDirectory(bAssets, Path.Combine(_root, "assets"), null);
+                    Log("rollback from backup completed");
+                }
+            }
+            catch (Exception rex)
+            {
+                Log("rollback failed: " + rex);
+            }
+            TryDeleteFile(pendingFile);
+            if (explicitRequest)
+            {
+                try
+                {
+                    MessageBoxW(IntPtr.Zero, "应用更新补丁失败，已保留或恢复原版本：\r\n\r\n" + ex.Message,
+                        "投影预览 — 更新失败", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
+                }
+                catch (Exception) { }
+            }
+        }
+    }
+
+    private static void WaitForProcessExit(int pid, int timeoutMs)
+    {
+        if (pid <= 0) return;
+        try
+        {
+            using (Process proc = Process.GetProcessById(pid))
+            {
+                proc.WaitForExit(timeoutMs);
+            }
+        }
+        catch (Exception) { }
+    }
+
+    private static void WaitForOwnElectronExit(int timeoutMs)
+    {
+        string prefix = _root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        int waited = 0;
+        while (waited < timeoutMs)
+        {
+            bool any = false;
+            try
+            {
+                foreach (Process p in Process.GetProcessesByName("electron"))
+                {
+                    try
+                    {
+                        string exe = p.MainModule != null ? p.MainModule.FileName : "";
+                        if (!string.IsNullOrEmpty(exe) && exe.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        {
+                            any = true;
+                            break;
+                        }
+                    }
+                    catch (Exception) { }
+                    finally { p.Dispose(); }
+                }
+            }
+            catch (Exception) { }
+            if (!any) return;
+            Thread.Sleep(200);
+            waited += 200;
+        }
+    }
+
+    private static void BackupOverwrittenFiles(string srcDir, string currentDir, string backupDir)
+    {
+        foreach (string srcFile in Directory.GetFiles(srcDir, "*", SearchOption.AllDirectories))
+        {
+            string rel = srcFile.Substring(srcDir.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string existing = Path.Combine(currentDir, rel);
+            if (!File.Exists(existing)) continue;
+            string dest = Path.Combine(backupDir, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(dest));
+            File.Copy(existing, dest, true);
+        }
+    }
+
+    private static void ReplaceDirectoryContents(string srcDir, string dstDir, HashSet<string> preserveTopDirs)
+    {
+        if (Directory.Exists(dstDir))
+        {
+            foreach (string file in Directory.GetFiles(dstDir)) File.Delete(file);
+            foreach (string sub in Directory.GetDirectories(dstDir))
+            {
+                string name = Path.GetFileName(sub);
+                if (preserveTopDirs != null && preserveTopDirs.Contains(name)) continue;
+                Directory.Delete(sub, true);
+            }
+        }
+        CopyDirectory(srcDir, dstDir, preserveTopDirs);
+    }
+
+    private static void CopyDirectory(string srcDir, string dstDir, HashSet<string> skipTopDirs)
+    {
+        Directory.CreateDirectory(dstDir);
+        foreach (string file in Directory.GetFiles(srcDir))
+        {
+            File.Copy(file, Path.Combine(dstDir, Path.GetFileName(file)), true);
+        }
+        foreach (string sub in Directory.GetDirectories(srcDir))
+        {
+            string name = Path.GetFileName(sub);
+            if (skipTopDirs != null && skipTopDirs.Contains(name)) continue;
+            CopyDirectory(sub, Path.Combine(dstDir, name), null);
+        }
+    }
+
+    private static void PruneOldBackups(string backupRoot, int keep)
+    {
+        if (!Directory.Exists(backupRoot)) return;
+        var dirs = new List<DirectoryInfo>(new DirectoryInfo(backupRoot).GetDirectories());
+        dirs.Sort((a, b) => b.CreationTimeUtc.CompareTo(a.CreationTimeUtc));
+        for (int i = keep; i < dirs.Count; i++) TryDeleteDirectory(dirs[i].FullName);
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try { if (File.Exists(path)) File.Delete(path); } catch (Exception) { }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try { if (Directory.Exists(path)) Directory.Delete(path, true); } catch (Exception) { }
+    }
 
     // 图形模式使用消息框报告错误，命令行模式写入标准错误。
 

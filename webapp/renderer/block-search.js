@@ -2,11 +2,11 @@
 'use strict';
 (() => {
   const el=id=>document.getElementById(id),query=el('blockSearchQuery'),info=el('blockSearchStatus');
-  let generation=0,page=null,index=0,searched='',running=false;
-  const api=window.blockSearch={active:false,revision:0,clear};
+  let generation=0,page=null,index=0,searched='',running=false,lastError=null;
+  const api=window.blockSearch={active:false,revision:0,clear,runQuery,locateAt};
   const box=p=>({min:p,max:p.map(v=>v+1)});
   function buttons(){el('blockSearchLocate').disabled=running||!page?.total;el('blockSearchPrev').disabled=el('blockSearchNext').disabled=running||!page?.total;el('blockSearchRun').disabled=running;}
-  function clear(){++generation;page=null;running=false;api.active=false;++api.revision;if(state.view){state.view.searchBoxes=null;state.view.searchCurrent=null;state.view.searchPage=null;state.view.setSearchMatches(null);}info.textContent='打开投影后可按中文名称或 ID 搜索。';buttons();drawView();}
+  function clear(){++generation;page=null;lastError=null;running=false;api.active=false;++api.revision;if(state.view){state.view.searchBoxes=null;state.view.searchCurrent=null;state.view.searchPage=null;state.view.setSearchMatches(null);}info.textContent='打开投影后可按中文名称或 ID 搜索。';buttons();drawView();}
   function show(){
     const result=page.results[index];api.active=!!result;++api.revision;
     if(state.view){if(state.view.searchPage!==page){state.view.setSearchMatches(page.results.map(r=>r.position));state.view.searchPage=page;}state.view.searchBoxes=page.results.map(r=>box(r.position));state.view.searchCurrent=result?box(result.position):null;}
@@ -21,13 +21,35 @@
     state.flyDirty=true;updateCoordinates();drawView();
   }
   async function search(offset=0,last=false){
-    if(!state.file){info.textContent='请先打开投影。';return;}
-    if(!state.viewReady||state.cpuPreview){info.textContent='请等待 GPU 三维预览就绪后搜索。';return;}
-    const text=offset?searched:query.value.trim();if(!text){clear();return;}
+    lastError=null;
+    if(!state.file){info.textContent='请先打开投影。';return null;}
+    if(!state.viewReady||state.cpuPreview){info.textContent='请等待 GPU 三维预览就绪后搜索。';return null;}
+    const text=offset?searched:query.value.trim();if(!text){clear();return null;}
     const token=++generation;running=true;buttons();info.textContent='正在搜索…';
-    try{const result=await window.engine.searchBlocks({query:text,offset});if(token!==generation)return;searched=text;page=result;index=last?Math.max(0,result.results.length-1):0;show();}
-    catch(error){if(token===generation){page=null;api.active=false;if(state.view){state.view.searchBoxes=null;state.view.searchCurrent=null;state.view.searchPage=null;state.view.setSearchMatches(null);}++api.revision;info.textContent='搜索失败：'+error.message;drawView();}}
+    try{const result=await window.engine.searchBlocks({query:text,offset});if(token!==generation)return null;searched=text;page=result;index=last?Math.max(0,result.results.length-1):0;show();return result;}
+    catch(error){if(token===generation){lastError=error;page=null;api.active=false;if(state.view){state.view.searchBoxes=null;state.view.searchCurrent=null;state.view.searchPage=null;state.view.setSearchMatches(null);}++api.revision;info.textContent='搜索失败：'+error.message;drawView();}return null;}
     finally{if(token===generation){running=false;buttons();}}
+  }
+  async function runQuery(text){
+    if(!state.file)throw Error('请先打开投影');
+    if(!state.viewReady||state.cpuPreview)throw Error('请等待 GPU 三维预览就绪后搜索');
+    query.value=String(text||'').trim();
+    if(!query.value){clear();return {total:0,results:[]};}
+    const res=await search(0,false);
+    if(lastError)throw lastError;
+    return res||{total:0,results:[]};
+  }
+  async function locateAt(oneBased){
+    if(!page?.total)throw Error('当前没有可定位的搜索结果，请先运行 /search');
+    if(running)throw Error('搜索正在进行中，请稍候');
+    const target=Math.max(0,Math.min(page.total-1,(oneBased|0)-1));
+    if(target<page.offset||target>=page.offset+page.results.length){
+      await search(Math.floor(target/page.limit)*page.limit,false);
+      if(!page)throw Error('翻页定位失败');
+    }
+    index=target-page.offset;
+    show();locate();
+    return {index:target+1,total:page.total,result:page.results[index]};
   }
   async function next(delta){
     if(!page?.total||running)return;let target=(page.offset+index+delta+page.total)%page.total;

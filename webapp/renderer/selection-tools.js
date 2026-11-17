@@ -54,10 +54,11 @@ function commandFeedback(text=''){
 function beginCommandInput(){
   commandResume=commandResume||state.fly&&(state.flyLookActive||state.flyLockPending);state.keys.clear();shortcutHeldKeys.clear();pauseFlyLook();
 }
+const commandHistory=[];let commandHistoryIndex=-1,commandDraft='';
 function openCommand(){
   setConsoleHidden(false);
   beginCommandInput();
-  selectionUi.command.focus();if(!selectionUi.command.value)selectionUi.command.value='//';
+  selectionUi.command.focus();if(!selectionUi.command.value)selectionUi.command.value='/';
   selectionUi.command.setSelectionRange(selectionUi.command.value.length,selectionUi.command.value.length);
 }
 function closeCommand(){selectionUi.command.blur();state.keys.clear();if(commandResume&&state.fly)resumeFlyLook();commandResume=false;}
@@ -65,7 +66,13 @@ selectionUi.command.addEventListener('focus',beginCommandInput);
 async function submitCommand(){
   const text=selectionUi.command.value.trim();if(!text||commandRunning)return;
   commandRunning=true;selectionUi.command.readOnly=true;$('commandSubmit').disabled=true;commandFeedback();log('> '+text);
-  try{await runSelectionCommand(text);selectionUi.command.value='';}
+  try{
+    if(window.CommandRouter?.execute)await window.CommandRouter.execute(text);
+    else await runSelectionCommand(text);
+    if(commandHistory[commandHistory.length-1]!==text){commandHistory.push(text);if(commandHistory.length>50)commandHistory.shift();}
+    commandHistoryIndex=-1;commandDraft='';
+    selectionUi.command.value='';
+  }
   catch(error){commandFeedback(error.message);log(error.message,'err');}
   finally{commandRunning=false;selectionUi.command.readOnly=false;$('commandSubmit').disabled=false;if(document.activeElement===selectionUi.command||document.activeElement===$('commandSubmit'))selectionUi.command.focus();}
 }
@@ -79,6 +86,32 @@ $('selectionReset').addEventListener('click',resetSelection);
 $('openCommand').addEventListener('click',openCommand);
 selectionUi.command.addEventListener('keydown',event=>{
   event.stopPropagation();
+  if(event.key==='Tab'){
+    event.preventDefault();
+    const res=window.CommandRouter?.complete?.(selectionUi.command.value);
+    if(res?.completion){
+      selectionUi.command.value=res.completion;
+      selectionUi.command.setSelectionRange(res.completion.length,res.completion.length);
+      commandFeedback(res.candidates?.length>1?res.candidates.slice(0,8).join('  ')+(res.candidates.length>8?' …':''):'');
+    }
+    return;
+  }
+  if(event.key==='ArrowUp'&&commandHistory.length){
+    event.preventDefault();
+    if(commandHistoryIndex<0){commandDraft=selectionUi.command.value;commandHistoryIndex=commandHistory.length-1;}
+    else if(commandHistoryIndex>0)commandHistoryIndex--;
+    const val=commandHistory[commandHistoryIndex];
+    selectionUi.command.value=val;selectionUi.command.setSelectionRange(val.length,val.length);
+    return;
+  }
+  if(event.key==='ArrowDown'&&commandHistoryIndex>=0){
+    event.preventDefault();
+    if(commandHistoryIndex<commandHistory.length-1){commandHistoryIndex++;selectionUi.command.value=commandHistory[commandHistoryIndex];}
+    else {commandHistoryIndex=-1;selectionUi.command.value=commandDraft;}
+    const len=selectionUi.command.value.length;
+    selectionUi.command.setSelectionRange(len,len);
+    return;
+  }
   if(isShortcut('close',event)){event.preventDefault();closeCommand();}
   if(isShortcut('submit',event)){
     event.preventDefault();submitCommand();

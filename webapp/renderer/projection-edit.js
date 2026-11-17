@@ -25,7 +25,7 @@
   let flyHotbarKey=null;
   let hoverTimer=0,hoverPoint=null,hoverRunning=false,hoverKey=null;
   let selected=null,category='building_blocks',tool='block',busy=false,session=0,originalFile=null,undo=0,redo=0,rotationGesture=false,cachedPatchAtlas=null;
-  const api=window.projectionEditor={enabled:false,dirty:false,target:null,pending:null,settle:()=>api.pending,toggle,reset,refreshHints,refreshVisibility,interact,history,flush,export:exportProjection};
+  const api=window.projectionEditor={enabled:false,dirty:false,target:null,pending:null,settle:()=>api.pending,toggle,reset,refreshHints,refreshVisibility,interact,history,flush,applyExternal,export:exportProjection};
   const categories=[['building_blocks','建筑方块'],['colored_blocks','染色方块'],['natural_blocks','自然方块'],['functional_blocks','功能方块'],['redstone_blocks','红石方块'],['op_blocks','管理员方块'],['special','水 / 岩浆 / 地狱门'],['all','全部']];
   function status(message){info.textContent=message;}
   function refreshHints(){
@@ -248,6 +248,33 @@
       const changes=ProjectionEditModel.placement(activeBlock,{position,face:hit.face,look,shift:!!event.shiftKey,neighbors:adjacent,hitHeight:hit.point?hit.point[1]-position[1]:.5});
       if(changes.some(change=>!ProjectionEditModel.within(change.position,bounds))){status('箱子另一半超出当前选区，请扩大范围。');return;}
       const result=await applyMutation({changes},'已放置 '+activeBlock.name+' · '+position.join(', ')+'；退出后统一更新模型。',token);if(token===session&&result?.changed)audio.play(activeBlock.id);
+    }
+  }
+  async function applyExternal(executor, formatMessage) {
+    if (busy || state.scenePreparing || state.rendering) throw Error('正在忙碌，请稍候再执行编辑指令');
+    if (!state.file || !state.viewReady || state.cpuPreview) throw Error('请等待 GPU 3D 预览就绪后执行编辑指令');
+    originalFile = originalFile || state.file;
+    busy = true;
+    update();
+    const token = session;
+    let resolvePending;
+    const pending = new Promise(r => { resolvePending = r; });
+    api.pending = pending;
+    try {
+      const result = await executor(token);
+      if (token !== session) return result;
+      if (result) {
+        await refresh(result, token);
+        if (token === session) {
+          const msg = typeof formatMessage === 'function' ? formatMessage(result) : (formatMessage || '修改已完成');
+          status(msg);
+        }
+      }
+      return result;
+    } finally {
+      if (token === session) { busy = false; update(); }
+      resolvePending();
+      if (api.pending === pending) api.pending = null;
     }
   }
   function history(action){if(!api.enabled||busy||state.scenePreparing||state.rendering)return;return operation(token=>applyMutation({action},action==='undo'?'已撤销上一步修改。':'已重做上一步修改。',token));}

@@ -15,6 +15,7 @@ tools/verify/preview-test-scenes/
 # Bundled toolchain (a full Node distribution, ~90 MB) — fetched, not authored here.
 tools/node/
 tools/launcher/bin/
+tools/installer/bin/
 tools/verify/output/
 tools/verify/entity-output/
 tools/verify/skin-output/

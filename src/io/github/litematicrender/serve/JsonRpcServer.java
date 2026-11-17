@@ -92,7 +92,7 @@ public final class JsonRpcServer {
 
     private static boolean isCancelableWorkerMethod(String method) {
         return switch (method) {
-            case "render", "renderPreview", "renderAnimation", "exportScene", "exportCachedScene", "exportSelectionScene" -> true;
+            case "render", "renderPreview", "renderAnimation", "writeAnimatedGif", "exportScene", "exportCachedScene", "exportSelectionScene" -> true;
             default -> false;
         };
     }
@@ -171,6 +171,20 @@ public final class JsonRpcServer {
             case "editPatch": {var selection=MiniJson.asObject(p.get("selection"));return this.engine.editPatch(Path.of(require(p,"directory")),selection==null?null:vector(selection,"min"),selection==null?null:vector(selection,"max"));}
             case "inspectPosition": {var position=MiniJson.asArray(p.get("position"));if(position==null||position.size()!=3)throw new IllegalArgumentException("无效坐标");return this.engine.inspectPosition(position.stream().mapToInt(v->((Number)v).intValue()).toArray());}
             case "editBlock": return this.engine.editBlock(p);
+            case "editRegion": return this.engine.editRegion(p);
+            case "selectionStats": {
+                var bounds=MiniJson.asObject(p.get("selection"));
+                if(bounds==null)throw new IllegalArgumentException("请先设置选区范围");
+                return this.engine.selectionStats(vector(bounds,"min"),vector(bounds,"max"),MiniJson.asString(p.get("query"),null));
+            }
+            case "writeAnimatedGif": {
+                Path spool=Path.of(require(p,"spool"));
+                Path out=Path.of(require(p,"out"));
+                int width=MiniJson.asInt(p.get("width"),1024),height=MiniJson.asInt(p.get("height"),1024);
+                int frames=MiniJson.asInt(p.get("frames"),RenderSettings.DEFAULT_ANIMATION_FRAMES);
+                int delayCs=MiniJson.asInt(p.get("delay"),RenderSettings.DEFAULT_ANIMATION_DELAY_CS);
+                return this.engine.writeAnimatedGif(spool,out,width,height,frames,delayCs,(stage,completed,total)->emit(Map.of("event","exportProgress","stage",stage,"completed",completed,"total",total)));
+            }
             case "exportEdited": return this.engine.exportEdited(Path.of(require(p,"out")));
             case "searchBlocks": return this.engine.searchBlocks(require(p,"query"),MiniJson.asInt(p.get("offset"),0));
             case "writeBoard": return io.github.litematicrender.schematic.BoardSchematic.write(Path.of(require(p,"out")),MiniJson.asArray(p.get("cells")));

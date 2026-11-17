@@ -22,7 +22,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases) 下载对应版本的 Windows x64 便携包（带 `-beta`、`-test` 等后缀的为测试版）。
+1. 从 [Releases](https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases) 下载对应版本的 Windows x64 安装包（`*-setup.exe`，支持应用内自动增量补丁更新与一键安装/卸载）或绿色便携包（`*.zip`，检测更新后引导下载；带 `-beta`、`-test` 等后缀的为测试版）。
 2. 将压缩包完整解压到可写目录（保留同级的 `bin`、`runtime`、`assets`、`webapp` 等文件夹），双击 `投影预览.exe`。
 3. 拖入或选择投影文件；通过左侧栏可调整选区、光照、材料清单或切换渲染/编辑模式。
 
@@ -32,7 +32,7 @@
 
 ## 主要功能
 
-当前版本：**1.3.0（正式版）**（以下功能截图拍摄于早期版本界面）。
+当前版本：**1.3.1（正式版）**（以下功能截图拍摄于早期版本界面）。
 
 ### 三维预览与漫游
 

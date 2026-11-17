@@ -7,7 +7,7 @@ function refreshShortcutHints(){
   els.fullscreen.textContent=`${state.fullscreen?'退出全屏':'全屏'} (${shortcutHint('fullscreen')})`;
   selectionUi.enabled.parentElement.lastChild.textContent=`选择渲染工具 (${shortcutHint('selection')})`;
   $('openCommand').textContent=`输入指令 (${shortcutHint('command')})`;
-  selectionUi.command.placeholder=`输入指令，例如 //select 1（${shortcutHint('command')} 聚焦）`;
+  selectionUi.command.placeholder=`输入 / 查看全局指令或 // 选区指令（${shortcutHint('command')} 聚焦，Tab 补全）`;
   selectionUi.command.title=`${shortcutHint('submit')} 执行，${shortcutHint('close')} 返回预览`;
   els.flyHint.textContent=`${shortcutHint('forward')} / ${shortcutHint('left')} / ${shortcutHint('backward')} / ${shortcutHint('right')} 移动，${shortcutHint('up')} 上升，${shortcutHint('down')} 下降，${shortcutHint('boost')} 加速；移动鼠标转向，${shortcutHint('close')} 释放鼠标，${shortcutHint('fly')} 退出漫游。`;
   $('selectionHelp').textContent=`开启后 ${shortcutHint('corner1')} 选角点 1，${shortcutHint('corner2')} 选角点 2，也可在“移动角点”中切换；${shortcutHint('nudge')}＋滚轮每格移动一个方块，上滚沿观察方向、下滚反向。抬头或低头超过 60° 时上下移动，逐层模式切换高度。漫游照常，选择优先。`;
@@ -44,8 +44,29 @@ keysDialog.addEventListener('close',()=>{cancelBinding();shortcutHeldKeys.clear(
 $('menuCommands').addEventListener('click',()=>openShortcutDialog(commandsDialog));
 $('closeCommands').addEventListener('click',()=>commandsDialog.close());
 $('commandsInput').addEventListener('click',()=>{commandsDialog.close();openCommand();});
-for(const [syntax,description]of [['//select 1 [X Y Z]','设置渲染范围角点 1'],['//select 2 [X Y Z]','设置渲染范围角点 2']]){
-  const row=document.createElement('div');row.className='shortcut-row';const code=document.createElement('code');code.textContent=syntax;const desc=document.createElement('span');desc.textContent=description;row.append(code,desc);$('commandRows').append(row);
+const specs = window.CommandRouter?.specs || [
+  { group: 'level2', syntax: '//select 1 [X Y Z]', desc: '设置渲染范围角点 1' },
+  { group: 'level2', syntax: '//select 2 [X Y Z]', desc: '设置渲染范围角点 2' },
+];
+const rowsHost = $('commandRows');
+rowsHost.replaceChildren();
+for (const [groupId, heading] of [['level1', '一级指令（/ 全局控制）'], ['level2', '二级指令（// 选区与批量编辑）']]) {
+  const items = specs.filter(item => item.group === groupId);
+  if (!items.length) continue;
+  const title = document.createElement('div');
+  title.className = 'command-group-heading';
+  title.textContent = heading;
+  rowsHost.append(title);
+  for (const item of items) {
+    const row = document.createElement('div');
+    row.className = 'shortcut-row';
+    const code = document.createElement('code');
+    code.textContent = item.syntax;
+    const desc = document.createElement('span');
+    desc.textContent = item.desc;
+    row.append(code, desc);
+    rowsHost.append(row);
+  }
 }
 window.addEventListener('keydown',event=>{
   if(bindingCaptureAction){event.preventDefault();event.stopImmediatePropagation();if(!event.repeat)bindShortcut(bindingCaptureAction,normalizedKey(event.code));return;}

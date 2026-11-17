@@ -41,6 +41,12 @@ const els = {
   render: $('btnRender'),
   export: $('btnExport'),
   exportGif: $('btnExportGif'),
+  exportSheet: $('btnExportSheet'),
+  sheetView1: $('sheetView1'),
+  sheetView2: $('sheetView2'),
+  viewPreset: $('viewPreset'),
+  rotate90: $('btnRotate90'),
+  flipSlant: $('btnFlipSlant'),
   preview: $('preview'),
   gl: $('gl'),
   flyBtn: $('btnFly'),
@@ -52,6 +58,8 @@ const els = {
   busyText: $('busyText'),
   log: $('log'),
   stats: $('stats'),
+  exportMode: $('exportMode'),
+  sheetMode: $('btnSheetMode'),
   bgMode: $('bgMode'),
   stopRender: $('btnStopRender'), fileDropHint: $('fileDropHint'), fileDropMessage: $('fileDropMessage'),
   sidebar: $('sidebar'),
@@ -93,6 +101,14 @@ const state = {
   view: null,
   viewReady: false,
   previewBackend: 'gpu', cpuPreview: false, cpuPreviewReady: false,
+  exportMode: 'gpu',
+  sheetMode: false,
+  sheetView1: 'dimetric_front',
+  sheetView2: 'dimetric_back',
+  sheetOutputDir: '',
+  sheetCopyClipboard: true,
+  defaultGameVersion: '',
+  lastSheet: null,
   lodPreview: true, largeProjection:false,projectionMode:'auto',
   geometryBudgetMB:256,
   preloadMode:'streaming',
@@ -152,6 +168,7 @@ function updateButtons() {
   els.materials.disabled=els.menuMaterials.disabled=!ready;
   els.export.disabled = !ready;
   els.exportGif.disabled = !ready;
+  if (els.exportSheet) els.exportSheet.disabled = !ready;
   els.menuExportPng.disabled = !ready;
   els.menuExportGif.disabled = !ready;
   els.skinOnline.disabled = busy||state.scenePreparing;
@@ -206,7 +223,7 @@ function invalidateCpuPreview() {
   lastCpuPreviewKey=null;
 }
 function requestPreview(interactive, options = {}) {
-  if (!state.file || state.stopping || state.stopped || state.engineNeedsOpen) return Promise.resolve(null);
+  if (state.sheetMode || !state.file || state.stopping || state.stopped || state.engineNeedsOpen) return Promise.resolve(null);
   if(!state.cpuPreview&&state.previewBackend!=='cpu'){if(state.viewReady)drawView();return Promise.resolve(null);}
   if (state.viewReady && !state.cpuPreview) { drawView(); return Promise.resolve(null); }
   const generation = ++state.previewGeneration;
@@ -288,6 +305,7 @@ function handlePreviewProgress(evt){
   showPreviewStage(evt.stage);
 }
 async function buildView(options = {}) {
+  if(state.sheetMode)return;
   if(window.projectionEditor?.pending&&!options.editsCommitted)await window.projectionEditor.settle();
   if(window.projectionEditor?.dirty&&!options.editsCommitted)await window.projectionEditor.flush(false);
   if(state.stopping)return;
@@ -599,7 +617,7 @@ function scheduleStreamView() {
 
 /** 空闲时复用已显示帧，运动结束后恢复原生分辨率。 */
 function drawView(interactive = false) {
-  if(state.stopping||state.stopped||state.fileOpening)return;
+  if(state.sheetMode||state.stopping||state.stopped||state.fileOpening)return;
   updateCoordinates();
   if(state.cpuPreview) {
     if(!state.cpuPreviewReady)return;
@@ -715,6 +733,10 @@ function syncAngleLabels() {
   els.rotationVal.textContent = yaw + '°';
   els.slantVal.textContent = pitch + '°';
   els.zoomVal.textContent = zoom + '×';
+  if (els.viewPreset && window.ViewPresets) {
+    const matched = window.ViewPresets.matchAngles(Number(els.rotation.value), Number(els.slant.value));
+    els.viewPreset.value = matched ? matched.id : 'custom';
+  }
   const hudCamera = $('hudCamera');
   if (hudCamera) hudCamera.textContent = `Yaw: ${yaw}° | Pitch: ${pitch}° | Zoom: ${zoom}×`;
 }
@@ -753,7 +775,7 @@ let dragY = 0;
 let flyPress=null,hoverPoint=null;
 
 els.viewport.addEventListener('pointerdown', (e) => {
-  if(e.target.closest('.block-inspector'))return;
+  if(state.sheetMode||e.target.closest('.sheet-result-panel, .block-inspector, .projection-fly-hotbar, .viewport-hud-stack'))return;
   if(state.fly)return;
 
   if (e.button !== 0 && e.button !== 2) return;
@@ -847,7 +869,7 @@ els.viewport.addEventListener('contextmenu', (e) => e.preventDefault());
 els.viewport.addEventListener(
   'wheel',
   (e) => {
-    if(e.target.closest('.block-inspector'))return;
+    if(state.sheetMode||e.target.closest('.sheet-result-panel, .block-inspector, .projection-fly-hotbar'))return;
     e.preventDefault();
 
     state.zoom *= Math.exp(-e.deltaY / 100 * 0.12);
@@ -859,23 +881,68 @@ els.viewport.addEventListener(
   { passive: false }
 );
 
+function populateViewSelects() {
+  if (!window.ViewPresets) return;
+  if (els.viewPreset) {
+    els.viewPreset.replaceChildren();
+    const customOpt = new Option('自定义视角', 'custom');
+    customOpt.disabled = true;
+    els.viewPreset.add(customOpt);
+    for (const p of window.ViewPresets.LIST) els.viewPreset.add(new Option(p.label, p.id));
+  }
+  if (els.sheetView1) {
+    els.sheetView1.replaceChildren();
+    els.sheetView1.add(new Option('当前交互视角', 'current'));
+    for (const p of window.ViewPresets.LIST) els.sheetView1.add(new Option(p.label, p.id));
+    els.sheetView1.value = state.sheetView1;
+  }
+  if (els.sheetView2) {
+    els.sheetView2.replaceChildren();
+    els.sheetView2.add(new Option('当前视角背面 (+180°)', 'current_reverse'));
+    els.sheetView2.add(new Option('当前交互视角', 'current'));
+    for (const p of window.ViewPresets.LIST) els.sheetView2.add(new Option(p.label, p.id));
+    els.sheetView2.value = state.sheetView2;
+  }
+}
+populateViewSelects();
+
+function applyViewAngles(yawDeg, slantDeg) {
+  if (state.fly) setFly(false);
+  const yaw = ((Number(yawDeg) || 0) % 360 + 360) % 360;
+  const slant = Math.max(-90, Math.min(90, Number(slantDeg) || 0));
+  els.rotation.value = String(yaw);
+  els.slant.value = String(slant);
+  syncAngleLabels();
+  if (state.cpuPreview) requestPreview(false);
+  else drawView();
+}
+
 document.querySelectorAll('[data-preset]').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const p = btn.dataset.preset;
-    const map = {
-      iso: [45, 35.264],
-      dimetric: [45, 30],
-      front: [0, 0],
-      top: [0, 89],
-      back: [180, 0],
-      left: [-90, 0],
-    }[p];
-    if (!map) return;
-    els.rotation.value = String(map[0]);
-    els.slant.value = String(map[1]);
-    syncAngleLabels();
-    requestPreview(false);
+    const p = window.ViewPresets?.find(btn.dataset.preset);
+    if (!p) return;
+    applyViewAngles(p.yaw, p.slant);
   });
+});
+
+els.viewPreset?.addEventListener('change', () => {
+  const p = window.ViewPresets?.find(els.viewPreset.value);
+  if (p) applyViewAngles(p.yaw, p.slant);
+});
+
+els.rotate90?.addEventListener('click', () => {
+  const cur = Number(els.rotation.value) || 0;
+  applyViewAngles(cur + 90, Number(els.slant.value));
+});
+
+els.flipSlant?.addEventListener('click', () => {
+  const stops = [30, 89, 0, -89];
+  const cur = Number(els.slant.value) || 0;
+  let best = 0;
+  for (let i = 1; i < stops.length; i++) {
+    if (Math.abs(cur - stops[i]) < Math.abs(cur - stops[best])) best = i;
+  }
+  applyViewAngles(Number(els.rotation.value), stops[(best + 1) % stops.length]);
 });
 
 els.transparent.addEventListener('change', () => {
@@ -906,6 +973,20 @@ els.bgMode.addEventListener('change', async () => {
   drawView();
   try { await window.appUi.setBackgroundMode(els.bgMode.value, els.bg.value); }
   catch (error) { log('背景设置失败：' + error.message, 'err'); }
+});
+
+els.exportMode?.addEventListener('change', async () => {
+  const previous = state.exportMode;
+  const mode = els.exportMode.value === 'cpu' ? 'cpu' : 'gpu';
+  state.exportMode = mode;
+  try {
+    await window.appUi.setExportMode(mode);
+    log(mode === 'gpu' ? '导出模式已切换为：GPU 极速。' : '导出模式已切换为：CPU 精确。');
+  } catch (error) {
+    state.exportMode = previous;
+    els.exportMode.value = previous;
+    log('保存导出模式失败：' + error.message, 'err');
+  }
 });
 
 
@@ -941,6 +1022,8 @@ function updateFullscreen(fullscreen) {
   state.fullscreen = fullscreen;
   els.fullscreen.textContent = `${fullscreen?'退出全屏':'全屏'} (${shortcutHint('fullscreen')})`;
   els.fullscreen.setAttribute('aria-pressed', String(fullscreen));
+  const winMax = $('winMaximize');
+  if (winMax) winMax.disabled = !!fullscreen;
   drawView();
 }
 async function setFullscreen(enabled) {
@@ -949,6 +1032,36 @@ async function setFullscreen(enabled) {
 }
 els.fullscreen.addEventListener('click', () => setFullscreen(!state.fullscreen));
 window.appUi.onFullscreen(updateFullscreen);
+
+function updateWindowMaximized(maximized) {
+  const btn = $('winMaximize');
+  if (!btn) return;
+  btn.dataset.maximized = String(!!maximized);
+  const label = maximized ? '向下还原' : '最大化';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  document.body.classList.toggle('is-maximized', !!maximized);
+}
+$('winMinimize')?.addEventListener('click', () => window.appUi.minimize?.().catch(() => {}));
+$('winMaximize')?.addEventListener('click', async () => {
+  try { updateWindowMaximized((await window.appUi.toggleMaximize?.())?.maximized); }
+  catch { }
+});
+$('winClose')?.addEventListener('click', () => {
+  if (window.appUi.closeWindow) window.appUi.closeWindow().catch(() => window.close());
+  else window.close();
+});
+window.appUi.onMaximized?.(updateWindowMaximized);
+window.appUi.isMaximized?.().then((res) => updateWindowMaximized(res?.maximized)).catch(() => {});
+window.appUi.onDevReloadCss?.((file) => {
+  const cleanName = String(file || '').split(/[\\/]/).pop();
+  document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+    const base = link.getAttribute('href')?.split('?')[0] || '';
+    if (!cleanName || base.endsWith(cleanName)) {
+      link.setAttribute('href', `${base}?v=${Date.now()}`);
+    }
+  });
+});
 
 function applySidebarCollapsed(collapsed) {
   state.sidebarCollapsed = collapsed;
@@ -986,6 +1099,13 @@ window.__uiReady = (async () => {
     const settings = await window.appUi.settings();
     setConsoleHidden(settings.consoleHidden===true,false);
     state.previewBackend=settings.previewBackend==='cpu'?'cpu':'gpu';
+    state.exportMode=settings.exportMode==='cpu'?'cpu':'gpu';if(els.exportMode)els.exportMode.value=state.exportMode;
+    state.defaultGameVersion=settings.defaultGameVersion||'';
+    state.sheetView1=settings.sheetView1||'dimetric_front';if(els.sheetView1)els.sheetView1.value=state.sheetView1;
+    state.sheetView2=settings.sheetView2||'dimetric_back';if(els.sheetView2)els.sheetView2.value=state.sheetView2;
+    applySheetOutputDir(settings.sheetOutputDir||'');
+    state.sheetCopyClipboard=settings.sheetCopyClipboard!==false;if($('sheetCopyClipboard'))$('sheetCopyClipboard').checked=state.sheetCopyClipboard;
+    setSheetMode(settings.sheetMode===true,{persist:false,buildIfNeeded:false});
     state.largeProjection=settings.largeProjection===true;els.largeProjection.checked=state.largeProjection;
     state.projectionMode=settings.projectionMode||'auto';$('projectionMode').value=state.projectionMode;
     setShortcutBindings(settings.keybindings);
@@ -1170,6 +1290,8 @@ function hasActiveRender() {
 function discardPreview() {
   window.projectionEditor?.reset();
   window.blockSearch?.clear();
+  window.SheetExporter?.invalidateCache();
+  clearSheetResult();
   ++gpuBuildGeneration;
   invalidateCpuPreview();
   if(typeof invalidateSelectionMesh==='function')invalidateSelectionMesh();
@@ -1277,6 +1399,10 @@ async function loadFile(file) {
     log(`已打开 ${info.name}（${info.regions.length} 个区域，${info.totalBlocks} 方块）`, 'ok');
     if (info.unresolved) log('存在无法解析的资源：' + JSON.stringify(info.unresolved), 'err');
     setBusy(false);
+    if (state.sheetMode) {
+      await exportShowcaseSheet({ auto: true, openingToken: opening });
+      return;
+    }
     await buildView();
   } catch (err) {
     if(opening!==fileOpenGeneration)return;
@@ -1348,6 +1474,10 @@ function inspectCenter() {
 els.open.addEventListener('click', openSchematic);
 async function rebuildPreview() {
   if (!state.file || state.rendering || state.scenePreparing) return;
+  if (state.sheetMode) {
+    await exportShowcaseSheet({ auto: true });
+    return;
+  }
   closeInspector();
   if (state.fly) pauseFlyLook();
   log('开始重新渲染…');
@@ -1355,8 +1485,47 @@ async function rebuildPreview() {
   if (state.viewReady||state.cpuPreviewReady) log('重新渲染完成，已保留当前视角。', 'ok');
 }
 els.render.addEventListener('click', rebuildPreview);
-els.export.addEventListener('click', exportPng);
-els.exportGif.addEventListener('click', exportGif);
+els.size?.addEventListener('change', () => {
+  if (state.sheetMode && state.file && !state.rendering && !state.scenePreparing) {
+    log(`展示图分辨率已调整为 ${els.size.value}，点击「按当前视角重导」或「重新渲染」即可按新尺寸输出。`);
+  }
+});
+els.export.addEventListener('click', () => exportPng());
+els.exportGif.addEventListener('click', () => exportGif());
+els.exportSheet?.addEventListener('click', () => exportShowcaseSheet({ auto: false }));
+els.sheetMode?.addEventListener('click', () => setSheetMode(!state.sheetMode));
+els.sheetView1?.addEventListener('change', () => {
+  state.sheetView1 = els.sheetView1.value;
+  window.appUi.setSheetSettings?.({ sheetView1: state.sheetView1 }).catch(() => {});
+});
+els.sheetView2?.addEventListener('change', () => {
+  state.sheetView2 = els.sheetView2.value;
+  window.appUi.setSheetSettings?.({ sheetView2: state.sheetView2 }).catch(() => {});
+});
+$('btnSheetDirBrowse')?.addEventListener('click', async () => {
+  try {
+    const res = await window.shellApi.chooseSheetDir?.();
+    if (res && typeof res.dir === 'string') {
+      applySheetOutputDir(res.dir);
+      log('导出模式默认保存位置已设置为：' + res.dir, 'ok');
+    }
+  } catch (error) { log('设置默认位置失败：' + error.message, 'err'); }
+});
+$('btnSheetDirReset')?.addEventListener('click', async () => {
+  try {
+    await window.appUi.setSheetSettings?.({ sheetOutputDir: '' });
+    applySheetOutputDir('');
+    log('导出模式默认保存位置已恢复为“与投影同目录”。');
+  } catch (error) { log('重置默认位置失败：' + error.message, 'err'); }
+});
+$('sheetCopyClipboard')?.addEventListener('change', () => {
+  state.sheetCopyClipboard = $('sheetCopyClipboard').checked;
+  window.appUi.setSheetSettings?.({ sheetCopyClipboard: state.sheetCopyClipboard }).catch(() => {});
+});
+$('btnSheetReveal')?.addEventListener('click', () => { if (state.lastSheet?.out) window.shellApi.reveal(state.lastSheet.out); });
+$('btnSheetSaveAs')?.addEventListener('click', () => exportShowcaseSheet({ auto: false }));
+$('btnSheetRegen')?.addEventListener('click', () => exportShowcaseSheet({ auto: true }));
+$('btnSheetExit')?.addEventListener('click', () => setSheetMode(false));
 
 function updatePreviewBackend() {
   els.previewBackendInfo.textContent=state.previewBackend==='cpu'
@@ -1383,13 +1552,13 @@ els.previewBackend.addEventListener('change',async()=>{
 
 els.lightingEnabled.addEventListener('change',async()=>{
   const enabled=els.lightingEnabled.checked;setBusy(true,'更新光照…');
-  try{await window.appUi.setLightingEnabled(enabled);if(state.file)await buildView({preserveCamera:true});}
+  try{await window.appUi.setLightingEnabled(enabled);window.SheetExporter?.invalidateCache();if(state.file&&!state.sheetMode)await buildView({preserveCamera:true});}
   catch(error){els.lightingEnabled.checked=!enabled;log(error.message,'err');}
   finally{setBusy(false);}
 });
 els.largeProjection.addEventListener('change',async()=>{
   const enabled=els.largeProjection.checked;setBusy(true,'更新模型…');
-  try{await window.appUi.setLargeProjection(enabled);state.projectionMode=enabled?'streaming':'full';$('projectionMode').value=state.projectionMode;state.largeProjection=enabled;if(state.file)await buildView({preserveCamera:true});}
+  try{await window.appUi.setLargeProjection(enabled);state.projectionMode=enabled?'streaming':'full';$('projectionMode').value=state.projectionMode;state.largeProjection=enabled;window.SheetExporter?.invalidateCache();if(state.file&&!state.sheetMode)await buildView({preserveCamera:true});}
   catch(error){els.largeProjection.checked=state.largeProjection;log(error.message,'err');}
   finally{setBusy(false);}
 });
@@ -1427,7 +1596,8 @@ els.realLighting.addEventListener('change', async () => {
     return;
   }
   log(enabled ? '已开启平滑光照，正在更新预览。' : '已恢复明亮光照，正在更新预览。');
-  if (state.file) await buildView({ preserveCamera: true });
+  window.SheetExporter?.invalidateCache();
+  if (state.file && !state.sheetMode) await buildView({ preserveCamera: true });
   else setBusy(false);
 });
 
@@ -1514,17 +1684,66 @@ els.skinImport.addEventListener('click', async () => {
   finally { els.skinImport.disabled = false; }
 });
 
-async function exportPng() {
+function resolveExportMode(override) {
+  const value = override || els.exportMode?.value || state.exportMode || 'gpu';
+  return value === 'cpu' ? 'cpu' : 'gpu';
+}
+
+function gpuExportPayload(params, width, height) {
+  return {
+    view: state.view,
+    width,
+    height,
+    rotationDeg: params.rotation,
+    slantDeg: params.slant,
+    transparent: params.transparent,
+    backgroundMode: els.bgMode.value,
+    backgroundColor: hexToInt(cssColor(els.bgMode.value) || '#22262e'),
+    backgroundDataUrl: state.background?.dataUrl || null,
+    selection: params.selection || null,
+  };
+}
+
+async function exportPng(options = {}) {
   if (!state.file || state.rendering || state.scenePreparing) return;
-  const rawSize = els.size.value;
+  const opts = options && typeof options === 'object' && !('isTrusted' in options) ? options : {};
+  const rawSize = opts.size != null ? String(opts.size) : els.size.value;
   const lossless = rawSize === 'lossless';
   const size = lossless ? 1024 : (Number(rawSize) || 1024);
   const suggested = ((state.info && state.info.name) || 'render') + `_${lossless ? 'lossless' : size}.png`;
-  const out = await window.shellApi.savePng(suggested);
+  const out = opts.out || await window.shellApi.savePng(suggested);
   if (!out) return;
+  const mode = resolveExportMode(opts.mode);
+  const params = renderParams(size, size);
+  if (mode === 'gpu' && window.GpuExporter) {
+    const check = window.GpuExporter.canExport({
+      kind: 'png',
+      rawSize,
+      width: size,
+      height: size,
+      view: state.view,
+      cpuPreview: state.cpuPreview,
+      viewReady: state.viewReady,
+      scenePreparing: state.scenePreparing,
+      overview: state.overview,
+    });
+    if (check.ok) {
+      try {
+        const t0 = performance.now();
+        const job = await window.GpuExporter.exportPng({ ...gpuExportPayload(params, size, size), out });
+        if (job?.id && typeof updateExportTask === 'function') updateExportTask(job);
+        log(`GPU 极速导出完成（${size}×${size}，${Math.round(performance.now() - t0)} ms）：${out}`, 'ok');
+        return job;
+      } catch (err) {
+        log('导出失败：' + err.message, 'err');
+        return;
+      }
+    }
+    if (check.reason) log(check.reason + '。');
+  }
   try {
-    await startBackgroundExport('png', {
-      ...renderParams(size, size),
+    return await startBackgroundExport('png', {
+      ...params,
       ...(lossless ? { lossless: true } : {}),
       out,
       diagnostics: true,
@@ -1534,26 +1753,309 @@ async function exportPng() {
   }
 }
 
-async function exportGif() {
+async function exportGif(options = {}) {
   if (!state.file || state.rendering || state.scenePreparing) return;
-  const rawSize = els.size.value;
+  const opts = options && typeof options === 'object' && !('isTrusted' in options) ? options : {};
+  const rawSize = opts.size != null ? String(opts.size) : els.size.value;
   const requested = rawSize === 'lossless' ? 4096 : (Number(rawSize) || 1024);
   const size = Math.min(4096, Math.max(64, requested));
   if (rawSize === 'lossless' || requested > 4096) {
     log('GIF 动画最高支持 4096 × 4096，当前已自动按 4096 × 4096 导出。');
   }
+  const frames = Number.isInteger(opts.frames) && opts.frames > 0 ? opts.frames : 480;
+  const delay = Number.isInteger(opts.delay) && opts.delay >= 1 ? opts.delay : 2;
   const suggested = ((state.info && state.info.name) || 'animation') + '.gif';
-  const out = await window.shellApi.saveGif(suggested);
+  const out = opts.out || await window.shellApi.saveGif(suggested);
   if (!out) return;
+  const mode = resolveExportMode(opts.mode);
+  const params = renderParams(size, size);
+  if (mode === 'gpu' && window.GpuExporter) {
+    const check = window.GpuExporter.canExport({
+      kind: 'gif',
+      rawSize: String(size),
+      width: size,
+      height: size,
+      view: state.view,
+      cpuPreview: state.cpuPreview,
+      viewReady: state.viewReady,
+      scenePreparing: state.scenePreparing,
+      overview: state.overview,
+    });
+    if (check.ok) {
+      try {
+        const t0 = performance.now();
+        const job = await window.GpuExporter.exportGif({ ...gpuExportPayload(params, size, size), frames, delay, out });
+        if (job?.id && typeof updateExportTask === 'function') updateExportTask(job);
+        if (!job?.aborted) log(`GPU 帧采集完成（${size}×${size} · ${frames} 帧，${Math.round(performance.now() - t0)} ms），正在后台编码 GIF：${out}`);
+        return job;
+      } catch (err) {
+        log('动画导出失败：' + err.message, 'err');
+        return;
+      }
+    }
+    if (check.reason) log(check.reason + '。');
+  }
   try {
-    await startBackgroundExport('gif', {
-      ...renderParams(size, size),
+    return await startBackgroundExport('gif', {
+      ...params,
       out,
-      frames: 480,
-      delay: 2,
+      frames,
+      delay,
     });
   } catch (err) {
     log('动画导出失败：' + err.message, 'err');
+  }
+}
+
+function applySheetOutputDir(dir) {
+  state.sheetOutputDir = dir || '';
+  const input = $('sheetOutputDir');
+  if (input) {
+    input.value = state.sheetOutputDir || '与投影同目录';
+    input.title = state.sheetOutputDir || '默认保存在原投影文件所在文件夹（若无写入权限则存入系统图片文件夹）';
+  }
+  updateSheetResultPanel();
+}
+
+function clearSheetResult() {
+  state.lastSheet = null;
+  updateSheetResultPanel();
+}
+
+let sheetZoom = 1;
+let sheetPanX = 0;
+let sheetPanY = 0;
+let sheetPanDrag = null;
+
+function applySheetTransform() {
+  const stage = $('sheetResultStage');
+  const img = $('sheetResultImage');
+  const zoomLabel = $('sheetZoomLabel');
+  if (!img) return;
+  img.style.transform = `translate(${sheetPanX.toFixed(1)}px, ${sheetPanY.toFixed(1)}px) scale(${sheetZoom.toFixed(4)})`;
+  if (zoomLabel) {
+    const isFit = Math.abs(sheetZoom - 1) < 0.02 && Math.abs(sheetPanX) < 2 && Math.abs(sheetPanY) < 2;
+    zoomLabel.textContent = isFit ? '适应' : `${Math.round(sheetZoom * 100)}%`;
+  }
+  if (stage) {
+    stage.style.cursor = sheetPanDrag ? 'grabbing' : (sheetZoom > 1.01 ? 'grab' : 'zoom-in');
+  }
+}
+
+function resetSheetZoom() {
+  sheetZoom = 1;
+  sheetPanX = 0;
+  sheetPanY = 0;
+  applySheetTransform();
+}
+
+function setSheetZoom(nextZoom, clientX, clientY) {
+  const stage = $('sheetResultStage');
+  const clamped = Math.max(0.5, Math.min(12, Number(nextZoom) || 1));
+  if (stage && clientX != null && clientY != null) {
+    const rect = stage.getBoundingClientRect();
+    const ox = clientX - (rect.left + rect.width / 2);
+    const oy = clientY - (rect.top + rect.height / 2);
+    const ratio = clamped / sheetZoom;
+    sheetPanX = ox - (ox - sheetPanX) * ratio;
+    sheetPanY = oy - (oy - sheetPanY) * ratio;
+  } else if (Math.abs(clamped - 1) < 0.02) {
+    sheetPanX = 0;
+    sheetPanY = 0;
+  }
+  sheetZoom = clamped;
+  applySheetTransform();
+}
+
+(function initSheetStageZoom() {
+  const stage = $('sheetResultStage');
+  if (!stage) return;
+  stage.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const factor = Math.exp(-e.deltaY / 100 * 0.14);
+    setSheetZoom(sheetZoom * factor, e.clientX, e.clientY);
+  }, { passive: false });
+  stage.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    if (e.button !== 0 && e.button !== 2) return;
+    sheetPanDrag = { x: e.clientX, y: e.clientY, px: sheetPanX, py: sheetPanY };
+    try { stage.setPointerCapture(e.pointerId); } catch {}
+    stage.classList.add('dragging');
+    applySheetTransform();
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!sheetPanDrag) return;
+    e.stopPropagation();
+    sheetPanX = sheetPanDrag.px + (e.clientX - sheetPanDrag.x);
+    sheetPanY = sheetPanDrag.py + (e.clientY - sheetPanDrag.y);
+    applySheetTransform();
+  });
+  const endPan = (e) => {
+    if (!sheetPanDrag) return;
+    e?.stopPropagation?.();
+    sheetPanDrag = null;
+    stage.classList.remove('dragging');
+    try {
+      if (e?.pointerId !== undefined && stage.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+    } catch {}
+    applySheetTransform();
+  };
+  stage.addEventListener('pointerup', endPan);
+  stage.addEventListener('pointercancel', endPan);
+  stage.addEventListener('dblclick', (e) => { e.stopPropagation(); resetSheetZoom(); });
+  $('btnSheetZoomIn')?.addEventListener('click', () => setSheetZoom(sheetZoom * 1.25));
+  $('btnSheetZoomOut')?.addEventListener('click', () => setSheetZoom(sheetZoom / 1.25));
+  $('btnSheetZoomReset')?.addEventListener('click', () => resetSheetZoom());
+  $('btnSheetZoomNative')?.addEventListener('click', () => {
+    const img = $('sheetResultImage');
+    if (img && img.naturalWidth > 0 && img.clientWidth > 0) {
+      sheetPanX = 0;
+      sheetPanY = 0;
+      setSheetZoom(Math.max(1, img.naturalWidth / img.clientWidth));
+    }
+  });
+})();
+
+function updateSheetResultPanel() {
+  const panel = $('sheetResultPanel');
+  if (!panel) return;
+  const visible = !!state.sheetMode;
+  panel.classList.toggle('hidden', !visible);
+  if (!visible) return;
+  const badge = $('sheetResultBadge');
+  const meta = $('sheetResultMeta');
+  const stage = $('sheetResultStage');
+  const img = $('sheetResultImage');
+  const zoomBar = $('sheetZoomBar');
+  const btnReveal = $('btnSheetReveal');
+  const btnSaveAs = $('btnSheetSaveAs');
+  const btnRegen = $('btnSheetRegen');
+  const res = state.lastSheet;
+  if (res) {
+    badge.textContent = res.copied ? '双视角展示图已导出并复制到剪贴板' : '双视角展示图已导出';
+    meta.textContent = `${res.width} × ${res.height} · ${res.view1.short} + ${res.view2.short} · ${res.out}`;
+    if (res.previewUrl) {
+      const changed = img.dataset.lastOut !== res.out || img.dataset.lastDims !== `${res.width}x${res.height}`;
+      img.src = res.previewUrl;
+      img.dataset.lastOut = res.out || '';
+      img.dataset.lastDims = `${res.width}x${res.height}`;
+      stage?.classList.remove('hidden');
+      zoomBar?.classList.remove('hidden');
+      if (changed) resetSheetZoom();
+    }
+    btnReveal.classList.remove('hidden');
+    btnSaveAs.classList.remove('hidden');
+    btnRegen.classList.remove('hidden');
+  } else if (state.file && state.info) {
+    badge.textContent = '导出模式已开启';
+    meta.textContent = `当前投影「${state.info.name}」— 可点击下方“立即导出展示图”，或直接拖入新投影自动导出。`;
+    stage?.classList.add('hidden');
+    zoomBar?.classList.add('hidden');
+    img.removeAttribute('src');
+    delete img.dataset.lastOut;
+    delete img.dataset.lastDims;
+    btnReveal.classList.add('hidden');
+    btnSaveAs.classList.remove('hidden');
+    btnRegen.textContent = '立即生成展示图';
+    btnRegen.classList.remove('hidden');
+  } else {
+    badge.textContent = '导出模式已开启';
+    const destHint = state.sheetOutputDir ? `保存至「${state.sheetOutputDir}」` : '默认保存在投影同目录';
+    meta.textContent = `拖入或打开投影文件，将直接输出双视角展示图 PNG（${destHint}${state.sheetCopyClipboard ? '，并自动复制到剪贴板' : ''}）。`;
+    stage?.classList.add('hidden');
+    zoomBar?.classList.add('hidden');
+    img.removeAttribute('src');
+    delete img.dataset.lastOut;
+    delete img.dataset.lastDims;
+    btnReveal.classList.add('hidden');
+    btnSaveAs.classList.add('hidden');
+    btnRegen.classList.add('hidden');
+  }
+  if (res) btnRegen.textContent = '按当前视角重导';
+}
+
+function setSheetMode(enabled, { persist = true, buildIfNeeded = true } = {}) {
+  const next = !!enabled;
+  state.sheetMode = next;
+  if (els.sheetMode) {
+    els.sheetMode.setAttribute('aria-pressed', String(next));
+    els.sheetMode.textContent = next ? '导出模式: 开' : '导出模式';
+  }
+  document.body.classList.toggle('sheet-mode', next);
+  if (next) {
+    dragging = false;
+    flyPress = null;
+    els.viewport.classList.remove('grabbing');
+    if (state.fly) setFly(false);
+    if (state.rendering || state.scenePreparing) {
+      ++gpuBuildGeneration;
+      invalidateCpuPreview();
+    }
+  }
+  updateSheetResultPanel();
+  if (persist) {
+    window.appUi.setSheetSettings?.({ sheetMode: next }).catch(error => log('保存导出模式状态失败：' + error.message, 'err'));
+    log(next ? '已开启纯粹导出模式：拖入或打开投影将直接导出双视角展示图。' : '已关闭纯粹导出模式，恢复 3D 交互预览。');
+  }
+  if (!next && state.file) {
+    if (!state.viewReady && !state.cpuPreviewReady && buildIfNeeded && !state.rendering && !state.fileOpening) {
+      buildView({ preserveCamera: true });
+    } else if (state.viewReady || state.cpuPreviewReady) {
+      drawView();
+    }
+  }
+}
+
+async function exportShowcaseSheet(options = {}) {
+  if (!state.file || !state.info || state.rendering || state.scenePreparing || state.stopping) return null;
+  const opts = options && typeof options === 'object' && !('isTrusted' in options) ? options : {};
+  const auto = opts.auto === true;
+  let out = opts.out || null;
+  if (!auto && !out) {
+    const suggested = ((state.info && state.info.name) || 'projection') + '_双视角展示图.png';
+    out = await window.shellApi.savePng(suggested);
+    if (!out) return null;
+  }
+  setBusy(true, '正在生成双视角展示图…');
+  setStatus('正在生成双视角展示图…', '');
+  try {
+    resolveProjectionMode();
+    const rawSize = opts.size != null ? String(opts.size) : (els.size?.value || '1024');
+    const res = await window.SheetExporter.exportSheet({
+      file: state.file,
+      info: state.info,
+      defaultGameVersion: state.defaultGameVersion,
+      currentYaw: Number(els.rotation.value) || 45,
+      currentSlant: Number(els.slant.value) || 30,
+      sheetView1: opts.view1 || els.sheetView1?.value || state.sheetView1 || 'dimetric_front',
+      sheetView2: opts.view2 || els.sheetView2?.value || state.sheetView2 || 'dimetric_back',
+      exportMode: resolveExportMode(opts.mode),
+      realLighting: els.realLighting.checked,
+      lightingEnabled: els.lightingEnabled.checked,
+      activeGpuView: state.viewReady && !state.cpuPreview ? state.view : null,
+      selection: state.selection?.bounds(state.viewReady && state.view ? { min: state.view.min, max: state.view.max } : null) || null,
+      useCpuOnly: state.largeProjection || state.previewBackend === 'cpu' || resolveExportMode(opts.mode) === 'cpu',
+      out,
+      copyClipboard: opts.copyClipboard !== undefined ? opts.copyClipboard : state.sheetCopyClipboard,
+      rawSize,
+    });
+    if (opts.openingToken !== undefined && opts.openingToken !== fileOpenGeneration) {
+      return null;
+    }
+    state.lastSheet = res;
+    if (res.job && typeof updateExportTask === 'function') updateExportTask(res.job);
+    updateSheetResultPanel();
+    setStatus(`展示图已导出：${res.width} × ${res.height}${res.copied ? '（已复制到剪贴板）' : ''}`, 'ok');
+    log(`双视角展示图已导出（${res.width}×${res.height} · ${res.view1.short} + ${res.view2.short}，${res.elapsedMs} ms${res.copied ? '，已复制' : ''}）：${res.out}`, 'ok');
+    return res;
+  } catch (err) {
+    setStatus('展示图导出失败：' + err.message, 'err');
+    log('双视角展示图导出失败：' + err.message, 'err');
+    return null;
+  } finally {
+    setBusy(false);
+    updateButtons();
   }
 }
 
@@ -1592,7 +2094,8 @@ async function reloadPackResources() {
   applyResourceList(res);
   if (state.file) {
     await window.engine.open(state.file);
-    await buildView({ preserveCamera: true });
+    window.SheetExporter?.invalidateCache();
+    if (!state.sheetMode) await buildView({ preserveCamera: true });
   }
   return res;
 }
@@ -1799,7 +2302,7 @@ function setConsoleHidden(hidden,persist=true){
 }
 $('btnToggleConsole').addEventListener('click',()=>setConsoleHidden(!$('debugConsole').classList.contains('hidden')));
 let containerPress=null;
-els.viewport.addEventListener('pointerdown',event=>{if(event.button!==2||window.projectionEditor?.enabled||state.selection?.enabled||event.target.closest('.block-inspector'))return;containerPress={x:event.clientX,y:event.clientY,yaw:state.flyYaw,pitch:state.flyPitch};},true);
+els.viewport.addEventListener('pointerdown',event=>{if(state.sheetMode||event.button!==2||window.projectionEditor?.enabled||state.selection?.enabled||event.target.closest('.sheet-result-panel, .block-inspector'))return;containerPress={x:event.clientX,y:event.clientY,yaw:state.flyYaw,pitch:state.flyPitch};},true);
 els.viewport.addEventListener('pointerup',event=>{
   const press=containerPress;containerPress=null;if(event.button!==2||!press||window.projectionEditor?.enabled||state.selection?.enabled||Math.hypot(event.clientX-press.x,event.clientY-press.y)>4||Math.abs(state.flyYaw-press.yaw)+Math.abs(state.flyPitch-press.pitch)>.03)return;
   openContainerAt(event.clientX,event.clientY).catch(error=>log('打开容器失败：'+error.message,'err'));
@@ -1809,3 +2312,211 @@ async function openContainerAt(clientX,clientY){
   const generation=state.inspectGeneration,view=state.view,hit=await window.engine.editPick({...ray,selection:state.selection.bounds(selectionWorld())||undefined});if(!hit.hit||view!==state.view||generation!==state.inspectGeneration)return;
   const result=await window.engine.inspectPosition(hit.position);if(result.container&&view===state.view&&generation===state.inspectGeneration)showInspection(result);
 }
+
+(function initUpdaterUi() {
+  if (!window.updaterApi) return;
+  const btnHeader = $('btnCheckUpdate');
+  const menuCheck = $('menuCheckUpdate');
+  const dlg = $('updateDialog');
+  const btnClose = $('updateClose');
+  const distBadge = $('updateDistBadge');
+  const summary = $('updateSummary');
+  const notes = $('updateNotes');
+  const progressWrap = $('updateProgressWrap');
+  const progressFill = $('updateProgressFill');
+  const progressText = $('updateProgressText');
+  const statusMsg = $('updateStatusMsg');
+  const btnPrimary = $('btnUpdatePrimary');
+  const btnSecondary = $('btnUpdateSecondary');
+  const btnIgnore = $('btnUpdateIgnore');
+  const btnRecheck = $('btnUpdateRecheck');
+
+  let currentUpdateState = null;
+  let ignoredVersion = '';
+
+  function formatBytes(n) {
+    const num = Number(n) || 0;
+    if (num >= 1048576) return (num / 1048576).toFixed(1) + ' MB';
+    if (num >= 1024) return Math.round(num / 1024) + ' KB';
+    return num + ' B';
+  }
+
+  function renderUpdateState(s) {
+    if (!s) return;
+    currentUpdateState = s;
+    if (typeof s.ignoredVersion === 'string') ignoredVersion = s.ignoredVersion;
+    const isInstaller = s.distribution === 'installer';
+    if (btnHeader) {
+      if (s.pending) {
+        btnHeader.textContent = `重启更新 ${s.pending.toVersion}`;
+        btnHeader.classList.add('has-update');
+      } else if (s.hasUpdate && s.latest && s.latest.version !== ignoredVersion) {
+        btnHeader.textContent = `发现新版 ${s.latest.version}`;
+        btnHeader.classList.add('has-update');
+      } else {
+        btnHeader.textContent = '检查更新';
+        btnHeader.classList.remove('has-update');
+      }
+    }
+    if (!dlg || !dlg.open) return;
+
+    if (distBadge) {
+      distBadge.textContent = isInstaller
+        ? `当前：安装版 ${s.currentVersion}（方案二：支持应用内增量补丁）`
+        : `当前：便携 ZIP 版 ${s.currentVersion}（方案一：检测更新并引导下载）`;
+    }
+
+    btnPrimary?.classList.add('hidden');
+    btnSecondary?.classList.add('hidden');
+    btnIgnore?.classList.add('hidden');
+    progressWrap?.classList.add('hidden');
+    notes?.classList.add('hidden');
+    if (btnPrimary) btnPrimary.disabled = false;
+    if (btnSecondary) btnSecondary.disabled = false;
+    if (btnRecheck) btnRecheck.disabled = s.status === 'checking' || s.status === 'downloading';
+    if (statusMsg) statusMsg.textContent = '';
+
+    if (s.status === 'checking') {
+      summary.textContent = '正在向 GitHub 查询最新版本清单…';
+      return;
+    }
+
+    if (s.status === 'downloading' && s.progress) {
+      progressWrap?.classList.remove('hidden');
+      const total = Number(s.progress.total) || 0;
+      const received = Number(s.progress.received) || 0;
+      const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : 50;
+      if (progressFill) progressFill.style.width = `${pct}%`;
+      const phaseLabel = s.progress.phase === 'extracting'
+        ? '正在校验 SHA-256 并解压补丁文件…'
+        : s.progress.phase === 'downloading-installer'
+          ? `正在下载安装程序… ${formatBytes(received)}${total ? ' / ' + formatBytes(total) : ''}`
+          : `正在下载补丁包… ${formatBytes(received)}${total ? ' / ' + formatBytes(total) : ''}`;
+      if (progressText) progressText.textContent = phaseLabel;
+      summary.textContent = `正在准备更新至 ${s.latest?.version || ''}`;
+      return;
+    }
+
+    if (s.pending) {
+      summary.textContent = `新版本 ${s.pending.toVersion} 的增量补丁已完成下载与 SHA-256 校验，重启软件即可完成文件替换。`;
+      btnPrimary.textContent = '立即重启并应用更新';
+      btnPrimary.classList.remove('hidden');
+      btnPrimary.onclick = async () => {
+        btnPrimary.disabled = true;
+        try { await window.updaterApi.applyAndRestart(); }
+        catch (err) { btnPrimary.disabled = false; statusMsg.textContent = err.message; }
+      };
+      btnSecondary.textContent = '下次启动自动应用';
+      btnSecondary.classList.remove('hidden');
+      btnSecondary.onclick = () => dlg.close();
+      return;
+    }
+
+    if (s.status === 'installer-ready' && s.installerFile) {
+      summary.textContent = `新版安装程序已完成下载并校验，退出当前窗口即可启动安装向导。`;
+      btnPrimary.textContent = '退出并运行安装程序';
+      btnPrimary.classList.remove('hidden');
+      btnPrimary.onclick = async () => {
+        btnPrimary.disabled = true;
+        try { await window.updaterApi.launchInstaller(s.installerFile); }
+        catch (err) { btnPrimary.disabled = false; statusMsg.textContent = err.message; }
+      };
+      return;
+    }
+
+    if (s.status === 'error') {
+      summary.textContent = s.error || '检查更新失败。';
+      btnPrimary.textContent = '打开 GitHub Releases';
+      btnPrimary.classList.remove('hidden');
+      btnPrimary.onclick = () => window.updaterApi.openExternal(`https://github.com/${s.repo}/releases/latest`).catch(() => {});
+      return;
+    }
+
+    if (s.hasUpdate && s.latest) {
+      const latest = s.latest;
+      if (latest.notes && latest.notes.trim()) {
+        notes.textContent = latest.notes.trim();
+        notes.classList.remove('hidden');
+      }
+      if (!isInstaller) {
+        summary.textContent = `检测到新版本 ${latest.version}！当前为绿色便携 ZIP 版，请前往下载新版压缩包解压覆盖（安装版支持应用内自动打补丁）。`;
+        btnPrimary.textContent = latest.portable?.url ? '下载新版 ZIP 压缩包' : '前往 GitHub 下载';
+        btnPrimary.classList.remove('hidden');
+        btnPrimary.onclick = () => window.updaterApi.openExternal(latest.portable?.url || latest.releaseUrl).catch(e => { statusMsg.textContent = e.message; });
+        if (latest.installer?.url) {
+          btnSecondary.textContent = '改下安装版 (支持自动补丁)';
+          btnSecondary.classList.remove('hidden');
+          btnSecondary.onclick = () => window.updaterApi.openExternal(latest.installer.url).catch(e => { statusMsg.textContent = e.message; });
+        } else {
+          btnSecondary.textContent = '打开发布页';
+          btnSecondary.classList.remove('hidden');
+          btnSecondary.onclick = () => window.updaterApi.openExternal(latest.releaseUrl).catch(() => {});
+        }
+      } else if (s.updateKind === 'patch') {
+        const sizeLabel = latest.patch?.size ? `（补丁仅 ${formatBytes(latest.patch.size)}）` : '';
+        summary.textContent = `检测到新版本 ${latest.version}${sizeLabel}，可直接下载并校验增量补丁包，重启后自动生效。`;
+        btnPrimary.textContent = '下载并准备补丁';
+        btnPrimary.classList.remove('hidden');
+        btnPrimary.onclick = async () => {
+          btnPrimary.disabled = true;
+          try { await window.updaterApi.downloadPatch(); }
+          catch (err) { btnPrimary.disabled = false; statusMsg.textContent = err.message; }
+        };
+        btnSecondary.textContent = '打开发布页';
+        btnSecondary.classList.remove('hidden');
+        btnSecondary.onclick = () => window.updaterApi.openExternal(latest.releaseUrl).catch(() => {});
+      } else {
+        summary.textContent = `检测到新版本 ${latest.version}（底层运行时已升级，需要运行新版安装程序升级）。`;
+        btnPrimary.textContent = latest.installer?.url ? '下载新版安装程序' : '前往下载新版';
+        btnPrimary.classList.remove('hidden');
+        btnPrimary.onclick = async () => {
+          if (!latest.installer?.url) {
+            window.updaterApi.openExternal(latest.releaseUrl).catch(() => {});
+            return;
+          }
+          btnPrimary.disabled = true;
+          try { await window.updaterApi.downloadInstaller(); }
+          catch (err) { btnPrimary.disabled = false; statusMsg.textContent = err.message; }
+        };
+        btnSecondary.textContent = '打开发布页';
+        btnSecondary.classList.remove('hidden');
+        btnSecondary.onclick = () => window.updaterApi.openExternal(latest.releaseUrl).catch(() => {});
+      }
+      btnIgnore.classList.remove('hidden');
+      btnIgnore.onclick = async () => {
+        await window.updaterApi.ignoreVersion(latest.version).catch(() => {});
+        ignoredVersion = latest.version;
+        renderUpdateState({ ...currentUpdateState, ignoredVersion });
+        dlg.close();
+      };
+      return;
+    }
+
+    summary.textContent = `当前版本 ${s.currentVersion} 已是最新版本。`;
+    btnSecondary.textContent = '查看历史版本';
+    btnSecondary.classList.remove('hidden');
+    btnSecondary.onclick = () => window.updaterApi.openExternal(`https://github.com/${s.repo}/releases`).catch(() => {});
+  }
+
+  async function openUpdateDialog({ triggerCheck = false } = {}) {
+    if (!dlg) return;
+    const latestState = await window.updaterApi.status().catch(() => null);
+    if (!dlg.open) dlg.showModal();
+    if (latestState) renderUpdateState(latestState);
+    if (triggerCheck && !latestState?.pending) {
+      const checked = await window.updaterApi.check({}).catch(() => null);
+      if (checked) renderUpdateState(checked);
+    }
+  }
+
+  window.openUpdateDialog = openUpdateDialog;
+  window.updaterApi.onStatus(renderUpdateState);
+  window.updaterApi.status().then(renderUpdateState).catch(() => {});
+  btnHeader?.addEventListener('click', () => openUpdateDialog({ triggerCheck: !currentUpdateState?.pending && !currentUpdateState?.hasUpdate }));
+  menuCheck?.addEventListener('click', () => { toggleFileMenu(false); openUpdateDialog({ triggerCheck: true }); });
+  btnClose?.addEventListener('click', () => dlg?.close());
+  btnRecheck?.addEventListener('click', async () => {
+    const checked = await window.updaterApi.check({}).catch(() => null);
+    if (checked) renderUpdateState(checked);
+  });
+})();

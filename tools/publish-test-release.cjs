@@ -3,7 +3,7 @@
 
 const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process'),crypto=require('node:crypto');
 const root=path.resolve(__dirname,'..'),repo='wocenimenma0220/Standalone-Litematic-Renderer';
-const version=require('./version.cjs').sync(root),tag='v'+version.display,body=fs.readFileSync(path.join(root,'docs/修复记录.md'),'utf8');
+const verMod=require('./version.cjs'),version=verMod.sync(root),relMeta=verMod.releaseInfo(root),tag='v'+version.display,body=fs.readFileSync(path.join(root,'docs/修复记录.md'),'utf8');
 const prerelease=version.version.includes('-'),makeLatest=prerelease?'false':'true';
 const report=path.join(root,'tools/verify/publish-output/release-'+version.version+'.json');
 function credential(){const raw=cp.execFileSync('git',['-c','credential.interactive=never','credential','fill'],{cwd:root,input:`protocol=https\nhost=github.com\npath=${repo}.git\n\n`,env:{...process.env,GIT_TERMINAL_PROMPT:'0',GCM_INTERACTIVE:'never'},timeout:15000,stdio:['pipe','pipe','pipe']}).toString();const fields=Object.fromEntries(raw.trim().split(/\r?\n/).map(line=>{const i=line.indexOf('=');return[line.slice(0,i),line.slice(i+1)];}));if(!fields.password)throw Error('GitHub authentication unavailable');return fields.password;}
@@ -13,8 +13,17 @@ async function main(){
  if(process.argv[2]==='probe'){const data=await request(base);console.log(JSON.stringify({authenticated:true,repository:data.full_name,canPush:data.permissions?.push}));return;}
  const sha=process.argv[2];if(!/^[a-f0-9]{40}$/.test(sha))throw Error('Expected verified commit SHA');if(cp.execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim()!==sha)throw Error('Local commit changed');
  const remote=await request(base+'/commits/'+sha);if(remote.sha!==sha)throw Error('Source commit is not on GitHub');
- const assets=[{name:version.zipName+'.zip',file:'dist/'+version.zipName+'.zip',type:'application/zip'},{name:'Changes.md',file:'docs/修复记录.md',type:'text/markdown; charset=utf-8'},{name:'SHA256SUMS.txt',file:'dist/SHA256SUMS-'+version.display+'.txt',type:'text/plain'}].map(a=>{const file=path.join(root,a.file),bytes=fs.readFileSync(file);return{...a,file,size:bytes.length,digest:'sha256:'+crypto.createHash('sha256').update(bytes).digest('hex')};});
- const sums=fs.readFileSync(assets[2].file,'utf8').toLowerCase();for(const a of assets.slice(0,2))if(!sums.includes(a.digest.slice(7)+'  '+a.name.toLowerCase()))throw Error('Checksum file mismatch: '+a.name);
+ const candidates=[
+  {name:version.zipName+'.zip',file:'dist/'+version.zipName+'.zip',type:'application/zip',verifySum:true},
+  {name:relMeta.setupExeName,file:'dist/'+relMeta.setupExeName,type:'application/vnd.microsoft.portable-executable',verifySum:true,optional:true},
+  {name:relMeta.patchZipName,file:'dist/'+relMeta.patchZipName,type:'application/zip',verifySum:true,optional:true},
+  {name:relMeta.manifestName,file:'dist/'+relMeta.manifestName,type:'application/json',verifySum:false,optional:true},
+  {name:'Changes.md',file:'docs/修复记录.md',type:'text/markdown; charset=utf-8',verifySum:true},
+  {name:'SHA256SUMS.txt',file:'dist/SHA256SUMS-'+version.display+'.txt',type:'text/plain',verifySum:false}
+ ];
+ const assets=candidates.filter(a=>!a.optional||fs.existsSync(path.join(root,a.file))).map(a=>{const file=path.join(root,a.file),bytes=fs.readFileSync(file);return{...a,file,size:bytes.length,digest:'sha256:'+crypto.createHash('sha256').update(bytes).digest('hex')};});
+ const sumAsset=assets.find(a=>a.name==='SHA256SUMS.txt');
+ const sums=fs.readFileSync(sumAsset.file,'utf8').toLowerCase();for(const a of assets)if(a.verifySum&&!sums.includes(a.digest.slice(7)+'  '+a.name.toLowerCase()))throw Error('Checksum file mismatch: '+a.name);
  const tagRefs=await request(base+'/git/matching-refs/tags/'+tag);if(tagRefs.some(ref=>ref.ref==='refs/tags/'+tag&&ref.object.sha!==sha))throw Error('Version tag already targets another commit');if(!tagRefs.some(ref=>ref.ref==='refs/tags/'+tag))await request(base+'/git/refs','POST',JSON.stringify({ref:'refs/tags/'+tag,sha}),{'Content-Type':'application/json'});
  const releases=await request(base+'/releases?per_page=100');let release=releases.find(r=>r.tag_name===tag||r.tag_name.startsWith('untagged-')&&r.name===tag&&r.body===body);if(release&&release.target_commitish!==sha){if(!release.draft&&!release.tag_name.startsWith('untagged-'))throw Error('Existing published release targets another commit');const changed=cp.execFileSync('git',['diff','--name-only',release.target_commitish,sha],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).filter(Boolean);if(changed.some(file=>file!=='tools/publish-test-release.cjs'))throw Error('Packaged application changed since draft creation');const refs=await request(base+'/git/matching-refs/tags/'+tag);if(refs.some(ref=>ref.object.sha!==sha))throw Error('Version tag targets another commit');release=await request(base+'/releases/'+release.id,'PATCH',JSON.stringify({tag_name:tag,target_commitish:sha}),{'Content-Type':'application/json'});if(release.target_commitish!==sha)throw Error('Draft commit update failed');}
  if(!release)release=await request(base+'/releases','POST',JSON.stringify({tag_name:tag,target_commitish:sha,name:tag,body,draft:true,prerelease,generate_release_notes:false}),{'Content-Type':'application/json'});

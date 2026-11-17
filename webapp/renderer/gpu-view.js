@@ -788,37 +788,44 @@ class GpuView {
 
   draw(cam) {
     const gl = this.gl;
-    // 按视口自己的布局尺寸取大小，不能让画布的像素尺寸反过来撑大父容器。
-
-
-    const dpr = window.devicePixelRatio || 1;
-    const box = this.canvas.parentElement || this.canvas;
-    const cssW = Math.max(1, Math.round(box.clientWidth || box.getBoundingClientRect().width));
-    const cssH = Math.max(1, Math.round(box.clientHeight || box.getBoundingClientRect().height));
-    const displayW = Math.max(1, Math.round(cssW * dpr)), displayH = Math.max(1, Math.round(cssH * dpr));
-    this.lodViewportWidth=displayW;this.lodViewportHeight=displayH;
-    const scale = Math.max(0.1, Math.min(1, cam.renderScale || 1));
-    const w = Math.max(1, Math.round(displayW * scale)), h = Math.max(1, Math.round(displayH * scale));
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w;
-      this.canvas.height = h;
+    // 支持离屏 FBO 导出：保持画布 DOM 尺寸不变，直接向指定帧缓冲与视口像素绘制。
+    const offscreen = cam.framebuffer !== undefined;
+    let displayW, displayH, w, h;
+    if (offscreen) {
+      displayW = w = Math.max(1, Math.round(cam.targetWidth || this.canvas.width));
+      displayH = h = Math.max(1, Math.round(cam.targetHeight || this.canvas.height));
+      gl.bindFramebuffer(gl.FRAMEBUFFER, cam.framebuffer);
+    } else {
+      const dpr = window.devicePixelRatio || 1;
+      const box = this.canvas.parentElement || this.canvas;
+      const cssW = Math.max(1, Math.round(box.clientWidth || box.getBoundingClientRect().width));
+      const cssH = Math.max(1, Math.round(box.clientHeight || box.getBoundingClientRect().height));
+      displayW = Math.max(1, Math.round(cssW * dpr));
+      displayH = Math.max(1, Math.round(cssH * dpr));
+      this.lodViewportWidth = displayW; this.lodViewportHeight = displayH;
+      const scale = Math.max(0.1, Math.min(1, cam.renderScale || 1));
+      w = Math.max(1, Math.round(displayW * scale));
+      h = Math.max(1, Math.round(displayH * scale));
+      if (this.canvas.width !== w || this.canvas.height !== h) {
+        this.canvas.width = w;
+        this.canvas.height = h;
+      }
+      if (this.canvas.style.width !== cssW + 'px') this.canvas.style.width = cssW + 'px';
+      if (this.canvas.style.height !== cssH + 'px') this.canvas.style.height = cssH + 'px';
+      this.diag = {
+        vpClient: [box.clientWidth, box.clientHeight],
+        vpRect: [Math.round(box.getBoundingClientRect().width), Math.round(box.getBoundingClientRect().height)],
+        cvClient: [this.canvas.clientWidth, this.canvas.clientHeight],
+        cvRect: [Math.round(this.canvas.getBoundingClientRect().width), Math.round(this.canvas.getBoundingClientRect().height)],
+        buf: [w, h],
+        dpr,
+      };
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
-    // CSS 尺寸使用布局单位，绘图缓冲使用设备像素，两者按设备比例对应。
-
-    if (this.canvas.style.width !== cssW + 'px') this.canvas.style.width = cssW + 'px';
-    if (this.canvas.style.height !== cssH + 'px') this.canvas.style.height = cssH + 'px';
-    this.diag = {
-      vpClient: [box.clientWidth, box.clientHeight],
-      vpRect: [Math.round(box.getBoundingClientRect().width), Math.round(box.getBoundingClientRect().height)],
-      cvClient: [this.canvas.clientWidth, this.canvas.clientHeight],
-      cvRect: [Math.round(this.canvas.getBoundingClientRect().width), Math.round(this.canvas.getBoundingClientRect().height)],
-      buf: [w, h],
-      dpr,
-    };
     gl.viewport(0, 0, w, h);
     const bg = cam.background || [0, 0, 0, 0];
     if(!cam.selectionOverlay){gl.clearColor(bg[0], bg[1], bg[2], bg[3]);gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);}
-    if (!this.layers || !this.texture) return;
+    if (!this.layers || !this.texture) { if (offscreen) gl.bindFramebuffer(gl.FRAMEBUFFER, null); return; }
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -836,14 +843,26 @@ class GpuView {
     let viewProj;
     if (cam.orbit) {
       // 与 CPU 相同，旋转真实包围盒后按宽高跨度适配，避免球半径对扁平和长条建筑估计失真。
-
-
-      const fit = this.fitOrtho(cam.rotationDeg, cam.slantDeg, displayW, displayH, cam.zoom);
-      this.fitScale = fit.scale;
-      this.spanX = fit.spanX;
-      this.spanY = fit.spanY;
-      this.offsetX = fit.offsetX;
-      this.offsetY = fit.offsetY;
+      let fit;
+      if (cam.fixedFit) {
+        const pitch = (cam.slantDeg || 0) * Math.PI / 180;
+        const dx = (this.max[0] - this.min[0]) / 2;
+        const dy = (this.max[1] - this.min[1]) / 2;
+        const dz = (this.max[2] - this.min[2]) / 2;
+        const horizRadius = Math.hypot(dx, dz);
+        const spanX = Math.max(1e-3, 2 * horizRadius);
+        const spanY = Math.max(1e-3, 2 * (Math.abs(Math.cos(pitch)) * dy + Math.abs(Math.sin(pitch)) * horizRadius));
+        fit = { scale: Math.min(displayW / spanX, displayH / spanY) * 0.92 * Math.max(0.05, cam.zoom || 1), spanX, spanY, offsetX: 0, offsetY: 0 };
+      } else {
+        fit = this.fitOrtho(cam.rotationDeg, cam.slantDeg, displayW, displayH, cam.zoom);
+      }
+      if (!offscreen) {
+        this.fitScale = fit.scale;
+        this.spanX = fit.spanX;
+        this.spanY = fit.spanY;
+        this.offsetX = fit.offsetX;
+        this.offsetY = fit.offsetY;
+      }
 
       // 从 CPU 的屏幕映射推导裁剪矩阵，保持两条渲染路径的中心和缩放一致。
 
@@ -880,9 +899,11 @@ class GpuView {
       m[14] = -rz * scaleZ;
       m[15] = 1;
       viewProj = m;
-      this.lastM = Array.from(m);
-      this.lastW = w;
-      this.lastH = h;
+      if (!offscreen) {
+        this.lastM = Array.from(m);
+        this.lastW = w;
+        this.lastH = h;
+      }
     } else {
       const distance=Number.isInteger(cam.viewDistance)?Math.max(1,Math.min(128,cam.viewDistance)):6;
       const far=Math.max(this.radius*8+64,(distance+1)*16*Math.SQRT2+64);
@@ -894,13 +915,14 @@ class GpuView {
     gl.useProgram(this.program);
     gl.uniform1f(this.uni.colorOnly,0);
     gl.uniformMatrix4fv(this.uni.viewProj, false, viewProj);
-    this.lastMatrix = viewProj;
-    this.lastMode = cam.orbit ? 'orbit' : 'fly';
-
-    this.cameraRotationDeg = cam.rotationDeg || 0;
-    this.cameraSlantDeg = cam.slantDeg || 0;
-    this.cameraEye = cam.orbit ? null : cam.eye;
-    this.cameraTarget = cam.orbit ? null : cam.target;
+    if (!offscreen) {
+      this.lastMatrix = viewProj;
+      this.lastMode = cam.orbit ? 'orbit' : 'fly';
+      this.cameraRotationDeg = cam.rotationDeg || 0;
+      this.cameraSlantDeg = cam.slantDeg || 0;
+      this.cameraEye = cam.orbit ? null : cam.eye;
+      this.cameraTarget = cam.orbit ? null : cam.target;
+    }
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
@@ -931,7 +953,7 @@ class GpuView {
       gl.useProgram(this.program);gl.uniformMatrix4fv(this.uni.viewProj,false,viewProj);gl.uniform1f(this.uni.colorOnly,0);this._compactActive=true;this.resetCompact();
       gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.texture);gl.uniform1i(this.uni.atlas,0);
     }
-    if(this.stream){this.stream.draw({...cam,focusPasses:passes},frustum);this.drawEditPreview(cam);this.drawSearchBoxes(viewProj);if(cam.editTarget)this.drawFocusBox(cam.editTarget,viewProj,[1,.85,.25,1]);if(cam.selectionBox!==false)this.drawFocusBox(cam.focus||cam.selectionBox,viewProj);return;}
+    if(this.stream){this.stream.draw({...cam,focusPasses:passes},frustum);this.drawEditPreview(cam);if(cam.searchBoxes!==false)this.drawSearchBoxes(viewProj);if(cam.editTarget)this.drawFocusBox(cam.editTarget,viewProj,[1,.85,.25,1]);if(cam.selectionBox!==false)this.drawFocusBox(cam.focus||cam.selectionBox,viewProj);if(offscreen&&!cam.selectionOverlay&&!cam.editOverlay)gl.bindFramebuffer(gl.FRAMEBUFFER,null);return;}
     for(const focusPass of passes){
     gl.uniform1f(this.uni.focusPass,focusPass);
     for (const layer of this.layers) {
@@ -1004,6 +1026,7 @@ class GpuView {
     gl.colorMask(true,true,true,true);
     this.drawEditPreview(cam);this.drawSearchBoxes(viewProj);if(cam.editTarget)this.drawFocusBox(cam.editTarget,viewProj,[1,.85,.25,1]);
     if(cam.selectionBox!==false)this.drawFocusBox(cam.focus||cam.selectionBox,viewProj);
+    if(offscreen)gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   }
 
   resetCompact(){

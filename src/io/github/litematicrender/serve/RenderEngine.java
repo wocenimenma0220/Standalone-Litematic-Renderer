@@ -198,8 +198,68 @@ public final class RenderEngine implements AutoCloseable {
     }
     private io.github.litematicrender.world.BlockState stateAt(int[] p){var regions=new ArrayList<>(schematic.regions().values());for(int i=regions.size()-1;i>=0;i--){var r=regions.get(i);var o=r.blockOrigin();int x=p[0]-o.x(),y=p[1]-o.y(),z=p[2]-o.z();if(x>=0&&y>=0&&z>=0&&x<r.blocks.sizeX&&y<r.blocks.sizeY&&z<r.blocks.sizeZ)return r.blocks.get(x,y,z);}return io.github.litematicrender.world.BlockState.air();}
     private Map<String,String> statePropertiesAt(int[] p){var regions=new ArrayList<>(schematic.regions().values());for(int i=regions.size()-1;i>=0;i--){var r=regions.get(i);var o=r.blockOrigin();int x=p[0]-o.x(),y=p[1]-o.y(),z=p[2]-o.z();if(x>=0&&y>=0&&z>=0&&x<r.blocks.sizeX&&y<r.blocks.sizeY&&z<r.blocks.sizeZ)return r.storedProperties(x,y,z);}return Map.of();}
+    public synchronized Map<String,Object> editRegion(Map<String,Object> request)throws Exception {
+        if(schematic==null)throw new IllegalStateException("请先打开投影");
+        if(edits==null){edits=new io.github.litematicrender.schematic.ProjectionEdits(schematicPath);editWorkingPath=home.resolve("renders/.edit/current.litematic").toAbsolutePath().normalize();}
+        if(!editsDirty){var base=streamBuilder!=null?streamBuilder:sceneBuilder;if(base!=null)editBaseBuilder=base;}
+        var bounds=io.github.litematicrender.util.MiniJson.asObject(request.get("selection"));
+        if(bounds==null)throw new IllegalArgumentException("请先设置选区范围");
+        var minRaw=io.github.litematicrender.util.MiniJson.asArray(bounds.get("min"));var maxRaw=io.github.litematicrender.util.MiniJson.asArray(bounds.get("max"));
+        if(minRaw==null||maxRaw==null||minRaw.size()!=3||maxRaw.size()!=3)throw new IllegalArgumentException("无效的选区范围");
+        int[] min=new int[3],max=new int[3];for(int i=0;i<3;i++){min[i]=((Number)minRaw.get(i)).intValue();max[i]=((Number)maxRaw.get(i)).intValue();}
+        String action=io.github.litematicrender.util.MiniJson.asString(request.get("action"),"set");
+        if(!action.equals("set")&&!action.equals("replace"))throw new IllegalArgumentException("未知批量编辑操作");
+        var targetObj=io.github.litematicrender.util.MiniJson.asObject(request.get("target"));if(targetObj==null)throw new IllegalArgumentException("请指定目标方块");
+        var targetValue=editValue(targetObj);
+        java.util.function.Predicate<String> filter=null;
+        if(action.equals("replace")){
+            String from=io.github.litematicrender.util.MiniJson.asString(request.get("from"),null);
+            if(from!=null&&!from.isBlank()){
+                String norm=from.trim().toLowerCase(java.util.Locale.ROOT);
+                if(!norm.contains(":"))norm="minecraft:"+norm;
+                final String matchId=norm;filter=id->id.equals(matchId);
+            }else filter=id->!java.util.Set.of("minecraft:air","minecraft:cave_air","minecraft:void_air").contains(id);
+        }
+        var checkpoint=edits.checkpoint();var previous=schematic;
+        try{
+            int count=edits.fillRegion(min,max,targetValue,filter);
+            boolean changed=count>0;
+            var result=new LinkedHashMap<String,Object>(edits.status());
+            result.put("changed",changed);result.put("count",count);result.put("path",schematicPath.toAbsolutePath().toString());
+            if(changed){schematic=io.github.litematicrender.schematic.LitematicaSchematic.fromData(edits.data());schematic.materialize(registry);editsDirty=true;editRevision++;materialKey=null;inspector=null;result.put("revision",editRevision);result.put("info",editInfo());result.put("rebuildRequired",edits.requiresRebuild());}
+            return result;
+        }catch(Exception error){edits.restore(checkpoint);schematic=previous;throw error;}
+    }
+    public synchronized Map<String,Object> selectionStats(double[] minimum,double[] maximum,String query)throws Exception {
+        ensureResources();if(schematic==null)throw new IllegalStateException("请先打开投影");
+        if(minimum==null||maximum==null||minimum.length!=3||maximum.length!=3)throw new IllegalArgumentException("请先设置选区范围");
+        int[] min={(int)Math.floor(minimum[0]),(int)Math.floor(minimum[1]),(int)Math.floor(minimum[2])};
+        int[] max={(int)Math.ceil(maximum[0]),(int)Math.ceil(maximum[1]),(int)Math.ceil(maximum[2])};
+        for(int i=0;i<3;i++)if(min[i]>=max[i])throw new IllegalArgumentException("无效的选区范围");
+        var names=new java.util.HashMap<String,String>();
+        for(String lang:List.of("en_us","zh_cn")){var stack=resources.getResourceStack("minecraft","lang/"+lang+".json");for(int i=stack.size()-1;i>=0;i--)try{io.github.litematicrender.util.MiniJson.parseObject(new String(stack.get(i),java.nio.charset.StandardCharsets.UTF_8)).forEach((k,v)->{if(v instanceof String t)names.put(k,t);});}catch(Exception ignored){}}
+        String q=query==null?"":query.trim().toLowerCase(java.util.Locale.ROOT);
+        long volume=(long)(max[0]-min[0])*(max[1]-min[1])*(max[2]-min[2]);
+        long nonAir=0,matched=0;var counts=new java.util.HashMap<String,Long>();
+        for(var region:schematic.regions().values()){
+            var o=region.blockOrigin();
+            int x0=Math.max(0,min[0]-o.x()),y0=Math.max(0,min[1]-o.y()),z0=Math.max(0,min[2]-o.z());
+            int x1=Math.min(region.blocks.sizeX,max[0]-o.x()),y1=Math.min(region.blocks.sizeY,max[1]-o.y()),z1=Math.min(region.blocks.sizeZ,max[2]-o.z());
+            if(x0>=x1||y0>=y1||z0>=z1)continue;
+            var pal=region.blocks.palette;boolean[] palMatch=new boolean[pal.length];
+            for(int i=0;i<pal.length;i++){var b=pal[i];if(b==null)continue;String id=b.blockId;String label=names.getOrDefault("block."+id.replace(':','.'),id);palMatch[i]=q.isEmpty()?!b.isAir():(id.toLowerCase(java.util.Locale.ROOT).contains(q)||label.toLowerCase(java.util.Locale.ROOT).contains(q));}
+            for(int y=y0;y<y1;y++)for(int z=z0;z<z1;z++)for(int x=x0;x<x1;x++){
+                int pid=LitematicaSchematic.getAt(region.blocks.storage,region.blocks.bits,((long)y*region.blocks.sizeZ+z)*region.blocks.sizeX+x);
+                if(pid<0||pid>=pal.length)continue;var b=pal[pid];if(b==null)continue;
+                if(!b.isAir()){nonAir++;counts.merge(b.blockId,1L,Long::sum);}
+                if(palMatch[pid])matched++;
+            }
+        }
+        var distribution=counts.entrySet().stream().sorted((a,b)->Long.compare(b.getValue(),a.getValue())).limit(25).map(e->Map.<String,Object>of("id",e.getKey(),"name",names.getOrDefault("block."+e.getKey().replace(':','.'),e.getKey()),"count",e.getValue())).toList();
+        return Map.of("volume",volume,"nonAir",nonAir,"air",Math.max(0,volume-nonAir),"matched",matched,"uniqueBlocks",counts.size(),"distribution",distribution);
+    }
     public synchronized Map<String,Object> editPatch(Path directory,double[] min,double[] max)throws Exception {
-        if(edits==null)return Map.of("empty",true);Files.createDirectories(directory);var cells=edits.previewCells();
+        if(edits==null)return Map.of("empty",true);if(edits.requiresRebuild())return Map.of("rebuildRequired",true,"cells",edits.previewCells().size(),"revision",editRevision);Files.createDirectories(directory);var cells=edits.previewCells();
         // 基础模型重建后接替补丁，避免连续编辑无限扩大局部模型。
         if(cells.size()>8192)return Map.of("rebuildRequired",true,"cells",cells.size(),"revision",editRevision);
         var shapes=editBaseBuilder!=null?editBaseBuilder.shapes():null;
@@ -426,8 +486,8 @@ public final class RenderEngine implements AutoCloseable {
         out.put("totalVolume", md.totalVolume);
         Vec3i size = md.enclosingSize;
         out.put("size", Map.of("x", size.x(), "y", size.y(), "z", size.z()));
-        out.put("schematicVersion", md.schematicVersion);
-        out.put("minecraftDataVersion", md.minecraftDataVersion);
+        out.put("schematicVersion", schem.version > 0 ? schem.version : md.schematicVersion);
+        out.put("minecraftDataVersion", schem.minecraftDataVersion > 0 ? schem.minecraftDataVersion : md.minecraftDataVersion);
         out.put("hasPreviewImage", md.previewImageData != null && md.previewImageData.length > 0);
 
         java.util.List<Map<String, Object>> regions = new java.util.ArrayList<>();
@@ -510,7 +570,7 @@ public final class RenderEngine implements AutoCloseable {
         SceneBuilder preparedBuilder=streamBuilder!=null&&streamRealLighting==realLighting&&streamLightingEnabled==lightingEnabled?streamBuilder:null;
         this.sceneLightingEnabled=lightingEnabled;
         this.sceneRealLighting=realLighting;
-        String key = this.schematicPath + "|" + this.loadedBuiltinNames + "|" + this.loadedUserPackNames
+        String key = this.schematicDigest + "|" + this.loadedBuiltinNames + "|" + this.loadedUserPackNames
             + "|" + System.identityHashCode(this.baker) + "|" + realLighting + "|" + lightingEnabled;
         if (this.scene != null && key.equals(this.sceneKey)) {
             this.sceneFromMesh = true;
@@ -834,6 +894,19 @@ public final class RenderEngine implements AutoCloseable {
         }
     }
 
+    public Map<String,Object> writeAnimatedGif(Path spool,Path outGif,int width,int height,int frames,int delayCs,GifWriter.Progress progress)throws Exception {
+        this.cancelled.set(false);
+        long t0=System.currentTimeMillis();
+        GifWriter.writeFramesFromSpool(outGif,spool,width,height,frames,delayCs,this::isRenderAborted,progress);
+        Map<String,Object> out=new LinkedHashMap<>();
+        out.put("path",outGif.toAbsolutePath().toString());
+        out.put("width",width);out.put("height",height);
+        out.put("frames",frames);out.put("delayCentiseconds",delayCs);
+        out.put("encodeMillis",System.currentTimeMillis()-t0);
+        out.put("bytes",Files.size(outGif));
+        return out;
+    }
+
     private boolean isRenderAborted() {
         return this.cancelled.get() || Thread.currentThread().isInterrupted();
     }
@@ -858,7 +931,9 @@ public final class RenderEngine implements AutoCloseable {
         String digest=CacheFingerprint.file(file);
         long stamp = java.nio.file.Files.getLastModifiedTime(file).toMillis()
             ^ java.nio.file.Files.size(file);
-        if (this.schematic != null && file.equals(this.schematicPath) && digest.equals(this.schematicDigest)) {
+        if (this.schematic != null && digest.equals(this.schematicDigest)) {
+            this.schematicPath = file;
+            this.schematicStamp = stamp;
             return this.schematic;
         }
         LitematicaSchematic schem = LitematicaSchematic.load(file);

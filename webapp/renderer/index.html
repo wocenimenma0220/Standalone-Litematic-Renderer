@@ -30,9 +30,25 @@
         <button id="menuExportPng" disabled>导出 PNG…</button>
         <button id="menuExportGif" disabled>导出 360° 旋转 GIF…</button>
         <div class="menusep"></div>
+        <button id="menuCheckUpdate">检查更新…</button>
+        <div class="menusep"></div>
         <button id="menuQuit">退出</button>
       </div>
     </nav>
+    <div class="titlebar-spacer"></div>
+    <button id="btnCheckUpdate" class="titlebar-update-btn" type="button" title="检查版本更新">检查更新</button>
+    <div class="window-controls" aria-label="窗口控制">
+      <button class="win-btn" id="winMinimize" type="button" title="最小化" aria-label="最小化">
+        <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="6" width="8" height="2" fill="currentColor" /></svg>
+      </button>
+      <button class="win-btn" id="winMaximize" type="button" title="最大化" aria-label="最大化" data-maximized="false">
+        <svg class="win-icon-max" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 2h8v8H2V2zm2 2v4h4V4H4z" fill="currentColor" /></svg>
+        <svg class="win-icon-restore" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 2h6v6H8v2H2V4h2V2zm1.5 1.5V4H8v2.5h.5v-3H5.5zm-2 2v3h3v-3h-3z" fill="currentColor" /></svg>
+      </button>
+      <button class="win-btn win-btn-close" id="winClose" type="button" title="关闭" aria-label="关闭">
+        <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 3.9 3.9 2.5 6 4.6 8.1 2.5 9.5 3.9 7.4 6 9.5 8.1 8.1 9.5 6 7.4 3.9 9.5 2.5 8.1 4.6 6z" fill="currentColor" /></svg>
+      </button>
+    </div>
   </div>
 
   <div id="fileDropHint" class="file-drop-hint hidden" role="status" aria-live="polite">
@@ -152,13 +168,21 @@
           <label for="zoom">缩放 <span id="zoomVal" class="val">1.00×</span></label>
           <input type="range" id="zoom" min="0.05" max="20" step="0.05" value="1" />
         </div>
+        <div class="field">
+          <label for="viewPreset">视角预设</label>
+          <select id="viewPreset"></select>
+        </div>
         <div class="presets">
-          <button data-preset="iso">等轴 45/35.264</button>
-          <button data-preset="dimetric">斜二测 45/30</button>
+          <button data-preset="iso">等轴 45/35.3</button>
+          <button data-preset="dimetric">二轴 45/30</button>
+          <button data-preset="dimetric_wiki">Wiki 135/30</button>
           <button data-preset="front">正视 0/0</button>
           <button data-preset="top">俯视 0/89</button>
-          <button data-preset="back">背视 180/0</button>
           <button data-preset="left">左视 -90/0</button>
+        </div>
+        <div class="preset-tools">
+          <button id="btnRotate90" type="button" title="水平方向顺时针旋转 90°">水平 +90°</button>
+          <button id="btnFlipSlant" type="button" title="在仰视 / 平视 / 俯视之间切换">俯仰切换</button>
         </div>
         <p class="muted small">在预览区拖动即可旋转，滚轮缩放；按 V 进入漫游。</p>
         <label class="check"><input id="showCoordinates" type="checkbox" />显示自身坐标</label>
@@ -218,12 +242,27 @@
           <label for="bg">背景色</label>
           <input type="color" id="bg" value="#ffffff" />
         </div>
+        <div class="sheet-panel-config">
+          <span class="sheet-panel-title">展示图双视角与保存位置</span>
+          <div class="field"><label for="sheetView1">主视角 (左)</label><select id="sheetView1"></select></div>
+          <div class="field"><label for="sheetView2">副视角 (右)</label><select id="sheetView2"></select></div>
+          <div class="field">
+            <label for="sheetOutputDir">默认位置</label>
+            <div class="sheet-dir-row">
+              <input id="sheetOutputDir" type="text" readonly value="与投影同目录" title="开启导出模式后自动保存 PNG 的文件夹位置" />
+              <button id="btnSheetDirBrowse" type="button">选择…</button>
+              <button id="btnSheetDirReset" type="button" title="恢复为保存到原投影所在目录">默认</button>
+            </div>
+          </div>
+          <label class="check small"><input id="sheetCopyClipboard" type="checkbox" checked />自动复制到剪贴板</label>
+        </div>
       </section>
 
       <div class="actions">
         <button id="btnRender" class="primary" disabled>重新渲染</button>
         <button id="btnExport" disabled>导出 PNG…</button>
         <button id="btnExportGif" disabled>导出 360° 旋转 GIF…</button>
+        <button id="btnExportSheet" disabled>导出双视角展示图…</button>
       </div>
 
       <p id="hint" class="muted small">先打开一个 .litematic 文件。</p>
@@ -236,6 +275,14 @@
       <div class="toolbar">
         <span class="spacer"></span>
         <button id="btnStopRender" class="toolbar-button stop-render" title="强制停止当前预览；拖入新投影时会自动停止当前任务" disabled><span aria-hidden="true">■</span> 停止渲染</button>
+        <label class="check small" title="GPU 极速利用当前三维预览直接出图，支持 PNG 与 360° GIF；CPU 精确用于无损自适应导出、大投影分块导出或 CPU 预览">
+          导出
+          <select id="exportMode">
+            <option value="gpu" selected>GPU 极速</option>
+            <option value="cpu">CPU 精确</option>
+          </select>
+        </label>
+        <button id="btnSheetMode" class="toolbar-button sheet-mode-btn" type="button" aria-pressed="false" title="开启纯粹导出模式：拖入或打开投影直接生成双视角展示图（含信息卡片与剪贴板复制），不渲染交互界面">导出模式</button>
         <label class="check small">
           背景
           <select id="bgMode">
@@ -264,6 +311,27 @@
         <img id="crosshair" src="crosshair.png" class="crosshair hidden" alt="" aria-hidden="true" draggable="false" />
         <img id="preview" alt="渲染预览" class="hidden" />
         <div id="placeholder" class="placeholder">还没有渲染结果</div>
+        <section id="sheetResultPanel" class="sheet-result-panel hidden" aria-label="双视角展示图导出结果">
+          <div class="sheet-result-header">
+            <span id="sheetResultBadge" class="sheet-result-badge">导出模式已开启</span>
+            <span id="sheetResultMeta" class="sheet-result-meta">拖入或打开投影文件，将直接输出双视角展示图 PNG。</span>
+          </div>
+          <div id="sheetResultStage" class="sheet-result-stage hidden" title="滚轮缩放，按住拖动平移，双击恢复适应窗口">
+            <img id="sheetResultImage" class="sheet-result-preview" alt="双视角展示图预览" draggable="false" />
+          </div>
+          <div class="sheet-result-actions">
+            <div id="sheetZoomBar" class="sheet-zoom-bar hidden" role="group" aria-label="展示图缩放控制">
+              <button id="btnSheetZoomOut" type="button" title="缩小">－</button>
+              <button id="btnSheetZoomReset" type="button" title="双击或点击恢复适应窗口"><span id="sheetZoomLabel">适应</span></button>
+              <button id="btnSheetZoomIn" type="button" title="放大">＋</button>
+              <button id="btnSheetZoomNative" type="button" title="按 1:1 原始像素查看">1:1</button>
+            </div>
+            <button id="btnSheetReveal" type="button" class="hidden">打开文件位置</button>
+            <button id="btnSheetSaveAs" type="button" class="hidden">另存为…</button>
+            <button id="btnSheetRegen" type="button" class="primary hidden">按当前视角重导</button>
+            <button id="btnSheetExit" type="button">切换为交互预览</button>
+          </div>
+        </section>
         <section id="projectionFlyHotbar" class="projection-fly-hotbar hidden" aria-label="漫游物品栏">
           <div id="projectionFlyItemName" class="projection-fly-item-name" aria-live="polite"></div>
           <div id="projectionFlySlots" class="projection-fly-slots" role="group" aria-label="背包第一栏 9 格"></div>
@@ -300,7 +368,7 @@
         <div id="log" class="log" role="log" aria-label="运行日志"></div>
         <form id="commandBar" class="command-bar" aria-label="输入指令">
           <label for="commandInput" class="command-prompt" title="输入指令">&gt;</label>
-          <input id="commandInput" type="text" autocomplete="off" spellcheck="false" aria-label="指令输入" aria-describedby="commandFeedback" placeholder="输入指令，例如 //select 1" />
+          <input id="commandInput" type="text" autocomplete="off" spellcheck="false" aria-label="指令输入" aria-describedby="commandFeedback" placeholder="输入 / 查看全局指令或 // 选区指令（/ 聚焦，Tab 补全）" />
           <button id="commandSubmit" type="submit">执行</button>
           <p id="commandFeedback" class="muted small hidden" role="status" aria-live="polite"></p>
         </form>
@@ -330,7 +398,27 @@
     <p id="welcomeError" class="welcome-error hidden" role="alert"></p>
   </dialog>
   <dialog id="shortcutDialog" class="shortcut-dialog"><div class="dialog-title"><h2>自定义按键</h2><button id="closeShortcuts" type="button">关闭</button></div><p class="muted small">点击右侧绑定，再按新键或滚动滚轮。左右 Shift、Ctrl、Alt 视为同一键；鼠标键也可绑定。</p><div id="shortcutRows"></div><p id="shortcutFeedback" class="muted small" aria-live="polite"></p><button id="cancelBinding" class="hidden" type="button">取消本次绑定</button><button id="resetShortcuts" type="button">恢复默认按键</button><p class="muted small">视角：拖动鼠标旋转，滚轮缩放；更改投影中滚轮切换快捷栏物品，Alt＋滚轮缩放。漫游：移动鼠标转向。微调：按住设置的修饰键并滚动滚轮。</p></dialog>
-  <dialog id="commandsDialog" class="shortcut-dialog"><div class="dialog-title"><h2>支持的指令</h2><button id="closeCommands" type="button">关闭</button></div><p class="muted small">选择工具开启后可设置角点；坐标按投影自身坐标输入，支持负数。省略坐标时选取准星所指方块，漫游中未指向方块时使用当前位置。</p><div id="commandRows"></div><button id="commandsInput" type="button">打开指令输入</button></dialog>
+  <dialog id="commandsDialog" class="shortcut-dialog"><div class="dialog-title"><h2>支持的指令</h2><button id="closeCommands" type="button">关闭</button></div><p class="muted small">分为一级全局指令（/ 开头）与二级选区/编辑指令（// 开头）。支持 ↑/↓ 历史记录与 Tab 自动补全；省略坐标时选取准星所指方块或当前视角位置。</p><div id="commandRows"></div><button id="commandsInput" type="button">打开指令输入</button></dialog>
+  <dialog id="updateDialog" class="shortcut-dialog update-dialog" aria-labelledby="updateTitle">
+    <div class="dialog-title">
+      <h2 id="updateTitle">软件更新</h2>
+      <button id="updateClose" type="button">关闭</button>
+    </div>
+    <p id="updateDistBadge" class="update-dist-badge"></p>
+    <p id="updateSummary" class="update-summary"></p>
+    <pre id="updateNotes" class="update-notes hidden"></pre>
+    <div id="updateProgressWrap" class="update-progress-wrap hidden">
+      <div class="update-progress-track"><div id="updateProgressFill" class="update-progress-fill"></div></div>
+      <p id="updateProgressText" class="muted small"></p>
+    </div>
+    <p id="updateStatusMsg" class="muted small" role="status" aria-live="polite"></p>
+    <div id="updateActions" class="update-actions">
+      <button id="btnUpdatePrimary" type="button" class="primary hidden"></button>
+      <button id="btnUpdateSecondary" type="button" class="hidden"></button>
+      <button id="btnUpdateIgnore" type="button" class="hidden">忽略此版本</button>
+      <button id="btnUpdateRecheck" type="button">重新检查</button>
+    </div>
+  </dialog>
   <dialog id="boardViewDialog" class="board-view-dialog" aria-label="选择视角"><div class="dialog-title"><h2>二维搭建</h2><button id="boardViewCancel">取消</button></div><p class="muted small">只模拟当前平面，适合局部红石与微时序实验。面外更新、随机刻、区块加载和三维投影联动尚未接入；复杂机器请在游戏中复核。</p><p class="muted small">熔炉、合成器、酿造台仅保存库存；生物和船没有 AI。上次画布会自动恢复，重要设计可另存 JSON。</p><div class="board-view-choices"><button id="boardViewSide">侧视</button><button id="boardViewTop">俯视</button></div></dialog>
   <dialog id="boardDialog" class="board-dialog" aria-label="二维方块搭建">
     <header class="board-header"><button id="boardClose">← 返回</button><h2 id="boardTitle">二维搭建</h2><span class="board-spacer"></span><button id="boardUndo">撤销</button><button id="boardRedo">重做</button><button id="boardPause" aria-pressed="true">开始运行</button><button id="boardTimingToggle" aria-expanded="false" aria-controls="boardTimingBar boardTimingPanel">显示时序</button><button id="boardHome">归位</button><button id="boardSave">保存</button><button id="boardLoad">打开</button><input id="boardFile" type="file" accept=".json" hidden /></header>
@@ -349,8 +437,12 @@
   <script src="gpu-view.js"></script>
   <script src="lod-stream.js"></script>
   <script src="materials-panel.js"></script>
+  <script src="view-presets.js"></script>
+  <script src="gpu-exporter.js"></script>
+  <script src="sheet-exporter.js"></script>
   <script src="renderer.js"></script>
   <script src="selection-tools.js"></script>
+  <script src="command-router.js"></script>
   <script src="shortcuts-ui.js"></script>
   <script src="export-tools.js"></script>
   <script src="block-search.js"></script>

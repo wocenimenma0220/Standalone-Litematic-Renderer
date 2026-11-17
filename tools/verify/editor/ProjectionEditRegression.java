@@ -24,6 +24,21 @@ public class ProjectionEditRegression {
    // 首个新状态使位宽从 2 增至 3，随后验证每一格以检查重新打包。
    engine.editBlock(set(-2,-1,-3,"redstone_wire",Map.of("power","15","north","none","south","none","east","none","west","none")));check(((Number)engine.searchBlocks("dispenser",0).get("total")).intValue()==1,"repack preserved other cells");
    Path negative=out.resolve("negative.litematic");var neg=NbtFileUtils.readCompressed(source);var r=neg.getCompound("Regions").orElseThrow().getCompound("设计").orElseThrow();var size=SubRegion.readBlockPos(r,"Size");var position=SubRegion.readBlockPos(r,"Position");r.put("Size",new NbtCompound().putInt("x",-size.x()).putInt("y",size.y()).putInt("z",size.z()));r.put("Position",new NbtCompound().putInt("x",position.x()+size.x()-1).putInt("y",position.y()).putInt("z",position.z()));NbtFileUtils.writeCompressed(negative,neg);engine.open(negative);engine.editBlock(set(-2,-1,-3,"oak_planks",Map.of()));check(((Number)engine.searchBlocks("oak_planks",0).get("total")).intValue()==1,"negative-size edit");
+   // 批量选区统计、//set、//replace 与批量撤销重做
+   engine.open(source);
+   var stats0=engine.selectionStats(new double[]{-3,-2,-4},new double[]{5,3,5},"stone");
+   check(((Number)stats0.get("volume")).longValue()==8L*5*9,"selectionStats volume");
+   check(((Number)stats0.get("matched")).longValue()==2L,"selectionStats matched stone");
+   var fillOut=engine.editRegion(Map.of("action","set","selection",Map.of("min",List.of(10,0,10),"max",List.of(14,2,14)),"target",Map.of("id","minecraft:glass","states",Map.of())));
+   check(fillOut.get("changed").equals(true)&&((Number)fillOut.get("count")).intValue()==32,"editRegion bulk fill outside");
+   check(((Number)engine.searchBlocks("glass",0).get("total")).intValue()==32,"glass blocks created by fill");
+   var replaced=engine.editRegion(Map.of("action","replace","selection",Map.of("min",List.of(10,0,10),"max",List.of(14,2,14)),"from","glass","target",Map.of("id","minecraft:stone","states",Map.of())));
+   check(replaced.get("changed").equals(true)&&((Number)replaced.get("count")).intValue()==32,"editRegion replace count");
+   check(((Number)engine.searchBlocks("glass",0).get("total")).intValue()==0,"replace removed glass");
+   engine.editBlock(Map.of("action","undo"));check(((Number)engine.searchBlocks("glass",0).get("total")).intValue()==32,"undo restored glass");
+   engine.editBlock(Map.of("action","undo"));check(((Number)engine.searchBlocks("glass",0).get("total")).intValue()==0,"second undo removed bulk fill");
+   engine.editBlock(Map.of("action","redo"));check(((Number)engine.searchBlocks("glass",0).get("total")).intValue()==32,"redo restored bulk fill");
+   engine.editBlock(Map.of("action","undo"));
   }
   System.out.println("PASS: face picking, partial selection, 3D states, palette growth, negative coordinates / sizes, outside placement, undo / redo, inventories, entities, custom data, LiteKinda export and source preservation");
  }

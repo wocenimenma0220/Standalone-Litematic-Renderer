@@ -29,6 +29,24 @@ class BackgroundExports {
   status(job){return {id:job.id,kind:job.kind,name:path.basename(job.out),path:job.out,state:job.state,stage:job.stage,completed:job.completed||0,total:job.total||0,error:job.error,result:job.result};}
   list(){return this.jobs.map(job=>this.status(job));}
   publish(job){this.onUpdate(this.status(job));}
+  recordExternal({kind,out,result}){
+    const job={id:randomUUID(),kind,out:path.resolve(out),directory:null,state:'completed',stage:'completed',result:{...result,path:path.resolve(out)}};
+    this.jobs.push(job);this.publish(job);
+    const finished=this.jobs.filter(j=>['completed','failed','cancelled'].includes(j.state));
+    for(const old of finished.slice(0,-8))this.jobs.splice(this.jobs.indexOf(old),1);
+    return this.status(job);
+  }
+  async submitSpoolGif({id,directory,spoolPath,params}){
+    if(this.closed)throw Error('应用正在退出');
+    if(!spoolPath||!params?.out||!path.isAbsolute(params.out))throw Error('导出参数无效');
+    const out=path.resolve(params.out);
+    if(this.jobs.some(job=>!['completed','failed','cancelled'].includes(job.state)&&path.resolve(job.out).toLowerCase()===out.toLowerCase()))throw Error('这个文件已有导出任务，请选择其他文件名');
+    const job={id:id||randomUUID(),kind:'gif',isSpool:true,spoolPath,out,directory,params:structuredClone(params),state:'queued',stage:'queued'};
+    this.jobs.push(job);this.publish(job);
+    const finished=this.jobs.filter(j=>['completed','failed','cancelled'].includes(j.state));
+    for(const old of finished.slice(0,-8))this.jobs.splice(this.jobs.indexOf(old),1);
+    this.pump();return this.status(job);
+  }
   async submit({kind,source,params,resources}){
     if(this.closed)throw Error('应用正在退出');
     if(!['png','gif'].includes(kind)||!source||!params?.out||!path.isAbsolute(params.out))throw Error('导出参数无效');
@@ -76,14 +94,20 @@ class BackgroundExports {
         await worker.start();alive();
         try{os.setPriority(worker.proc.pid,os.constants.priority.PRIORITY_BELOW_NORMAL);}catch{ }
       }
-      await worker.call('loadResources',job.resources);alive();
-      job.stage='opening';this.publish(job);await worker.call('open',{path:job.input});alive();
-      job.stage='building';this.publish(job);
       const output=path.join(job.directory,'result.'+job.kind);
-      const result=await worker.call(job.kind==='gif'?'renderAnimation':'render',{...job.params,out:output});alive();
+      let result;
+      if(job.isSpool){
+        job.stage='encoding';job.completed=0;job.total=job.params.frames;this.publish(job);
+        result=await worker.call('writeAnimatedGif',{spool:job.spoolPath,out:output,width:job.params.width,height:job.params.height,frames:job.params.frames,delay:job.params.delay});alive();
+      }else{
+        await worker.call('loadResources',job.resources);alive();
+        job.stage='opening';this.publish(job);await worker.call('open',{path:job.input});alive();
+        job.stage='building';this.publish(job);
+        result=await worker.call(job.kind==='gif'?'renderAnimation':'render',{...job.params,out:output});alive();
+      }
       job.stage='saving';this.publish(job);
       await moveFile(output,job.out);
-      job.result={...result,path:job.out};job.state='completed';job.stage='completed';
+      job.result={...result,...(job.isSpool?{gpu:true}:{}),path:job.out};job.state='completed';job.stage='completed';
       healthy=true;
     }catch(error){job.state=job.cancelled||this.closed?'cancelled':'failed';job.stage=job.state;if(job.state==='failed')job.error=error.message;}
     finally{
@@ -93,9 +117,9 @@ class BackgroundExports {
         await (this.reuseWorker&&typeof worker.forceStop==='function'?(job.cancelled?worker.forceStop():worker.stop()):worker.stop()).catch(()=>{});
       }else{
         this.warmWorker=worker;
-        this.warmTimer=setTimeout(()=>this.resetWorker(),60000);this.warmTimer.unref?.();
+        this.warmTimer=setTimeout(()=>this.resetWorker(),180000);this.warmTimer.unref?.();
       }
-      try{await fs.rm(job.directory,{recursive:true,force:true});}catch{/** 临时目录被占用不能把已成功的导出改为失败。 */}
+      if(job.directory)try{await fs.rm(job.directory,{recursive:true,force:true});}catch{/** 临时目录被占用不能把已成功的导出改为失败。 */}
       this.publish(job);
     }
   }

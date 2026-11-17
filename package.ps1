@@ -15,7 +15,9 @@ param(
     [ValidatePattern('^\d+\.\d+\.\d+(\.\d+)?(-?[A-Za-z][A-Za-z0-9.-]*)?$')]
     [string]$Version = '',
     [string]$ZipName = '',
-    [string]$ClientJar = ''
+    [string]$ClientJar = '',
+    [switch]$SkipInstaller,
+    [switch]$SkipPatch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +27,7 @@ $versionNode=if(Test-Path -LiteralPath 'tools/node/node.exe'){(Resolve-Path 'too
 $versionJson=& $versionNode tools/version.cjs --json
 if($LASTEXITCODE -ne 0){throw '版本不同步，请先运行 node tools/version.cjs --write'}
 $versionInfo=$versionJson | ConvertFrom-Json
+$releaseInfo=(& $versionNode tools/version.cjs --release-json) | ConvertFrom-Json
 if($Version -and $Version -ne $versionInfo.display){throw '请在 webapp/package.json 修改版本并运行 node tools/version.cjs --write'}
 $Version=$versionInfo.display
 if(-not $ZipName){$ZipName=$versionInfo.zipName}
@@ -162,7 +165,7 @@ if ($IncludeSkinCache) {
 Write-Host "`n[5/7] Copying the Electron shell..."
 $stageWebapp = Join-Path $stageDir 'webapp'
 New-Item -ItemType Directory -Path $stageWebapp | Out-Null
-foreach ($f in @('main.js', 'preload.js', 'engine-client.js', 'background-exports.js', 'runtime.js', 'performance-policy.js', 'ui-settings.js', 'scene-transfer.js', 'cache-cleanup.js', 'schematic-formats.js', 'package.json', 'app.ico', 'icon.png')) {
+foreach ($f in @('main.js', 'preload.js', 'engine-client.js', 'background-exports.js', 'runtime.js', 'performance-policy.js', 'ui-settings.js', 'scene-transfer.js', 'cache-cleanup.js', 'schematic-formats.js', 'updater.js', 'package.json', 'app.ico', 'icon.png')) {
     Copy-Item (Join-Path $webapp $f) -Destination $stageWebapp
 }
 Copy-Item (Join-Path $webapp 'renderer') -Destination $stageWebapp -Recurse
@@ -229,4 +232,93 @@ if (-not $SkipElectron) {
     if(Test-Path -LiteralPath $changesPath){$changesHash=(Get-FileHash -LiteralPath $changesPath -Algorithm SHA256).Hash.ToLowerInvariant();$sums+="$changesHash  Changes.md`n"}
     [IO.File]::WriteAllText((Join-Path $distRoot "SHA256SUMS-$Version.txt"),$sums,[Text.UTF8Encoding]::new($false))
     Write-Host "SHA256: $zipHash"
+
+    $patchEntry = $null
+    if (-not $SkipPatch) {
+        Write-Host "`n[8/9] Building incremental patch ZIP..."
+        $patchStage = Join-Path $distRoot '_patch_stage'
+        Remove-BuildDirectory $patchStage
+        New-Item -ItemType Directory -Path $patchStage | Out-Null
+        Copy-Item (Join-Path $stageDir 'bin') -Destination (Join-Path $patchStage 'bin') -Recurse
+        $patchWebapp = Join-Path $patchStage 'webapp'
+        New-Item -ItemType Directory -Path $patchWebapp | Out-Null
+        foreach ($item in Get-ChildItem -LiteralPath $stageWebapp) {
+            if ($item.Name -eq 'node_modules') { continue }
+            Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $patchWebapp $item.Name) -Recurse
+        }
+        $stageBuiltinAssets = Join-Path $stageDir 'assets\builtin'
+        if (Test-Path -LiteralPath $stageBuiltinAssets) {
+            $patchAssetsBuiltin = Join-Path $patchStage 'assets\builtin'
+            New-Item -ItemType Directory -Path (Split-Path -Parent $patchAssetsBuiltin) -Force | Out-Null
+            Copy-Item -LiteralPath $stageBuiltinAssets -Destination $patchAssetsBuiltin -Recurse
+        }
+        $patchMeta = [ordered]@{
+            version = $releaseInfo.version
+            display = $releaseInfo.display
+            runtimeSignature = $releaseInfo.runtimeSignature
+            generatedAt = [DateTime]::UtcNow.ToString('o')
+        } | ConvertTo-Json -Depth 4
+        [IO.File]::WriteAllText((Join-Path $patchStage 'patch-manifest.json'), $patchMeta + "`n", [Text.UTF8Encoding]::new($false))
+
+        $patchZipName = $releaseInfo.patchZipName
+        $patchZipPath = Join-Path $distRoot $patchZipName
+        if (Test-Path -LiteralPath $patchZipPath) { Remove-Item -LiteralPath $patchZipPath -Force }
+        [IO.Compression.ZipFile]::CreateFromDirectory($patchStage, $patchZipPath, $compression, $false)
+        Remove-BuildDirectory $patchStage
+        $patchHash = (Get-FileHash -LiteralPath $patchZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        [IO.File]::WriteAllText($patchZipPath + '.sha256', "$patchHash  $patchZipName`n", [Text.UTF8Encoding]::new($false))
+        $sums += "$patchHash  $patchZipName`n"
+        $patchSize = (Get-Item -LiteralPath $patchZipPath).Length
+        $patchEntry = [ordered]@{
+            name = $patchZipName
+            url = "https://github.com/$($releaseInfo.repo)/releases/download/v$($releaseInfo.version)/$patchZipName"
+            size = $patchSize
+            sha256 = $patchHash
+        }
+        Write-Host ("PATCH: {0}  ({1:N1} MB, sha256 {2})" -f $patchZipPath, ($patchSize / 1MB), $patchHash)
+    }
+
+    $installerEntry = $null
+    if (-not $SkipInstaller) {
+        Write-Host "`n[9/9] Building Windows setup installer EXE..."
+        $setupExeName = $releaseInfo.setupExeName
+        $setupExePath = Join-Path $distRoot $setupExeName
+        & (Join-Path $ProjectRoot 'tools\installer\build-installer.ps1') -PayloadZip $zipPath -OutExe $setupExePath
+        if ($LASTEXITCODE -ne 0) { throw 'build-installer failed' }
+        $setupHash = (Get-FileHash -LiteralPath $setupExePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        [IO.File]::WriteAllText($setupExePath + '.sha256', "$setupHash  $setupExeName`n", [Text.UTF8Encoding]::new($false))
+        $sums += "$setupHash  $setupExeName`n"
+        $setupSize = (Get-Item -LiteralPath $setupExePath).Length
+        $installerEntry = [ordered]@{
+            name = $setupExeName
+            url = "https://github.com/$($releaseInfo.repo)/releases/download/v$($releaseInfo.version)/$setupExeName"
+            size = $setupSize
+            sha256 = $setupHash
+        }
+        Write-Host ("SETUP: {0}  ({1:N1} MB, sha256 {2})" -f $setupExePath, ($setupSize / 1MB), $setupHash)
+    }
+
+    [IO.File]::WriteAllText((Join-Path $distRoot "SHA256SUMS-$Version.txt"), $sums, [Text.UTF8Encoding]::new($false))
+
+    $tag = "v$($releaseInfo.version)"
+    $latestManifest = [ordered]@{
+        version = $releaseInfo.version
+        display = $releaseInfo.display
+        tag = $tag
+        publishedAt = [DateTime]::UtcNow.ToString('o')
+        runtimeSignature = $releaseInfo.runtimeSignature
+        releaseUrl = "https://github.com/$($releaseInfo.repo)/releases/tag/$tag"
+        notes = "投影预览 $($releaseInfo.display) 更新发布（安装版支持应用内自动校验补丁更新，便携 ZIP 版请在发布页下载最新压缩包）。"
+        portable = [ordered]@{
+            name = $zipFileName
+            url = "https://github.com/$($releaseInfo.repo)/releases/download/$tag/$zipFileName"
+            size = (Get-Item -LiteralPath $zipPath).Length
+            sha256 = $zipHash
+        }
+        installer = $installerEntry
+        patch = $patchEntry
+    } | ConvertTo-Json -Depth 6
+    $latestPath = Join-Path $distRoot $releaseInfo.manifestName
+    [IO.File]::WriteAllText($latestPath, $latestManifest + "`n", [Text.UTF8Encoding]::new($false))
+    Write-Host "MANIFEST: $latestPath"
 }

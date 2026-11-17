@@ -14,6 +14,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** 投影渲染流程：构建场景、适配相机、光栅化输出。 */
 public final class SchematicRenderer {
@@ -21,6 +26,10 @@ public final class SchematicRenderer {
     private static final long STREAM_THRESHOLD_PIXELS = 16_777_216L;
     private static final int DEFAULT_BAND_PIXELS = 4_194_304;
     private static final int BAND_CHUNK = 64;
+    private static final int RASTER_WORKERS = Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors()));
+    private static final AtomicInteger WORKER_SEQ = new AtomicInteger();
+    private static final ExecutorService RASTER_POOL = RASTER_WORKERS <= 1 ? null : Executors.newFixedThreadPool(
+        RASTER_WORKERS, task -> Thread.ofPlatform().name("raster-worker-" + WORKER_SEQ.incrementAndGet()).daemon(true).unstarted(task));
 
     private SchematicRenderer() {}
 
@@ -207,48 +216,94 @@ public final class SchematicRenderer {
         // 动态纹理只更新图集像素，网格和 UV 保持不变。
 
         atlas.rebakeAtTick(settings.animationTick);
+        SceneMesh foreground = settings.selectionMesh != null ? settings.selectionMesh : mesh;
+        List<SceneMesh.MeshQuad> orderedTranslucent = orderedTranslucentQuads(foreground, cam);
+        List<SceneMesh.MeshQuad> ghosts = settings.selectionMin != null ? sortedGhosts(mesh, cam) : null;
 
-        Rasterizer raster = new Rasterizer(width, height, cam, atlas);
-        raster.clear(RenderBackground.isTransparent(settings) ? 0 : (settings.backgroundColor | 0xFF000000));
-        RenderBackground.fill(raster.color, settings);
-        raster.selectionMin=settings.selectionMin;raster.selectionMax=settings.selectionMax;raster.selectionPass=settings.selectionMin==null?0:1;
+        int stripCount = RASTER_POOL == null || (long) width * height < 65_536L || height < 64
+            ? 1 : Math.min(RASTER_WORKERS, Math.max(1, height / 32));
+        if (stripCount <= 1) {
+            Rasterizer raster = new Rasterizer(width, height, cam, atlas);
+            raster.clear(RenderBackground.isTransparent(settings) ? 0 : (settings.backgroundColor | 0xFF000000));
+            RenderBackground.fill(raster.color, settings);
+            raster.selectionMin = settings.selectionMin; raster.selectionMax = settings.selectionMax;
+            raster.selectionPass = settings.selectionMin == null ? 0 : 1;
 
-        // 先绘制写入深度的不透明和裁剪层，正确遮挡后方半透明几何。
-
-        SceneMesh foreground=settings.selectionMesh!=null?settings.selectionMesh:mesh;
-        int n = 0;
-        for (SceneMesh.MeshQuad q : foreground.solid) {
-            if ((++n & 1023) == 0) checkCancelled(settings);
-            draw(raster, q, settings, false);
-        }
-        checkCancelled(settings);
-        for (SceneMesh.MeshQuad q : foreground.cutout) {
-            if ((++n & 1023) == 0) checkCancelled(settings);
-            draw(raster, q, settings, false);
-        }
-        raster.writeColor=false;
-        for(SceneMesh.MeshQuad q:foreground.waterMask)draw(raster,q,settings,false);
-        raster.writeColor=true;
-        checkCancelled(settings);
-
-        // 玻璃、水和传送门统一按深度排序，避免固定材质顺序造成穿插。
-        if(foreground.translucentBsp!=null) {
-            double[] towardEye=towardEyeVector(cam);
-            int[] visited = {0};
-            foreground.translucentBsp.visit(towardEye,true,q->{
-                if ((++visited[0] & 1023) == 0) checkCancelled(settings);
-                draw(raster,q,settings,true);
-            });
-        } else {
-            drawSorted(raster, sortedBlended(foreground, cam), settings);
-        }
-
-        if(settings.selectionMin!=null){
+            int n = 0;
+            for (SceneMesh.MeshQuad q : foreground.solid) { if ((++n & 1023) == 0) checkCancelled(settings); draw(raster, q, settings, false); }
             checkCancelled(settings);
-            raster.selectionPass=2;
-            drawSorted(raster, sortedGhosts(mesh, cam), settings);
+            for (SceneMesh.MeshQuad q : foreground.cutout) { if ((++n & 1023) == 0) checkCancelled(settings); draw(raster, q, settings, false); }
+            raster.writeColor = false;
+            for (SceneMesh.MeshQuad q : foreground.waterMask) draw(raster, q, settings, false);
+            raster.writeColor = true;
+            checkCancelled(settings);
+            drawSorted(raster, orderedTranslucent, settings);
+            if (ghosts != null) {
+                checkCancelled(settings);
+                raster.selectionPass = 2;
+                drawSorted(raster, ghosts, settings);
+            }
+            return raster.color;
         }
-        return raster.color;
+
+        int bandH = (height + stripCount - 1) / stripCount;
+        Rasterizer probe = new Rasterizer(width, height, 0, 0, 1, 1, cam, atlas);
+        BandPass solidPass = buildBandPass(foreground.solid, probe, bandH, stripCount, settings);
+        BandPass cutoutPass = buildBandPass(foreground.cutout, probe, bandH, stripCount, settings);
+        BandPass waterMaskPass = buildBandPass(foreground.waterMask, probe, bandH, stripCount, settings);
+        BandPass translucentPass = buildBandPass(orderedTranslucent, probe, bandH, stripCount, settings);
+        BandPass ghostPass = ghosts != null ? buildBandPass(ghosts, probe, bandH, stripCount, settings) : null;
+
+        int clearArgb = RenderBackground.isTransparent(settings) ? 0 : (settings.backgroundColor | 0xFF000000);
+        int baseSelectionPass = settings.selectionMin == null ? 0 : 1;
+        Image output = new Image(width, height);
+        List<Future<?>> futures = new ArrayList<>(stripCount);
+        try {
+            for (int b = 0; b < stripCount; b++) {
+                final int bandIdx = b;
+                final int bandY = b * bandH;
+                final int activeH = Math.min(bandH, height - bandY);
+                if (activeH <= 0) break;
+                futures.add(RASTER_POOL.submit(() -> {
+                    checkCancelled(settings);
+                    Rasterizer raster = new Rasterizer(width, height, 0, bandY, width, activeH, cam, atlas);
+                    raster.selectionMin = settings.selectionMin;
+                    raster.selectionMax = settings.selectionMax;
+                    raster.clear(clearArgb);
+                    RenderBackground.fillRegion(raster.color, width, height, 0, bandY, activeH, settings, null, null);
+
+                    raster.selectionPass = baseSelectionPass;
+                    raster.writeColor = true;
+                    drawBandPass(raster, solidPass, bandIdx, settings, false);
+                    drawBandPass(raster, cutoutPass, bandIdx, settings, false);
+                    raster.writeColor = false;
+                    drawBandPass(raster, waterMaskPass, bandIdx, settings, false);
+                    raster.writeColor = true;
+                    drawBandPass(raster, translucentPass, bandIdx, settings, true);
+                    if (ghostPass != null) {
+                        raster.selectionPass = 2;
+                        drawBandPass(raster, ghostPass, bandIdx, settings, true);
+                    }
+                    System.arraycopy(raster.color.pixels(), 0, output.pixels(), bandY * width, activeH * width);
+                }));
+            }
+            for (Future<?> f : futures) {
+                try {
+                    f.get();
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof RuntimeException re) throw re;
+                    if (cause instanceof Error err) throw err;
+                    throw new RuntimeException(cause);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new java.util.concurrent.CancellationException("渲染已取消");
+                }
+            }
+            return output;
+        } finally {
+            for (Future<?> f : futures) f.cancel(true);
+        }
     }
 
     private static double[] towardEyeVector(Camera cam) {
@@ -359,43 +414,102 @@ public final class SchematicRenderer {
             ? buildBandPass(sortedGhosts(mesh, cam), probe, bandH, bandCount, settings)
             : null;
 
-        Rasterizer raster = new Rasterizer(width, height, 0, 0, width, bandH, cam, atlas);
-        raster.selectionMin = settings.selectionMin;
-        raster.selectionMax = settings.selectionMax;
         int baseSelectionPass = settings.selectionMin == null ? 0 : 1;
         int clearArgb = RenderBackground.isTransparent(settings) ? 0 : (settings.backgroundColor | 0xFF000000);
-        BufferedImage preparedBg = RenderBackground.prepareSource(settings);
-        BufferedImage[] bgScratch = new BufferedImage[1];
         long lastReportNs = 0;
 
         try (StreamingPngWriter png = new StreamingPngWriter(outPng, width, height)) {
             if (progress != null) progress.update("rendering", 0, bandCount);
-            for (int b = 0; b < bandCount; b++) {
-                checkCancelled(settings);
-                int bandY = b * bandH;
-                int activeH = Math.min(bandH, height - bandY);
-                raster.reposition(0, bandY, activeH);
-                raster.clear(clearArgb);
-                RenderBackground.fillRegion(raster.color, width, height, 0, bandY, activeH, settings, preparedBg, bgScratch);
+            if (RASTER_POOL == null || bandCount <= 1) {
+                Rasterizer raster = new Rasterizer(width, height, 0, 0, width, bandH, cam, atlas);
+                raster.selectionMin = settings.selectionMin;
+                raster.selectionMax = settings.selectionMax;
+                BufferedImage preparedBg = RenderBackground.prepareSource(settings);
+                BufferedImage[] bgScratch = new BufferedImage[1];
+                for (int b = 0; b < bandCount; b++) {
+                    checkCancelled(settings);
+                    int bandY = b * bandH;
+                    int activeH = Math.min(bandH, height - bandY);
+                    raster.reposition(0, bandY, activeH);
+                    raster.clear(clearArgb);
+                    RenderBackground.fillRegion(raster.color, width, height, 0, bandY, activeH, settings, preparedBg, bgScratch);
 
-                raster.selectionPass = baseSelectionPass;
-                raster.writeColor = true;
-                drawBandPass(raster, solidPass, b, settings, false);
-                drawBandPass(raster, cutoutPass, b, settings, false);
-                raster.writeColor = false;
-                drawBandPass(raster, waterMaskPass, b, settings, false);
-                raster.writeColor = true;
-                drawBandPass(raster, translucentPass, b, settings, true);
-                if (ghostPass != null) {
-                    raster.selectionPass = 2;
-                    drawBandPass(raster, ghostPass, b, settings, true);
+                    raster.selectionPass = baseSelectionPass;
+                    raster.writeColor = true;
+                    drawBandPass(raster, solidPass, b, settings, false);
+                    drawBandPass(raster, cutoutPass, b, settings, false);
+                    raster.writeColor = false;
+                    drawBandPass(raster, waterMaskPass, b, settings, false);
+                    raster.writeColor = true;
+                    drawBandPass(raster, translucentPass, b, settings, true);
+                    if (ghostPass != null) {
+                        raster.selectionPass = 2;
+                        drawBandPass(raster, ghostPass, b, settings, true);
+                    }
+
+                    png.writeRows(raster.color.pixels(), activeH);
+                    long now = System.nanoTime();
+                    if (progress != null && (b + 1 == bandCount || now - lastReportNs >= 200_000_000L)) {
+                        lastReportNs = now;
+                        progress.update("rendering", b + 1, bandCount);
+                    }
                 }
-
-                png.writeRows(raster.color.pixels(), activeH);
-                long now = System.nanoTime();
-                if (progress != null && (b + 1 == bandCount || now - lastReportNs >= 200_000_000L)) {
-                    lastReportNs = now;
-                    progress.update("rendering", b + 1, bandCount);
+            } else {
+                int inFlightLimit = Math.min(bandCount, Math.min(RASTER_WORKERS, 4));
+                var pending = new java.util.ArrayDeque<Future<int[]>>(inFlightLimit);
+                ThreadLocal<BufferedImage> localBg = ThreadLocal.withInitial(() -> RenderBackground.prepareSource(settings));
+                int nextSubmit = 0;
+                try {
+                    for (int b = 0; b < bandCount; b++) {
+                        while (nextSubmit < bandCount && pending.size() < inFlightLimit) {
+                            final int submitIdx = nextSubmit++;
+                            final int submitY = submitIdx * bandH;
+                            final int submitH = Math.min(bandH, height - submitY);
+                            pending.addLast(RASTER_POOL.submit(() -> {
+                                checkCancelled(settings);
+                                Rasterizer bandRaster = new Rasterizer(width, height, 0, submitY, width, submitH, cam, atlas);
+                                bandRaster.selectionMin = settings.selectionMin;
+                                bandRaster.selectionMax = settings.selectionMax;
+                                bandRaster.clear(clearArgb);
+                                RenderBackground.fillRegion(bandRaster.color, width, height, 0, submitY, submitH, settings, localBg.get(), null);
+                                bandRaster.selectionPass = baseSelectionPass;
+                                bandRaster.writeColor = true;
+                                drawBandPass(bandRaster, solidPass, submitIdx, settings, false);
+                                drawBandPass(bandRaster, cutoutPass, submitIdx, settings, false);
+                                bandRaster.writeColor = false;
+                                drawBandPass(bandRaster, waterMaskPass, submitIdx, settings, false);
+                                bandRaster.writeColor = true;
+                                drawBandPass(bandRaster, translucentPass, submitIdx, settings, true);
+                                if (ghostPass != null) {
+                                    bandRaster.selectionPass = 2;
+                                    drawBandPass(bandRaster, ghostPass, submitIdx, settings, true);
+                                }
+                                return bandRaster.color.pixels();
+                            }));
+                        }
+                        checkCancelled(settings);
+                        int activeH = Math.min(bandH, height - b * bandH);
+                        int[] pixels;
+                        try {
+                            pixels = pending.removeFirst().get();
+                        } catch (ExecutionException e) {
+                            Throwable cause = e.getCause();
+                            if (cause instanceof RuntimeException re) throw re;
+                            if (cause instanceof Error err) throw err;
+                            throw new RuntimeException(cause);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new java.util.concurrent.CancellationException("渲染已取消");
+                        }
+                        png.writeRows(pixels, activeH);
+                        long now = System.nanoTime();
+                        if (progress != null && (b + 1 == bandCount || now - lastReportNs >= 200_000_000L)) {
+                            lastReportNs = now;
+                            progress.update("rendering", b + 1, bandCount);
+                        }
+                    }
+                } finally {
+                    for (Future<int[]> f : pending) f.cancel(true);
                 }
             }
             checkCancelled(settings);

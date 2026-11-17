@@ -1,0 +1,94 @@
+name: 发布 Release（便携 ZIP / Windows 安装版 / 增量补丁）
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '可选手动发布 Tag（留空则使用 v<package.json version>）'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: 安装 Webapp 依赖与 Electron
+        shell: pwsh
+        run: |
+          npm ci --prefix webapp
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+          node webapp/node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path webapp/node_modules/electron/dist/electron.exe)) { throw 'Electron install failed' }
+
+      - name: 准备官方原版资源（Mojang Client JAR）
+        shell: pwsh
+        run: |
+          $manifest = Invoke-RestMethod 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
+          $latestId = $manifest.latest.release
+          $metaUrl = ($manifest.versions | Where-Object { $_.id -eq $latestId } | Select-Object -First 1).url
+          $verMeta = Invoke-RestMethod $metaUrl
+          $jarUrl = $verMeta.downloads.client.url
+          $jarPath = Join-Path $env:RUNNER_TEMP 'client.jar'
+          Invoke-WebRequest -Uri $jarUrl -OutFile $jarPath
+          ./tools/prepare-resources.ps1 -ClientJar $jarPath
+
+      - name: 校验逻辑与打包
+        shell: pwsh
+        run: |
+          ./verify.ps1 -JdkHome $env:JAVA_HOME
+          ./package.ps1 -JdkHome $env:JAVA_HOME
+          node tools/verify/release/package-modules.cjs dist/投影预览
+
+      - name: 确定发布 Tag 并上传 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          $rel = (node tools/version.cjs --release-json) | ConvertFrom-Json
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } elseif ($env:INPUT_TAG) { $env:INPUT_TAG } else { "v$($rel.version)" }
+          $changesCopy = Join-Path 'dist' 'Changes.md'
+          if (Test-Path -LiteralPath 'docs/修复记录.md') { Copy-Item -LiteralPath 'docs/修复记录.md' -Destination $changesCopy -Force }
+          $sumsCopy = Join-Path 'dist' 'SHA256SUMS.txt'
+          $sumsOrig = Join-Path 'dist' "SHA256SUMS-$($rel.display).txt"
+          if (Test-Path -LiteralPath $sumsOrig) { Copy-Item -LiteralPath $sumsOrig -Destination $sumsCopy -Force }
+          $files = @(
+            (Join-Path 'dist' "$($rel.zipName).zip"),
+            (Join-Path 'dist' $rel.setupExeName),
+            (Join-Path 'dist' $rel.patchZipName),
+            (Join-Path 'dist' $rel.manifestName),
+            $changesCopy,
+            $sumsCopy
+          ) | Where-Object { Test-Path -LiteralPath $_ }
+          $existingJson = gh release view $tag --json isDraft,assets 2>$null
+          if ($LASTEXITCODE -eq 0 -and $existingJson) {
+            $existing = $existingJson | ConvertFrom-Json
+            $hasManifest = @($existing.assets | Where-Object { $_.name -eq 'latest.json' }).Count -gt 0
+            if (-not $existing.isDraft -and $hasManifest) {
+              Write-Host "Release $tag already published with latest.json; skipping overwrite."
+              exit 0
+            }
+            gh release upload $tag @files --clobber
+          } else {
+            if (Test-Path -LiteralPath 'docs/修复记录.md') {
+              gh release create $tag @files --title "投影预览 $($rel.display)" --notes-file 'docs/修复记录.md'
+            } else {
+              gh release create $tag @files --title "投影预览 $($rel.display)" --notes "提供 **便携 ZIP 版**、**Windows 安装版（支持应用内自动补丁更新）** 与 **增量代码补丁包**。"
+            }
+          }

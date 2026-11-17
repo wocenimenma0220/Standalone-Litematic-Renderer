@@ -42,6 +42,7 @@ $cscArgs = @(
     '/platform:x64'
     '/optimize+'
     '/codepage:65001'
+    '/r:System.Web.Extensions.dll'
     "/out:$exe"
     $src
     $versionSource

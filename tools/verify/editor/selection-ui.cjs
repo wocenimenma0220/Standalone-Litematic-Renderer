@@ -51,7 +51,7 @@ app.once('browser-window-created',(_event,win)=>{
     document.querySelector('[data-action="selection"]').click();key('KeyO');await until(()=>!bindingCaptureAction,'binding save timeout');
     check(shortcutBindings.selection[0]==='KeyO','O binding failed');$('closeShortcuts').click();
     const enabled=state.selection.enabled;key('KeyB');check(state.selection.enabled===enabled,'old B binding still active');key('KeyO');check(!state.selection.enabled,'custom O binding not active');key('KeyO');
-    $('menuCommands').click();check(commandsDialog.open&&$('commandRows').children.length===2,'commands missing');$('closeCommands').click();
+    $('menuCommands').click();check(commandsDialog.open&&$('commandRows').children.length>=2,'commands missing');$('closeCommands').click();
     els.viewport.requestPointerLock=()=>Promise.reject(Error('hidden test'));setFly(true);pauseFlyLook(false);state.flyLookActive=true;
     const p=state.flyPos.slice();document.body.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyW',bubbles:true,cancelable:true}));flyTick(performance.now());document.body.dispatchEvent(new KeyboardEvent('keyup',{code:'KeyW',bubbles:true}));check(state.flyPos.some((v,i)=>v!==p[i]),'fly movement broken while selecting');
     openCommand();const commandPosition=state.flyPos.slice();selectionUi.command.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyW',key:'w',bubbles:true,cancelable:true}));check(state.keys.size===0&&state.flyPos.every((v,i)=>v===commandPosition[i]),'command typing moved camera');commandResume=false;closeCommand();

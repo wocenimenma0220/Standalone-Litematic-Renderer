@@ -472,11 +472,18 @@
   transition: border-color 0.1s ease, background-color 0.1s ease;
 }
 
-.board-container-dialog input:focus,
-.board-container-dialog select:focus {
+.board-container-dialog input:focus {
   outline: none;
   border-color: var(--accent-border);
   background: var(--bg-input-focus);
+}
+
+.board-container-dialog select:focus,
+.board-container-dialog select:focus-visible {
+  outline: none;
+  border-color: #121214;
+  background-color: var(--bg-btn);
+  box-shadow: var(--bevel-btn-sm);
 }
 
 #boardContainerError {
@@ -740,11 +747,18 @@
   font-size: 12px;
 }
 
-#boardPressureDialog select:focus,
 #boardPressureDialog input:focus {
   outline: none;
   border-color: var(--accent-border);
   background: var(--bg-input-focus);
+}
+
+#boardPressureDialog select:focus,
+#boardPressureDialog select:focus-visible {
+  outline: none;
+  border-color: #121214;
+  background-color: var(--bg-btn);
+  box-shadow: var(--bevel-btn-sm);
 }
 
 #boardPressureApply {
@@ -1121,7 +1135,7 @@
   width: auto;
   max-width: 180px;
   margin: 0;
-  padding: 6px 26px 6px 8px;
+  padding: 5px 8px;
   font-size: 11px;
 }
 

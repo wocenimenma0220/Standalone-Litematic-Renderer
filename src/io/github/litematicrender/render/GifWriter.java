@@ -4,13 +4,26 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
-/** 无外部依赖的 GIF89a 编码器，支持全局调色板、循环播放和逐帧压缩。 */
+/** 无外部依赖的 GIF89a 编码器，支持全局调色板、循环播放和并行帧压缩。 */
 public final class GifWriter {
+    private static final int ENCODE_WORKERS = Math.max(1, Math.min(6, Runtime.getRuntime().availableProcessors()));
+    private static final AtomicInteger ENCODE_SEQ = new AtomicInteger();
+    private static final ExecutorService ENCODE_POOL = ENCODE_WORKERS <= 1 ? null : Executors.newFixedThreadPool(
+        ENCODE_WORKERS, task -> Thread.ofPlatform().name("gif-encode-" + ENCODE_SEQ.incrementAndGet()).daemon(true).unstarted(task));
+
     private final int width;
     private final int height;
     /** 调色板保存 256 个 RGB 值，索引 0 保留给透明像素。 */
@@ -22,8 +35,11 @@ public final class GifWriter {
         void write(byte[] bytes, int start, int length) { try { stream.write(bytes,start,length); } catch (IOException e) { throw new java.io.UncheckedIOException(e); } }
         byte[] toByteArray() { return ((ByteArrayOutputStream)stream).toByteArray(); }
     }
-    /** 按颜色缓存调色板索引，避免对同一种颜色反复搜索 256 项。 */
-    private final Map<Integer, Integer> nearestCache = new HashMap<>();
+    /** 按 RGB 缓存调色板索引（开放定址零装箱表），避免对同一种颜色反复搜索 256 项。 */
+    private static final int CACHE_SIZE = 8192;
+    private static final int CACHE_MASK = CACHE_SIZE - 1;
+    private final int[] nearestKeys = new int[CACHE_SIZE];
+    private final byte[] nearestVals = new byte[CACHE_SIZE];
     private int framesWritten;
 
     public GifWriter(int width, int height) {
@@ -62,22 +78,105 @@ public final class GifWriter {
             }
             histogram.finish(gif.palette);
             encoded=Files.createTempFile(parent,".projection-gif-",".tmp");
-            try (var output=new java.io.BufferedOutputStream(Files.newOutputStream(encoded),1<<20);
-                 var pixels=new java.io.BufferedInputStream(Files.newInputStream(spool),1<<20)) {
-                gif.out.stream=output; gif.writeHeader();
-                Image frame=new Image(gif.width,gif.height);
-                for(int tick=0;tick<frameCount;tick++) {
-                    if (Thread.currentThread().isInterrupted()) throw new java.util.concurrent.CancellationException("渲染已取消");
-                    readSpoolPixels(pixels, frame.pixels(), ioBuf);
-                    gif.writeFrame(frame,delayCs);
-                    progress.update("encoding",tick+1,frameCount);
-                }
-                gif.writeTrailer();
-            }
+            encodeFromSpool(spool, encoded, gif, frameCount, delayCs, () -> false, progress);
             Files.move(encoded,destination,java.nio.file.StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(spool);
             if(encoded!=null) Files.deleteIfExists(encoded);
+        }
+    }
+
+    /** 直接从预先生成的原始 ARGB 帧文件并行统计调色板并编码为 GIF89a（供 GPU 快速导出使用）。 */
+    public static void writeFramesFromSpool(Path destinationFile, Path spool, int width, int height, int frameCount, int delayCs,
+                                            BooleanSupplier cancelSignal, Progress progress) throws Exception {
+        if (frameCount <= 0) throw new IOException("no frames to write");
+        if (width <= 0 || height <= 0) throw new IOException("invalid dimensions");
+        Path destination = destinationFile.toAbsolutePath(), parent = destination.getParent();
+        Files.createDirectories(parent);
+        Path encoded = Files.createTempFile(parent, ".projection-gif-", ".tmp");
+        try {
+            var histogram = new PaletteBuilder();
+            GifWriter gif = new GifWriter(width, height);
+            byte[] ioBuf = new byte[65536];
+            Image scan = new Image(width, height);
+            try (var in = new java.io.BufferedInputStream(Files.newInputStream(spool), 1 << 20)) {
+                for (int tick = 0; tick < frameCount; tick++) {
+                    if ((cancelSignal != null && cancelSignal.getAsBoolean()) || Thread.currentThread().isInterrupted()) {
+                        throw new java.util.concurrent.CancellationException("渲染已取消");
+                    }
+                    readSpoolPixels(in, scan.pixels(), ioBuf);
+                    histogram.add(scan);
+                }
+            }
+            histogram.finish(gif.palette);
+            encodeFromSpool(spool, encoded, gif, frameCount, delayCs, cancelSignal, progress);
+            Files.move(encoded, destination, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            if (encoded != null) Files.deleteIfExists(encoded);
+        }
+    }
+
+    private static void encodeFromSpool(Path spool, Path encoded, GifWriter gif, int frameCount, int delayCs,
+                                        BooleanSupplier cancelSignal, Progress progress) throws Exception {
+        byte[] ioBuf = new byte[65536];
+        try (var output = new java.io.BufferedOutputStream(Files.newOutputStream(encoded), 1 << 20);
+             var pixels = new java.io.BufferedInputStream(Files.newInputStream(spool), 1 << 20)) {
+            gif.out.stream = output;
+            gif.writeHeader();
+            if (ENCODE_POOL == null || frameCount < 2 || (long) gif.width * gif.height * frameCount < 262_144L) {
+                Image frame = new Image(gif.width, gif.height);
+                for (int tick = 0; tick < frameCount; tick++) {
+                    if ((cancelSignal != null && cancelSignal.getAsBoolean()) || Thread.currentThread().isInterrupted()) {
+                        throw new java.util.concurrent.CancellationException("渲染已取消");
+                    }
+                    readSpoolPixels(pixels, frame.pixels(), ioBuf);
+                    gif.writeFrame(frame, delayCs);
+                    progress.update("encoding", tick + 1, frameCount);
+                }
+            } else {
+                int inFlight = Math.min(frameCount, ENCODE_WORKERS * 2);
+                ArrayDeque<Future<byte[]>> pending = new ArrayDeque<>(inFlight);
+                int submitted = 0;
+                try {
+                    for (int tick = 0; tick < frameCount; tick++) {
+                        while (submitted < frameCount && pending.size() < inFlight) {
+                            if ((cancelSignal != null && cancelSignal.getAsBoolean()) || Thread.currentThread().isInterrupted()) {
+                                throw new java.util.concurrent.CancellationException("渲染已取消");
+                            }
+                            Image copy = new Image(gif.width, gif.height);
+                            readSpoolPixels(pixels, copy.pixels(), ioBuf);
+                            pending.addLast(ENCODE_POOL.submit(() -> {
+                                GifWriter scratch = new GifWriter(gif.width, gif.height);
+                                System.arraycopy(gif.palette, 0, scratch.palette, 0, 256);
+                                scratch.writeFrame(copy, delayCs);
+                                return scratch.out.toByteArray();
+                            }));
+                            submitted++;
+                        }
+                        if ((cancelSignal != null && cancelSignal.getAsBoolean()) || Thread.currentThread().isInterrupted()) {
+                            throw new java.util.concurrent.CancellationException("渲染已取消");
+                        }
+                        byte[] encodedFrame;
+                        try {
+                            encodedFrame = pending.removeFirst().get();
+                        } catch (ExecutionException e) {
+                            Throwable cause = e.getCause();
+                            if (cause instanceof RuntimeException re) throw re;
+                            if (cause instanceof Error err) throw err;
+                            throw new RuntimeException(cause);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            throw new java.util.concurrent.CancellationException("渲染已取消");
+                        }
+                        output.write(encodedFrame);
+                        gif.framesWritten++;
+                        progress.update("encoding", tick + 1, frameCount);
+                    }
+                } finally {
+                    for (Future<byte[]> f : pending) f.cancel(true);
+                }
+            }
+            gif.writeTrailer();
         }
     }
 
@@ -189,32 +288,28 @@ public final class GifWriter {
 
     /** 查找最近颜色；透明覆盖率由像素位置独立计算。 */
     private int nearest(int argb) {
-        Integer cached = this.nearestCache.get(argb);
-        if (cached != null) return cached;
-        int result;
-        int a = (argb >>> 24) & 0xFF;
-        if (a == 0) {
-            result = 0;
-        } else {
-            int r = (argb >>> 16) & 0xFF, g = (argb >>> 8) & 0xFF, b = argb & 0xFF;
-            int best = 1, bestDist = Integer.MAX_VALUE;
-            for (int i = 1; i < 256; i++) {
-                int p = this.palette[i];
-                int dr = r - ((p >>> 16) & 0xFF);
-                int dg = g - ((p >>> 8) & 0xFF);
-                int db = b - (p & 0xFF);
-                int d = dr * dr + dg * dg + db * db;
-                if (d < bestDist) {
-                    bestDist = d;
-                    best = i;
-                    if (d == 0) break;
-                }
+        int a = argb >>> 24;
+        if (a == 0) return 0;
+        int key = argb | 0xFF000000;
+        int slot = ((key * 0x9E3779B9) >>> (32 - 13)) & CACHE_MASK;
+        if (this.nearestKeys[slot] == key) return this.nearestVals[slot] & 0xFF;
+        int r = (argb >>> 16) & 0xFF, g = (argb >>> 8) & 0xFF, b = argb & 0xFF;
+        int best = 1, bestDist = Integer.MAX_VALUE;
+        for (int i = 1; i < 256; i++) {
+            int p = this.palette[i];
+            int dr = r - ((p >>> 16) & 0xFF);
+            int dg = g - ((p >>> 8) & 0xFF);
+            int db = b - (p & 0xFF);
+            int d = dr * dr + dg * dg + db * db;
+            if (d < bestDist) {
+                bestDist = d;
+                best = i;
+                if (d == 0) break;
             }
-            result = best;
         }
-        if (this.nearestCache.size() >= 65536) this.nearestCache.clear();
-        this.nearestCache.put(argb, result);
-        return result;
+        this.nearestKeys[slot] = key;
+        this.nearestVals[slot] = (byte) best;
+        return best;
     }
 
     private void writeHeader() {

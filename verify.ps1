@@ -41,6 +41,7 @@ $checks=@(
 foreach($check in $checks){Invoke-Check -Name ([IO.Path]::GetFileNameWithoutExtension($check)) -Executable $node -Arguments @("tools/verify/$check.cjs")}
 Invoke-Check -Name '版本一致性' -Executable $node -Arguments @('tools/version.cjs')
 Invoke-Check -Name '版本与文件入口' -Executable $node -Arguments @('tools/verify/release/version-regression.cjs')
+Invoke-Check -Name '双轨更新与安装器回归' -Executable $node -Arguments @('tools/verify/release/installer-updater-regression.cjs')
 & ./tools/verify/release/resource-preparation-regression.ps1
 $sources=@(Get-ChildItem src -Recurse -Filter '*.java' | ForEach-Object FullName)
 $javaChecks=@('render/PreviewCheckpointRegression','render/RenderingPipelineRegression','render/GifTransparencyRegression','render/SavedEntityDataRegression','render/SchematicFormatsRegression','render/LosslessAndHighResRegression')
