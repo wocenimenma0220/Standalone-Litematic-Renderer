@@ -54,13 +54,13 @@
 ./package.ps1 -JdkHome 'C:/path/to/jdk'
 ```
 
-打包脚手架会编译 Java、重新构建带版本号属性的 `投影预览.exe`、裁剪精简 Java 运行时并打包 Electron，产物输出至 `dist/`。
+打包脚手架会编译 Java、重新构建带版本号与自动打补丁逻辑的 `投影预览.exe`、裁剪精简 Java 运行时并打包 Electron，一次性向 `dist/` 输出 **便携 ZIP**、**Windows 安装版（`*-setup.exe`）**、**增量补丁包（`*-patch.zip`）**、更新清单 **`latest.json`** 以及 SHA-256 校验文件。
 
 版本更新流程：
 
-1. 修改并同步版本：`node tools/version.cjs --write 1.3.0`（同步 `webapp/package-lock.json` 与 `webapp/renderer/app-version.js`）。
-2. 重新构建打包并跑全套 `./verify.ps1` 检查。
-3. 推送 Git 提交后，运行 `node tools/publish-test-release.cjs <完整提交 SHA>` 自动校验制品 SHA-256 并发布到 GitHub Releases（版本号不带 `-` 后缀视为正式版，自动标为 Latest；更新说明读取自 `docs/修复记录.md`）。
+1. 修改并同步版本：`node tools/version.cjs --write 1.3.2`（支持三段/四段版本号，同步 `webapp/package-lock.json` 与 `webapp/renderer/app-version.js`）。
+2. 更新 `docs/修复记录.md`，重新构建打包并跑全套 `./verify.ps1` 检查。
+3. 推送 Git 提交后，可运行 `node tools/publish-test-release.cjs <完整提交 SHA>` 自动校验全部 6 个制品 SHA-256 并发布到 GitHub Releases（版本号不带 `-` 后缀视为正式版并标为 Latest），或推送 `v*` 标签由 `.github/workflows/release.yml` 自动完成云端构建与发布。
 
 ## 主要源码入口
 
@@ -69,8 +69,12 @@
 | `src/.../serve/RenderEngine.java` | 资源加载、投影打开、场景缓存管理与编辑会话 |
 | `src/.../schematic/ProjectionEdits.java` | 保留原 NBT 的方块修改、成对/活塞联动、撤销历史与原子写入 |
 | `src/.../schematic/SchematicFormats.java` | Java `.nbt` 与 Sponge v2/v3 `.schem` 统一导入 |
-| `webapp/main.js`、`preload.js` | Electron 主进程窗口、菜单及受限 IPC 接口 |
-| `webapp/renderer/renderer.js`、`gpu-view.js`、`lod-stream.js` | GPU 视图、自由漫游与分块网格传输 |
+| `tools/launcher/Launcher.cs` | 原生启动器 `投影预览.exe`（图形/CLI 统一入口与安装版重启热补丁应用） |
+| `tools/installer/Setup.cs` | 单文件 Windows 安装向导与控制面板卸载程序 |
+| `webapp/main.js`、`preload.js`、`updater.js` | Electron 主进程单实例复用、受限 IPC、热重载 `--dev` 与双轨 GitHub 更新检查 |
+| `webapp/renderer/renderer.js`、`gpu-view.js`、`lod-stream.js` | Ore UI 主界、GPU 视图、自由漫游与分块网格传输 |
+| `webapp/renderer/gpu-exporter.js`、`sheet-exporter.js`、`view-presets.js` | 离屏 GPU 导出管线、自适应双视角展示卡生成与 15 套标准预设视角 |
+| `webapp/renderer/command-router.js` | `/` 一级全局指令与 `//` 二级选区/编辑指令控制台 |
 | `webapp/renderer/projection-edit.js` | 三维编辑交互与快捷键控制 |
 | `webapp/renderer/materials-panel.js` | 建材与容器统计、水桶换冰与表格导出 |
 | `webapp/renderer/board-loader.js`、`board-session.js` | 二维画布按需加载、历史上限与暂存恢复 |
