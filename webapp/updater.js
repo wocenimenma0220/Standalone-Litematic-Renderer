@@ -195,6 +195,7 @@ async function defaultFetchJson(url) {
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await net.fetch(url, {
+        cache: 'no-store',
         headers: {
           'User-Agent': 'Litematic-Viewer-Updater/1.0',
           Accept: 'application/json',
