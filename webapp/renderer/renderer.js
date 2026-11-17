@@ -2215,12 +2215,19 @@ window.engine.onEvent((evt) => {
 });
 
 
-window.engine.onOpenFile((file) => {
-  log(`命令行指定投影：${file}`);
-  pendingOpen = file;
-});
-
 let pendingOpen = null;
+let openHandlerReady = false;
+let openingStartupQueue = false;
+
+window.engine.onOpenFile((file) => {
+  if (!file) return;
+  log(`外部打开投影：${file}`);
+  if (!openHandlerReady || openingStartupQueue) {
+    pendingOpen = file;
+    return;
+  }
+  loadFile(file).catch(err => log('打开失败：' + err.message, 'err'));
+});
 
 window.engine.onExit((info) => {
   if (info.error) {
@@ -2260,13 +2267,20 @@ window.__resourcesReady=new Promise(resolve=>{finishResourceInitialization=resol
     applyResourceList(res);
     if(!state.file&&!state.fileOpening)setStatus('材质包已就绪，请打开投影。','ok');
     finishResourceInitialization(true);
+    openHandlerReady = true;
     if (res.builtinPacks && res.builtinPacks.length) {
       log(`内置材质包：${res.builtinPacks.join('，')}`, 'ok');
     }
     log(`资源包已加载（${Math.round(performance.now() - t0)} ms，贴图 ${res.sprites} 张）`, 'ok');
-    if (pendingOpen) {
-      await loadFile(pendingOpen);
-      pendingOpen = null;
+    openingStartupQueue = true;
+    try {
+      while (pendingOpen) {
+        const nextFile = pendingOpen;
+        pendingOpen = null;
+        await loadFile(nextFile);
+      }
+    } finally {
+      openingStartupQueue = false;
     }
   } catch (err) {
     setStatus('引擎初始化失败', 'err');

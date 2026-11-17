@@ -3,9 +3,11 @@ const fs=require('node:fs'),path=require('node:path');
 const DEFAULT_REPO='wocenimenma0220/Standalone-Litematic-Renderer';
 function versionInfo(root=path.resolve(__dirname,'..')){
   const pkg=JSON.parse(fs.readFileSync(path.join(root,'webapp/package.json'),'utf8'));
-  if(!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9]+(?:[.-][a-zA-Z0-9]+)*)?$/.test(pkg.version)||pkg.version.includes('tetst'))throw Error('版本格式无效，请使用如 1.2.0-test-v2');
+  if(!/^\d+\.\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9]+(?:[.-][a-zA-Z0-9]+)*)?$/.test(pkg.version)||pkg.version.includes('tetst'))throw Error('版本格式无效，请使用如 1.2.0-test-v2');
   const display=pkg.version.replace(/-test-v(\d+)$/,'test-v$1');
-  return {version:pkg.version,display,assembly:pkg.version.split('-')[0]+'.0',title:pkg.productName+' '+display,zipName:'Litematic-Viewer-'+display+'-win-x64'};
+  const coreParts=pkg.version.split('-')[0].split('.');
+  const assembly=coreParts.length>=4?coreParts.slice(0,4).join('.'):coreParts.concat(['0']).join('.');
+  return {version:pkg.version,display,assembly,title:pkg.productName+' '+display,zipName:'Litematic-Viewer-'+display+'-win-x64'};
 }
 function releaseInfo(root=path.resolve(__dirname,'..')){
   const info=versionInfo(root);

@@ -36,7 +36,13 @@ function diagnostic(message) {
 app.setName('投影预览');
 app.setAppUserModelId('io.kindasus.projectionpreview');
 
+const gotSingleInstanceLock = process.env.LITEMATIC_ALLOW_MULTI_INSTANCE === '1' || app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+}
+
 let mainWindow = null;
+let windowDidFinishLoad = false;
 let engine = null;
 let renderStopPromise = null;
 let openedSchematic=null,resourceRoot=null;
@@ -96,7 +102,40 @@ function setupDevHotReload(win) {
   }
 }
 
+function resolveSchematicFromArgs(argv, cwd = process.cwd()) {
+  if (!Array.isArray(argv)) return null;
+  for (let i = 1; i < argv.length; i++) {
+    const raw = argv[i];
+    if (!raw || typeof raw !== 'string') continue;
+    if (raw.startsWith('-') && !schematicFormats.accepts(raw)) continue;
+    const candidate = path.isAbsolute(raw) ? raw : path.resolve(cwd || process.cwd(), raw);
+    if (!schematicFormats.accepts(candidate)) continue;
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+    } catch { }
+  }
+  return null;
+}
+
+function focusMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (!mainWindow.isVisible()) mainWindow.show();
+  mainWindow.focus();
+}
+
+function dispatchExternalOpen(file) {
+  focusMainWindow();
+  if (!file) return;
+  if (mainWindow && !mainWindow.isDestroyed() && windowDidFinishLoad) {
+    mainWindow.webContents.send('app:openFile', file);
+  } else {
+    startupFile = file;
+  }
+}
+
 function createWindow() {
+  windowDidFinishLoad = false;
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -126,6 +165,14 @@ function createWindow() {
   mainWindow.on('maximize', () => mainWindow.webContents.send('window:maximized', true));
   mainWindow.on('unmaximize', () => mainWindow.webContents.send('window:maximized', false));
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow.webContents.once('did-finish-load', () => {
+    windowDidFinishLoad = true;
+    if (startupFile && mainWindow && !mainWindow.isDestroyed()) {
+      const target = startupFile;
+      startupFile = null;
+      mainWindow.webContents.send('app:openFile', target);
+    }
+  });
   setupDevHotReload(mainWindow);
   if (process.argv.includes('--dev')) mainWindow.webContents.openDevTools({ mode: 'detach' });
 }
@@ -871,46 +918,47 @@ ipcMain.handle('updater:launchInstaller', async (_e, file) => {
 
 // ---------------------------------------------------------------------------
 
-app.whenReady().then(async () => {
-  createWindow();
-  try {
-    await startEngine();
-  } catch (err) {
-    if (mainWindow) {
-      mainWindow.webContents.once('did-finish-load', () => {
-        mainWindow.webContents.send('engine:exit', { error: String(err && err.message ? err.message : err) });
-      });
-    }
-  }
-
-  // 命令行传入的投影在启动后打开，支持拖到 EXE 和文件关联。
-
-  const cliFile = process.argv.slice(1).find((a) => schematicFormats.accepts(a));
-  if (cliFile && mainWindow) {
-    startupFile = path.resolve(cliFile);
-    mainWindow.webContents.once('did-finish-load', () => {
-      mainWindow.webContents.send('app:openFile', startupFile);
-    });
-  }
-
-  if (process.env.LITEMATIC_DISABLE_AUTO_UPDATE !== '1') {
-    const timer = setTimeout(() => {
-      appUpdater.check().catch(() => {});
-    }, 2800);
-    timer.unref?.();
-  }
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (gotSingleInstanceLock) {
+  app.on('second-instance', (_event, commandLine, workingDirectory) => {
+    const file = resolveSchematicFromArgs(commandLine, workingDirectory);
+    diagnostic(`second-instance received: file=${file || 'none'}`);
+    dispatchExternalOpen(file);
   });
-});
+
+  app.whenReady().then(async () => {
+    const cliFile = resolveSchematicFromArgs(process.argv, process.cwd());
+    if (cliFile) startupFile = cliFile;
+
+    createWindow();
+    try {
+      await startEngine();
+    } catch (err) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const sendErr = () => mainWindow.webContents.send('engine:exit', { error: String(err && err.message ? err.message : err) });
+        if (windowDidFinishLoad) sendErr();
+        else mainWindow.webContents.once('did-finish-load', sendErr);
+      }
+    }
+
+    if (process.env.LITEMATIC_DISABLE_AUTO_UPDATE !== '1') {
+      const timer = setTimeout(() => {
+        appUpdater.check().catch(() => {});
+      }, 2800);
+      timer.unref?.();
+    }
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('before-quit', event => {
-  if(shutdownComplete)return;
+  if(!gotSingleInstanceLock||shutdownComplete)return;
   event.preventDefault();
   if(!shutdownPromise)shutdownPromise=(async()=>{
     try {

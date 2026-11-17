@@ -7,6 +7,7 @@ fs.writeFileSync(path.join(root,'webapp/package.json'),JSON.stringify({productNa
 fs.writeFileSync(path.join(root,'webapp/package-lock.json'),JSON.stringify({version:'old',packages:{'':{version:'old'},'node_modules/example':{version:'9.0.0'}}}));
 assert.throws(()=>sync(root),/不同步/);sync(root,{write:true});assert.equal(sync(root).display,'1.2.0test-v2');
 assert.equal(sync(root,{write:true,version:'1.3.0-test-v1'}).zipName,'Litematic-Viewer-1.3.0test-v1-win-x64');assert.equal(sync(root).assembly,'1.3.0.0');
+assert.equal(sync(root,{write:true,version:'1.3.1.1'}).zipName,'Litematic-Viewer-1.3.1.1-win-x64');assert.equal(sync(root).assembly,'1.3.1.1');
 assert.equal(sync(root,{write:true,version:'1.2.0'}).display,'1.2.0');assert.equal(sync(root).zipName,'Litematic-Viewer-1.2.0-win-x64');assert.equal(sync(root).assembly,'1.2.0.0');
 const original=fs.readFileSync(path.join(root,'webapp/package.json'),'utf8');assert.throws(()=>sync(root,{write:true,version:'1.3.0-tetst-v1'}));assert.equal(fs.readFileSync(path.join(root,'webapp/package.json'),'utf8'),original);
 assert.equal(JSON.parse(fs.readFileSync(path.join(root,'webapp/package-lock.json'))).packages['node_modules/example'].version,'9.0.0');

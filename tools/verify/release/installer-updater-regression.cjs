@@ -49,7 +49,9 @@ async function run() {
   fs.rmSync(outputRoot, { recursive: true, force: true });
   fs.mkdirSync(outputRoot, { recursive: true });
 
-  // 1. SemVer comparison checks
+  // 1. SemVer comparison checks (including 4-segment hotfix versions like 1.3.1.1)
+  assert.equal(compareVersions('1.3.1.1', '1.3.1'), 1);
+  assert.equal(compareVersions('1.3.2', '1.3.1.1'), 1);
   assert.equal(compareVersions('1.3.1', '1.3.0'), 1);
   assert.equal(compareVersions('v1.3.0', '1.3.0'), 0);
   assert.equal(compareVersions('1.3.0', '1.3.0-beta-v2'), 1);

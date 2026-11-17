@@ -25,10 +25,10 @@ function getDefaultElectronNet() {
 
 function parseVersion(raw) {
   const s = String(raw || '').trim().replace(/^v/i, '');
-  const m = s.match(/^(\d+)\.(\d+)\.(\d+)(?:[-.]?(.+))?$/);
+  const m = s.match(/^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:[-.]?(.+))?$/);
   if (!m) return null;
-  const core = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const pre = m[4] ? m[4].replace(/^test-v/i, 'test.').split(/[.-]/).filter(Boolean) : [];
+  const core = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4] || 0)];
+  const pre = m[5] ? m[5].replace(/^test-v/i, 'test.').split(/[.-]/).filter(Boolean) : [];
   return { raw: s, core, pre };
 }
 
@@ -36,7 +36,7 @@ function compareVersions(a, b) {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
   if (!pa || !pb) return String(a || '').localeCompare(String(b || ''));
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     if (pa.core[i] !== pb.core[i]) return pa.core[i] > pb.core[i] ? 1 : -1;
   }
   if (!pa.pre.length && !pb.pre.length) return 0;
