@@ -20,8 +20,57 @@ using Microsoft.Win32;
 internal static class SetupProgram
 {
     private const string Magic = "LVPACK01";
-    private const string UninstallRegKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteKindaProjectionPreview";
+    private const string UninstallKeyName = "LiteKindaProjectionPreview";
     private const string ProgId = "LiteKinda.ProjectionPreview";
+    private const string RegisteredAppName = "LiteKindaProjectionPreview";
+    private const int SHCNE_ASSOCCHANGED = 0x08000000;
+    private const uint SHCNF_IDLIST = 0x0000;
+
+    [DllImport("shell32.dll")]
+    private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+    private sealed class RegPaths
+    {
+        public readonly string RegRoot;
+        public readonly bool IsRealSystem;
+        public readonly string UninstallSubKey;
+        public readonly string ClassesRoot;
+        public readonly string CapabilitiesSubKey;
+        public readonly string RegisteredAppsSubKey;
+
+        public RegPaths(string regRoot)
+        {
+            string clean = NormalizeRegRoot(regRoot);
+            RegRoot = clean;
+            IsRealSystem = string.IsNullOrEmpty(clean);
+            if (IsRealSystem)
+            {
+                UninstallSubKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\" + UninstallKeyName;
+                ClassesRoot = @"Software\Classes";
+                CapabilitiesSubKey = @"Software\LiteKinda\ProjectionPreview\Capabilities";
+                RegisteredAppsSubKey = @"Software\RegisteredApplications";
+            }
+            else
+            {
+                UninstallSubKey = clean + @"\Uninstall\" + UninstallKeyName;
+                ClassesRoot = clean + @"\Classes";
+                CapabilitiesSubKey = clean + @"\LiteKinda\ProjectionPreview\Capabilities";
+                RegisteredAppsSubKey = clean + @"\RegisteredApplications";
+            }
+        }
+    }
+
+    private static string NormalizeRegRoot(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        string clean = raw.Trim().Replace('/', '\\').Trim('\\');
+        if (clean.IndexOf("..", StringComparison.Ordinal) >= 0) throw new ArgumentException("无效的注册表路径");
+        if (!clean.StartsWith(@"Software\", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("--reg-root 必须位于 Software\\ 下");
+        }
+        return clean;
+    }
 
     private sealed class SubStream : Stream
     {
@@ -112,24 +161,38 @@ internal static class SetupProgram
         PayloadSlice slice = InspectSelfPayload(selfExe);
 
         bool silent = false;
-        bool uninstall = !slice.HasPayload;
+        bool explicitUninstall = false;
+        bool repair = false;
         bool desktopShortcut = true;
         bool startMenuShortcut = true;
         bool associateFiles = true;
         bool launchAfter = true;
+        bool explicitDir = false;
         string targetDir = DefaultInstallDir();
+        string regRoot = "";
 
         for (int i = 0; i < args.Length; i++)
         {
             string a = args[i];
             if (string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase)) silent = true;
-            else if (string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase)) uninstall = true;
+            else if (string.Equals(a, "--uninstall", StringComparison.OrdinalIgnoreCase)) explicitUninstall = true;
+            else if (string.Equals(a, "--repair", StringComparison.OrdinalIgnoreCase)) repair = true;
             else if (string.Equals(a, "--no-shortcuts", StringComparison.OrdinalIgnoreCase)) { desktopShortcut = false; startMenuShortcut = false; }
             else if (string.Equals(a, "--no-assoc", StringComparison.OrdinalIgnoreCase)) associateFiles = false;
             else if (string.Equals(a, "--no-launch", StringComparison.OrdinalIgnoreCase)) launchAfter = false;
-            else if (string.Equals(a, "--dir", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) targetDir = Path.GetFullPath(args[++i]);
+            else if (string.Equals(a, "--dir", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) { targetDir = Path.GetFullPath(args[++i]); explicitDir = true; }
+            else if (string.Equals(a, "--reg-root", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length) regRoot = args[++i];
         }
 
+        RegPaths regPaths = new RegPaths(regRoot);
+
+        if (repair)
+        {
+            string installRoot = explicitDir ? targetDir : Path.GetDirectoryName(selfExe);
+            return RunRepair(installRoot, selfExe, slice, silent, desktopShortcut, startMenuShortcut, associateFiles, regPaths);
+        }
+
+        bool uninstall = explicitUninstall || !slice.HasPayload;
         if (uninstall)
         {
             string installRoot = Path.GetDirectoryName(selfExe);
@@ -138,7 +201,7 @@ internal static class SetupProgram
                 MessageBox.Show("此安装程序未包含安装包数据，无法单独安装。", "投影预览", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }
-            return RunUninstall(installRoot, silent);
+            return RunUninstall(installRoot, silent, desktopShortcut || startMenuShortcut, regPaths);
         }
 
         if (silent)
@@ -153,6 +216,7 @@ internal static class SetupProgram
                     DesktopShortcut = desktopShortcut,
                     StartMenuShortcut = startMenuShortcut,
                     AssociateFiles = associateFiles,
+                    RegPaths = regPaths,
                 };
                 PerformInstall(opts, null);
                 if (launchAfter && File.Exists(Path.Combine(targetDir, "投影预览.exe")))
@@ -170,7 +234,7 @@ internal static class SetupProgram
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new SetupForm(selfExe, slice, targetDir));
+        Application.Run(new SetupForm(selfExe, slice, targetDir, regPaths));
         return 0;
     }
 
@@ -187,6 +251,96 @@ internal static class SetupProgram
         public bool DesktopShortcut;
         public bool StartMenuShortcut;
         public bool AssociateFiles;
+        public RegPaths RegPaths;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        try { return Path.GetFullPath(path.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+        catch (Exception) { return ""; }
+    }
+
+    private static bool PathsEqual(string a, string b)
+    {
+        string na = NormalizePath(a);
+        string nb = NormalizePath(b);
+        return !string.IsNullOrEmpty(na) && string.Equals(na, nb, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPathUnderRoot(string candidatePath, string rootDir)
+    {
+        string cand = NormalizePath(candidatePath);
+        string root = NormalizePath(rootDir);
+        if (string.IsNullOrEmpty(cand) || string.IsNullOrEmpty(root)) return false;
+        if (string.Equals(cand, root, StringComparison.OrdinalIgnoreCase)) return true;
+        return cand.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ExtractExeFromCommand(string command)
+    {
+        if (string.IsNullOrWhiteSpace(command)) return "";
+        string s = command.Trim();
+        if (s.StartsWith("\"", StringComparison.Ordinal))
+        {
+            int end = s.IndexOf('"', 1);
+            return end > 1 ? s.Substring(1, end - 1) : "";
+        }
+        int exeIdx = s.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
+        if (exeIdx >= 0) return s.Substring(0, exeIdx + 4).Trim();
+        int sp = s.IndexOf(' ');
+        return sp > 0 ? s.Substring(0, sp) : s;
+    }
+
+    private static string ResolveInstalledVersion(string installDir)
+    {
+        try
+        {
+            var ser = new JavaScriptSerializer();
+            string manifestPath = Path.Combine(installDir, "install-manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                var m = ser.Deserialize<Dictionary<string, object>>(File.ReadAllText(manifestPath, Encoding.UTF8));
+                if (m != null)
+                {
+                    string v = m.ContainsKey("installedVersion") ? Convert.ToString(m["installedVersion"]) : "";
+                    if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+                    v = m.ContainsKey("displayVersion") ? Convert.ToString(m["displayVersion"]) : "";
+                    if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+                }
+            }
+            string pkgPath = Path.Combine(installDir, @"webapp\package.json");
+            if (File.Exists(pkgPath))
+            {
+                var pkg = ser.Deserialize<Dictionary<string, object>>(File.ReadAllText(pkgPath, Encoding.UTF8));
+                if (pkg != null && pkg.ContainsKey("version"))
+                {
+                    string v = Convert.ToString(pkg["version"]);
+                    if (!string.IsNullOrWhiteSpace(v)) return v.Trim();
+                }
+            }
+        }
+        catch (Exception) { }
+        return SetupMeta.Display;
+    }
+
+    private static long ComputeDirectorySizeKb(string dir)
+    {
+        long bytes = 0;
+        try
+        {
+            foreach (string sub in new[] { "bin", "runtime", "assets", "webapp" })
+            {
+                string full = Path.Combine(dir, sub);
+                if (!Directory.Exists(full)) continue;
+                foreach (string file in Directory.GetFiles(full, "*", SearchOption.AllDirectories))
+                {
+                    try { bytes += new FileInfo(file).Length; } catch (Exception) { }
+                }
+            }
+        }
+        catch (Exception) { }
+        return Math.Max(1, bytes / 1024);
     }
 
     private static void StopProcessesUnderDir(string dir)
@@ -230,6 +384,7 @@ internal static class SetupProgram
         StopProcessesUnderDir(destRoot);
 
         string destPrefix = destRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        long extractedBytes = 0;
         using (FileStream fs = File.OpenRead(opts.SelfExe))
         using (SubStream sub = new SubStream(fs, opts.Slice.Offset, opts.Slice.Length))
         using (ZipArchive archive = new ZipArchive(sub, ZipArchiveMode.Read))
@@ -253,6 +408,7 @@ internal static class SetupProgram
                 string parent = Path.GetDirectoryName(target);
                 if (!Directory.Exists(parent)) Directory.CreateDirectory(parent);
                 entry.ExtractToFile(target, true);
+                extractedBytes += Math.Max(0, entry.Length);
                 if (onProgress != null && (done % 25 == 0 || done == total))
                 {
                     onProgress(done, total, rel);
@@ -298,76 +454,221 @@ internal static class SetupProgram
         var ser = new JavaScriptSerializer();
         File.WriteAllText(Path.Combine(destRoot, "install-manifest.json"), ser.Serialize(manifest), new UTF8Encoding(false));
 
+        RegPaths paths = opts.RegPaths ?? new RegPaths("");
+        long estimatedKb = Math.Max(1, extractedBytes / 1024);
+        RegisterInstallIntegration(destRoot, uninstallerExe, SetupMeta.Display, estimatedKb,
+            opts.DesktopShortcut, opts.StartMenuShortcut, opts.AssociateFiles, paths);
+    }
+
+    private static void RegisterInstallIntegration(string destRoot, string uninstallerExe, string displayVersion,
+        long estimatedKb, bool desktopShortcut, bool startMenuShortcut, bool associateFiles, RegPaths paths)
+    {
         string appExe = Path.Combine(destRoot, "投影预览.exe");
-        if (opts.DesktopShortcut)
+        if (paths.IsRealSystem && desktopShortcut)
         {
             string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             CreateShortcut(Path.Combine(desktop, "投影预览.lnk"), appExe, destRoot, "Minecraft Litematica 投影查看与导出");
         }
-        if (opts.StartMenuShortcut)
+        if (paths.IsRealSystem && startMenuShortcut)
         {
             string programs = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "投影预览");
             Directory.CreateDirectory(programs);
             CreateShortcut(Path.Combine(programs, "投影预览.lnk"), appExe, destRoot, "Minecraft Litematica 投影查看与导出");
             CreateShortcut(Path.Combine(programs, "卸载 投影预览.lnk"), uninstallerExe, destRoot, "卸载 投影预览", "--uninstall");
         }
-        if (opts.AssociateFiles)
+        if (associateFiles)
         {
-            RegisterFileAssociations(appExe);
+            RegisterFileAssociations(paths, appExe);
         }
-        RegisterUninstallEntry(destRoot, appExe, uninstallerExe);
+        RegisterUninstallEntry(paths, destRoot, appExe, uninstallerExe, displayVersion, estimatedKb);
     }
 
     private static void CreateShortcut(string lnkPath, string targetExe, string workingDir, string description, string arguments = "")
     {
-        Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-        if (shellType == null) return;
-        dynamic shell = Activator.CreateInstance(shellType);
-        dynamic shortcut = shell.CreateShortcut(lnkPath);
-        shortcut.TargetPath = targetExe;
-        shortcut.WorkingDirectory = workingDir;
-        shortcut.IconLocation = targetExe + ",0";
-        shortcut.Description = description;
-        if (!string.IsNullOrEmpty(arguments)) shortcut.Arguments = arguments;
-        shortcut.Save();
-        Marshal.FinalReleaseComObject(shortcut);
-        Marshal.FinalReleaseComObject(shell);
+        dynamic shell = null;
+        dynamic shortcut = null;
+        try
+        {
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) return;
+            shell = Activator.CreateInstance(shellType);
+            shortcut = shell.CreateShortcut(lnkPath);
+            shortcut.TargetPath = targetExe;
+            shortcut.WorkingDirectory = workingDir;
+            shortcut.IconLocation = targetExe + ",0";
+            shortcut.Description = description;
+            if (!string.IsNullOrEmpty(arguments)) shortcut.Arguments = arguments;
+            shortcut.Save();
+        }
+        finally
+        {
+            if (shortcut != null) { try { Marshal.FinalReleaseComObject(shortcut); } catch { } }
+            if (shell != null) { try { Marshal.FinalReleaseComObject(shell); } catch { } }
+        }
     }
 
-    private static void RegisterUninstallEntry(string installDir, string appExe, string uninstallerExe)
+    private static string GetShortcutTargetPath(string lnkPath)
     {
-        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(UninstallRegKey))
+        if (!File.Exists(lnkPath)) return "";
+        dynamic shell = null;
+        dynamic shortcut = null;
+        try
+        {
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) return "";
+            shell = Activator.CreateInstance(shellType);
+            shortcut = shell.CreateShortcut(lnkPath);
+            return Convert.ToString(shortcut.TargetPath) ?? "";
+        }
+        catch (Exception) { return ""; }
+        finally
+        {
+            if (shortcut != null) { try { Marshal.FinalReleaseComObject(shortcut); } catch { } }
+            if (shell != null) { try { Marshal.FinalReleaseComObject(shell); } catch { } }
+        }
+    }
+
+    private static void RegisterUninstallEntry(RegPaths paths, string installDir, string appExe, string uninstallerExe, string displayVersion, long estimatedKb)
+    {
+        string version = string.IsNullOrWhiteSpace(displayVersion) ? SetupMeta.Display : displayVersion;
+        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(paths.UninstallSubKey))
         {
             key.SetValue("DisplayName", "投影预览");
-            key.SetValue("DisplayVersion", SetupMeta.Display);
+            key.SetValue("DisplayVersion", version);
             key.SetValue("Publisher", "LiteKinda");
-            key.SetValue("DisplayIcon", appExe);
+            key.SetValue("DisplayIcon", appExe + ",0");
             key.SetValue("InstallLocation", installDir);
             key.SetValue("UninstallString", "\"" + uninstallerExe + "\" --uninstall");
             key.SetValue("QuietUninstallString", "\"" + uninstallerExe + "\" --uninstall --silent");
+            key.SetValue("EstimatedSize", (int)Math.Max(1, Math.Min(int.MaxValue, estimatedKb)), RegistryValueKind.DWord);
             key.SetValue("NoModify", 1, RegistryValueKind.DWord);
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
         }
     }
 
-    private static void RegisterFileAssociations(string appExe)
+    private static void RegisterFileAssociations(RegPaths paths, string appExe)
     {
-        using (RegistryKey prog = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + ProgId))
+        string[] exts = new[] { ".litematic", ".nbt", ".schem" };
+        using (RegistryKey prog = Registry.CurrentUser.CreateSubKey(paths.ClassesRoot + @"\" + ProgId))
         {
             prog.SetValue("", "Minecraft 投影或结构文件");
+            prog.SetValue("FriendlyTypeName", "Minecraft 投影或结构文件");
             using (RegistryKey icon = prog.CreateSubKey("DefaultIcon")) icon.SetValue("", "\"" + appExe + "\",0");
-            using (RegistryKey cmd = prog.CreateSubKey(@"shell\open\command")) cmd.SetValue("", "\"" + appExe + "\" \"%1\"");
-        }
-        foreach (string ext in new[] { ".litematic", ".nbt", ".schem" })
-        {
-            using (RegistryKey extKey = Registry.CurrentUser.CreateSubKey(@"Software\Classes\" + ext))
+            using (RegistryKey openKey = prog.CreateSubKey(@"shell\open"))
             {
-                extKey.SetValue("", ProgId);
+                openKey.SetValue("FriendlyAppName", "投影预览");
+                using (RegistryKey cmd = openKey.CreateSubKey("command")) cmd.SetValue("", "\"" + appExe + "\" \"%1\"");
             }
         }
+        using (RegistryKey appReg = Registry.CurrentUser.CreateSubKey(paths.ClassesRoot + @"\Applications\投影预览.exe"))
+        {
+            appReg.SetValue("FriendlyAppName", "投影预览");
+            using (RegistryKey icon = appReg.CreateSubKey("DefaultIcon")) icon.SetValue("", "\"" + appExe + "\",0");
+            using (RegistryKey cmd = appReg.CreateSubKey(@"shell\open\command")) cmd.SetValue("", "\"" + appExe + "\" \"%1\"");
+            using (RegistryKey sup = appReg.CreateSubKey("SupportedTypes"))
+            {
+                foreach (string ext in exts) sup.SetValue(ext, "");
+            }
+        }
+        using (RegistryKey cap = Registry.CurrentUser.CreateSubKey(paths.CapabilitiesSubKey))
+        {
+            cap.SetValue("ApplicationName", "投影预览");
+            cap.SetValue("ApplicationDescription", "Minecraft Litematica 投影三维预览、双视角展示图导出与微时序实验工具");
+            using (RegistryKey fa = cap.CreateSubKey("FileAssociations"))
+            {
+                foreach (string ext in exts) fa.SetValue(ext, ProgId);
+            }
+        }
+        using (RegistryKey regApps = Registry.CurrentUser.CreateSubKey(paths.RegisteredAppsSubKey))
+        {
+            regApps.SetValue(RegisteredAppName, paths.CapabilitiesSubKey);
+        }
+        foreach (string ext in exts)
+        {
+            using (RegistryKey extKey = Registry.CurrentUser.CreateSubKey(paths.ClassesRoot + @"\" + ext))
+            {
+                extKey.SetValue("", ProgId);
+                using (RegistryKey owp = extKey.CreateSubKey("OpenWithProgids")) owp.SetValue(ProgId, "");
+            }
+        }
+        if (paths.IsRealSystem) SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
     }
 
-    private static int RunUninstall(string installRoot, bool silent)
+    private static int RunRepair(string installRoot, string selfExe, PayloadSlice slice, bool silent,
+        bool desktopShortcut, bool startMenuShortcut, bool associateFiles, RegPaths paths)
+    {
+        string normalizedRoot = NormalizePath(installRoot);
+        string appExe = Path.Combine(normalizedRoot, "投影预览.exe");
+        if (string.IsNullOrEmpty(normalizedRoot) || !File.Exists(appExe))
+        {
+            string msg = "未在指定目录找到「投影预览.exe」，无法修复系统注册：\r\n" + installRoot;
+            if (!silent) MessageBox.Show(msg, "投影预览 — 修复失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            else Console.Error.WriteLine(msg);
+            return 1;
+        }
+
+        string uninstallerExe = Path.Combine(normalizedRoot, "卸载投影预览.exe");
+        if (!File.Exists(uninstallerExe) && slice.HasPayload)
+        {
+            using (FileStream src = File.OpenRead(selfExe))
+            using (FileStream dst = File.Create(uninstallerExe))
+            {
+                byte[] buf = new byte[65536];
+                long remaining = slice.Offset;
+                while (remaining > 0)
+                {
+                    int r = src.Read(buf, 0, (int)Math.Min(buf.Length, remaining));
+                    if (r <= 0) break;
+                    dst.Write(buf, 0, r);
+                    remaining -= r;
+                }
+            }
+        }
+        if (!File.Exists(uninstallerExe)) uninstallerExe = selfExe;
+
+        string version = ResolveInstalledVersion(normalizedRoot);
+        string manifestPath = Path.Combine(normalizedRoot, "install-manifest.json");
+        var ser = new JavaScriptSerializer();
+        Dictionary<string, object> manifest = null;
+        if (File.Exists(manifestPath))
+        {
+            try { manifest = ser.Deserialize<Dictionary<string, object>>(File.ReadAllText(manifestPath, Encoding.UTF8)); }
+            catch (Exception) { }
+        }
+        if (manifest == null) manifest = new Dictionary<string, object>();
+        manifest["distribution"] = "installer";
+        manifest["installedVersion"] = version;
+        manifest["displayVersion"] = version;
+        if (!manifest.ContainsKey("runtimeSignature")) manifest["runtimeSignature"] = SetupMeta.RuntimeSignature;
+        if (!manifest.ContainsKey("repo")) manifest["repo"] = SetupMeta.Repo;
+        manifest["installDir"] = normalizedRoot;
+        if (!manifest.ContainsKey("installedAt")) manifest["installedAt"] = DateTime.UtcNow.ToString("o");
+        File.WriteAllText(manifestPath, ser.Serialize(manifest), new UTF8Encoding(false));
+
+        long estimatedKb = ComputeDirectorySizeKb(normalizedRoot);
+        RegisterInstallIntegration(normalizedRoot, uninstallerExe, version, estimatedKb,
+            desktopShortcut, startMenuShortcut, associateFiles, paths);
+
+        if (!silent)
+        {
+            MessageBox.Show("已修复「投影预览」的应用注册、默认文件关联与快捷方式。", "修复完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        return 0;
+    }
+
+    private static string ReadRegistryDefaultValue(string subKey)
+    {
+        try
+        {
+            using (RegistryKey k = Registry.CurrentUser.OpenSubKey(subKey, false))
+            {
+                return k != null ? Convert.ToString(k.GetValue("")) ?? "" : "";
+            }
+        }
+        catch (Exception) { return ""; }
+    }
+
+    private static int RunUninstall(string installRoot, bool silent, bool removeShortcuts, RegPaths paths)
     {
         if (!silent)
         {
@@ -380,30 +681,95 @@ internal static class SetupProgram
         }
 
         StopProcessesUnderDir(installRoot);
-        try { Registry.CurrentUser.DeleteSubKeyTree(UninstallRegKey, false); } catch (Exception) { }
-        try { Registry.CurrentUser.DeleteSubKeyTree(@"Software\Classes\" + ProgId, false); } catch (Exception) { }
-        foreach (string ext in new[] { ".litematic", ".nbt", ".schem" })
+
+        // 只清理归属于当前安装目录的注册表项和快捷方式，避免多目录/测试卸载误删现役安装。
+        bool uninstallOwned = false;
+        try
+        {
+            using (RegistryKey uk = Registry.CurrentUser.OpenSubKey(paths.UninstallSubKey, false))
+            {
+                if (uk != null)
+                {
+                    string installLoc = Convert.ToString(uk.GetValue("InstallLocation")) ?? "";
+                    string uninstCmd = Convert.ToString(uk.GetValue("UninstallString")) ?? "";
+                    uninstallOwned = !string.IsNullOrWhiteSpace(installLoc)
+                        ? PathsEqual(installLoc, installRoot)
+                        : IsPathUnderRoot(ExtractExeFromCommand(uninstCmd), installRoot);
+                }
+            }
+        }
+        catch (Exception) { }
+
+        if (uninstallOwned)
+        {
+            try { Registry.CurrentUser.DeleteSubKeyTree(paths.UninstallSubKey, false); } catch (Exception) { }
+        }
+
+        string progCmd = ReadRegistryDefaultValue(paths.ClassesRoot + @"\" + ProgId + @"\shell\open\command");
+        string progExe = ExtractExeFromCommand(progCmd);
+        bool progOwned = !string.IsNullOrEmpty(progExe) ? IsPathUnderRoot(progExe, installRoot) : uninstallOwned;
+
+        if (progOwned)
+        {
+            try { Registry.CurrentUser.DeleteSubKeyTree(paths.ClassesRoot + @"\" + ProgId, false); } catch (Exception) { }
+            foreach (string ext in new[] { ".litematic", ".nbt", ".schem" })
+            {
+                try
+                {
+                    using (RegistryKey k = Registry.CurrentUser.OpenSubKey(paths.ClassesRoot + @"\" + ext, true))
+                    {
+                        if (k != null && string.Equals(Convert.ToString(k.GetValue("")), ProgId, StringComparison.Ordinal))
+                        {
+                            k.DeleteValue("", false);
+                        }
+                    }
+                    using (RegistryKey owp = Registry.CurrentUser.OpenSubKey(paths.ClassesRoot + @"\" + ext + @"\OpenWithProgids", true))
+                    {
+                        if (owp != null) owp.DeleteValue(ProgId, false);
+                    }
+                }
+                catch (Exception) { }
+            }
+            try
+            {
+                using (RegistryKey regApps = Registry.CurrentUser.OpenSubKey(paths.RegisteredAppsSubKey, true))
+                {
+                    if (regApps != null && PathsEqual(Convert.ToString(regApps.GetValue(RegisteredAppName)), paths.CapabilitiesSubKey))
+                    {
+                        regApps.DeleteValue(RegisteredAppName, false);
+                    }
+                }
+                Registry.CurrentUser.DeleteSubKeyTree(paths.CapabilitiesSubKey, false);
+            }
+            catch (Exception) { }
+            if (paths.IsRealSystem) SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        string appCmd = ReadRegistryDefaultValue(paths.ClassesRoot + @"\Applications\投影预览.exe\shell\open\command");
+        string appRegExe = ExtractExeFromCommand(appCmd);
+        if ((!string.IsNullOrEmpty(appRegExe) && IsPathUnderRoot(appRegExe, installRoot)) || (string.IsNullOrEmpty(appRegExe) && progOwned))
+        {
+            try { Registry.CurrentUser.DeleteSubKeyTree(paths.ClassesRoot + @"\Applications\投影预览.exe", false); } catch (Exception) { }
+        }
+
+        if (paths.IsRealSystem && removeShortcuts)
         {
             try
             {
-                using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Classes\" + ext, true))
+                string desktopLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "投影预览.lnk");
+                if (IsPathUnderRoot(GetShortcutTargetPath(desktopLnk), installRoot)) File.Delete(desktopLnk);
+
+                string startDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "投影预览");
+                string startAppLnk = Path.Combine(startDir, "投影预览.lnk");
+                string startUninstLnk = Path.Combine(startDir, "卸载 投影预览.lnk");
+                if (IsPathUnderRoot(GetShortcutTargetPath(startAppLnk), installRoot) ||
+                    IsPathUnderRoot(GetShortcutTargetPath(startUninstLnk), installRoot))
                 {
-                    if (k != null && string.Equals(Convert.ToString(k.GetValue("")), ProgId, StringComparison.Ordinal))
-                    {
-                        k.SetValue("", "");
-                    }
+                    if (Directory.Exists(startDir)) Directory.Delete(startDir, true);
                 }
             }
             catch (Exception) { }
         }
-        try
-        {
-            string desktopLnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "投影预览.lnk");
-            if (File.Exists(desktopLnk)) File.Delete(desktopLnk);
-            string startDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "投影预览");
-            if (Directory.Exists(startDir)) Directory.Delete(startDir, true);
-        }
-        catch (Exception) { }
 
         // Defer folder cleanup until after uninstaller exe exits cleanly
         try
@@ -430,6 +796,7 @@ internal static class SetupProgram
     {
         private readonly string _selfExe;
         private readonly PayloadSlice _slice;
+        private readonly RegPaths _regPaths;
         private readonly TextBox _dirBox;
         private readonly CheckBox _chkDesktop;
         private readonly CheckBox _chkStartMenu;
@@ -440,10 +807,11 @@ internal static class SetupProgram
         private readonly Button _installBtn;
         private readonly Button _browseBtn;
 
-        public SetupForm(string selfExe, PayloadSlice slice, string initialDir)
+        public SetupForm(string selfExe, PayloadSlice slice, string initialDir, RegPaths regPaths)
         {
             _selfExe = selfExe;
             _slice = slice;
+            _regPaths = regPaths ?? new RegPaths("");
 
             Text = "投影预览 " + SetupMeta.Display + " 安装向导";
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -553,6 +921,7 @@ internal static class SetupProgram
                 DesktopShortcut = _chkDesktop.Checked,
                 StartMenuShortcut = _chkStartMenu.Checked,
                 AssociateFiles = _chkAssoc.Checked,
+                RegPaths = _regPaths,
             };
             try
             {

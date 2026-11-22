@@ -3,7 +3,7 @@
   <h1>投影预览 · Litematic Viewer</h1>
   <p><b>Standalone Litematic Renderer</b> — Minecraft Java 结构三维预览、双视角展示卡生成、选区编辑、材料统计与二维微时序红石实验工具</p>
   <p>
-    <a href="https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases/latest">下载最新版 (v1.3.2)</a>
+    <a href="https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/releases/latest">下载最新版 (v1.3.2.1)</a>
     · <a href="docs/修复记录.md">更新日志</a>
     · <a href="docs/DEVELOPMENT.md">开发与构建</a>
     · <a href="https://github.com/wocenimenma0220/Standalone-Litematic-Renderer/issues">问题反馈</a>

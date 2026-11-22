@@ -14,6 +14,55 @@ const { releaseInfo } = require(path.join(repo, 'tools/version.cjs'));
 
 const outputRoot = path.join(repo, 'tools/verify/verification-output', 'installer-updater-test');
 
+function inspectReg(subKey, names) {
+  const ps = [
+    "$ErrorActionPreference = 'Stop'",
+    '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
+    "$k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($env:R_KEY, $false)",
+    'if (-not $k) { Write-Output "null"; exit 0 }',
+    '$obj = [ordered]@{}',
+    'try {',
+    '  foreach ($n in ($env:R_NAMES | ConvertFrom-Json)) {',
+    '    $propName = if ([string]$n -eq "") { "__default__" } else { [string]$n }',
+    '    $obj[$propName] = $k.GetValue([string]$n, $null)',
+    '  }',
+    '} finally { $k.Dispose() }',
+    '$obj | ConvertTo-Json -Compress',
+  ].join('\n');
+  const raw = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], {
+    env: { ...process.env, R_KEY: subKey, R_NAMES: JSON.stringify(names) },
+    windowsHide: true,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+  if (!raw || raw === 'null') return null;
+  const parsed = JSON.parse(raw);
+  if (Object.prototype.hasOwnProperty.call(parsed, '__default__')) {
+    parsed[''] = parsed.__default__;
+    delete parsed.__default__;
+  }
+  return parsed;
+}
+
+function deleteRegTree(subKey) {
+  if (!subKey || !subKey.startsWith('Software\\LiteKindaTest\\')) return;
+  const ps = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    '[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($env:R_KEY, $false)',
+  ].join('\n');
+  const testRegRoot = `Software\\LiteKindaTest\\Verify-${process.pid}-${Date.now()}`;
+  const realUninstallSnap = inspectReg('Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LiteKindaProjectionPreview', ['InstallLocation', 'DisplayVersion']);
+  const realAssocSnap = inspectReg('Software\\Classes\\.litematic', ['']);
+
+  try {
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')], {
+      env: { ...process.env, R_KEY: subKey },
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+  } catch { }
+}
+
 function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').toLowerCase();
 }
@@ -101,6 +150,10 @@ async function run() {
   const port = server.address().port;
   const baseUrl = `http://127.0.0.1:${port}`;
 
+  const testRegRoot = `Software\\LiteKindaTest\\Verify-${process.pid}-${Date.now()}`;
+  const realUninstallSnap = inspectReg('Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LiteKindaProjectionPreview', ['InstallLocation', 'DisplayVersion']);
+  const realAssocSnap = inspectReg('Software\\Classes\\.litematic', ['']);
+
   try {
     manifestPayload = {
       version: '9.9.0',
@@ -143,9 +196,10 @@ async function run() {
     fs.writeFileSync(path.join(miniStage, 'webapp/node_modules/keep-electron.txt'), 'electron-untouched');
     buildDummyExe(path.join(miniStage, 'webapp/node_modules/electron/dist/electron.exe'));
 
-    // Copy real compiled 投影预览.exe from tools/launcher/bin (building if missing)
+    // Copy real compiled 投影预览.exe from tools/launcher/bin (building if missing or stale)
+    const launcherCs = path.join(repo, 'tools/launcher/Launcher.cs');
     const launcherSrc = path.join(repo, 'tools/launcher/bin/投影预览.exe');
-    if (!fs.existsSync(launcherSrc)) {
+    if (!fs.existsSync(launcherSrc) || fs.statSync(launcherCs).mtimeMs > fs.statSync(launcherSrc).mtimeMs) {
       execFileSync('powershell.exe', [
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(repo, 'tools/launcher/build-launcher.ps1'),
       ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -164,13 +218,28 @@ async function run() {
     assert.equal(fs.existsSync(setupExe), true);
 
     const installedHome = path.join(outputRoot, 'installed-app');
-    execFileSync(setupExe, ['--silent', '--dir', installedHome, '--no-shortcuts', '--no-assoc', '--no-launch'], { windowsHide: true });
+    execFileSync(setupExe, ['--silent', '--dir', installedHome, '--no-shortcuts', '--no-launch', '--reg-root', testRegRoot], { windowsHide: true });
 
     const distInfo = readDistribution(installedHome);
     assert.equal(distInfo.mode, 'installer');
     assert.equal(distInfo.canPatch, true);
     assert.equal(fs.existsSync(path.join(installedHome, '卸载投影预览.exe')), true);
     assert.equal(fs.existsSync(path.join(installedHome, 'install-manifest.json')), true);
+
+    // Verify isolated registry uninstall & .litematic association entries were written cleanly
+    const uReg1 = inspectReg(`${testRegRoot}\\Uninstall\\LiteKindaProjectionPreview`, ['DisplayName', 'DisplayVersion', 'InstallLocation', 'UninstallString', 'EstimatedSize']);
+    assert(uReg1 && uReg1.DisplayName === '投影预览');
+    assert.equal(uReg1.DisplayVersion, rel.display);
+    assert.equal(uReg1.InstallLocation, installedHome);
+    assert(uReg1.EstimatedSize >= 1);
+    const extReg1 = inspectReg(`${testRegRoot}\\Classes\\.litematic`, ['']);
+    assert.equal(extReg1?.[''], 'LiteKinda.ProjectionPreview');
+    const progCmd1 = inspectReg(`${testRegRoot}\\Classes\\LiteKinda.ProjectionPreview\\shell\\open\\command`, ['']);
+    assert(progCmd1?.['']?.includes(installedHome));
+    const appCmd1 = inspectReg(`${testRegRoot}\\Classes\\Applications\\投影预览.exe\\shell\\open\\command`, ['']);
+    assert(appCmd1?.['']?.includes(installedHome));
+    const regApp1 = inspectReg(`${testRegRoot}\\RegisteredApplications`, ['LiteKindaProjectionPreview']);
+    assert.equal(regApp1?.LiteKindaProjectionPreview, `${testRegRoot}\\LiteKinda\\ProjectionPreview\\Capabilities`);
 
     // Place user data to ensure patch preserves user files
     fs.mkdirSync(path.join(installedHome, 'settings'), { recursive: true });
@@ -213,17 +282,52 @@ async function run() {
     assert.equal(fs.readFileSync(path.join(installedHome, 'settings/ui.json'), 'utf8'), '{"userKeep":true}');
     const updatedManifest = JSON.parse(fs.readFileSync(path.join(installedHome, 'install-manifest.json'), 'utf8'));
     assert.equal(updatedManifest.installedVersion, '9.9.0');
+    assert.equal(updatedManifest.displayVersion, '9.9.0');
     const backups = fs.readdirSync(path.join(installedHome, 'updates/backup'));
     assert.equal(backups.length, 1, 'Expected 1 rollback backup folder');
 
-    // 5. Verify silent uninstall command runs cleanly
-    execFileSync(path.join(installedHome, '卸载投影预览.exe'), ['--uninstall', '--silent'], {
+    // 5. Verify second install (Chinese directory) + ownership-protected uninstall + --repair + clean uninstall
+    const cnHome = path.join(outputRoot, '中文目录安装', '投影预览');
+    execFileSync(setupExe, ['--silent', '--dir', cnHome, '--no-shortcuts', '--no-launch', '--reg-root', testRegRoot], { windowsHide: true });
+
+    // Uninstalling installedHome must NOT delete cnHome's active registry entries or .litematic association
+    execFileSync(path.join(installedHome, '卸载投影预览.exe'), ['--uninstall', '--silent', '--reg-root', testRegRoot], {
       cwd: outputRoot,
       windowsHide: true,
     });
+    const uRegAfterFirstUninstall = inspectReg(`${testRegRoot}\\Uninstall\\LiteKindaProjectionPreview`, ['InstallLocation', 'DisplayVersion']);
+    assert.equal(uRegAfterFirstUninstall?.InstallLocation, cnHome, 'Uninstalling old dir must not delete active InstallLocation');
+    const extAfterFirstUninstall = inspectReg(`${testRegRoot}\\Classes\\.litematic`, ['']);
+    assert.equal(extAfterFirstUninstall?.[''], 'LiteKinda.ProjectionPreview', 'Uninstalling old dir must not clear active .litematic association');
 
-    console.log('PASS: 便携 ZIP 引导下载 + 安装版校验补丁 + 真实 Launcher 热替换与回滚备份 + 安装卸载全链路测试通过');
+    // Simulate missing Uninstall entry and verify --repair restores it with install-manifest version
+    deleteRegTree(`${testRegRoot}\\Uninstall`);
+    assert.equal(inspectReg(`${testRegRoot}\\Uninstall\\LiteKindaProjectionPreview`, ['InstallLocation']), null);
+    execFileSync(path.join(cnHome, '卸载投影预览.exe'), ['--repair', '--silent', '--no-shortcuts', '--reg-root', testRegRoot], {
+      cwd: outputRoot,
+      windowsHide: true,
+    });
+    const repairedReg = inspectReg(`${testRegRoot}\\Uninstall\\LiteKindaProjectionPreview`, ['InstallLocation', 'DisplayVersion']);
+    assert.equal(repairedReg?.InstallLocation, cnHome);
+    assert.equal(repairedReg?.DisplayVersion, rel.display);
+
+    // Uninstalling owning cnHome MUST cleanly remove isolated registry & association entries
+    execFileSync(path.join(cnHome, '卸载投影预览.exe'), ['--uninstall', '--silent', '--reg-root', testRegRoot], {
+      cwd: outputRoot,
+      windowsHide: true,
+    });
+    assert.equal(inspectReg(`${testRegRoot}\\Uninstall\\LiteKindaProjectionPreview`, ['InstallLocation']), null);
+    assert.equal(inspectReg(`${testRegRoot}\\Classes\\LiteKinda.ProjectionPreview`, ['']), null);
+    assert.equal(inspectReg(`${testRegRoot}\\Classes\\.litematic`, [''])?.[''], null);
+    assert.equal(inspectReg(`${testRegRoot}\\RegisteredApplications`, ['LiteKindaProjectionPreview'])?.LiteKindaProjectionPreview, null);
+
+    // Assert host system HKCU registry was never modified by the test run
+    assert.deepEqual(inspectReg('Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\LiteKindaProjectionPreview', ['InstallLocation', 'DisplayVersion']), realUninstallSnap);
+    assert.deepEqual(inspectReg('Software\\Classes\\.litematic', ['']), realAssocSnap);
+
+    console.log('PASS: 便携 ZIP 引导下载 + 安装版校验补丁 + 真实 Launcher 热替换 + 多目录归属保护/修复/中文安装与卸载回归测试通过');
   } finally {
+    deleteRegTree(testRegRoot);
     server.close();
   }
 }

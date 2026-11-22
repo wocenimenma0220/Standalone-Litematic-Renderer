@@ -257,6 +257,8 @@ internal static class Launcher
         psi.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE");
         // -----------------------------------------------------------------------------
 
+        psi.StandardOutputEncoding = System.Text.Encoding.UTF8;
+        psi.StandardErrorEncoding = System.Text.Encoding.UTF8;
         psi.Arguments = BuildArguments(appDir, argv);
 
 
@@ -561,6 +563,7 @@ internal static class Launcher
             }
 
             manifest["installedVersion"] = toVersion;
+            if (!string.IsNullOrEmpty(toVersion)) manifest["displayVersion"] = toVersion;
             manifest["updatedAt"] = DateTime.UtcNow.ToString("o");
             File.WriteAllText(manifestPath, serializer.Serialize(manifest), new System.Text.UTF8Encoding(false));
 
@@ -568,7 +571,16 @@ internal static class Launcher
             {
                 using (RegistryKey key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\LiteKindaProjectionPreview", true))
                 {
-                    if (key != null && !string.IsNullOrEmpty(toVersion)) key.SetValue("DisplayVersion", toVersion);
+                    if (key != null && !string.IsNullOrEmpty(toVersion))
+                    {
+                        string regDir = Convert.ToString(key.GetValue("InstallLocation")) ?? "";
+                        string normReg = string.IsNullOrWhiteSpace(regDir) ? "" : Path.GetFullPath(regDir.Trim()).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        string normRoot = Path.GetFullPath(_root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        if (string.IsNullOrEmpty(normReg) || string.Equals(normReg, normRoot, StringComparison.OrdinalIgnoreCase))
+                        {
+                            key.SetValue("DisplayVersion", toVersion);
+                        }
+                    }
                 }
             }
             catch (Exception) { }
