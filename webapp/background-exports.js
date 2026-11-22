@@ -47,7 +47,7 @@ class BackgroundExports {
     for(const old of finished.slice(0,-8))this.jobs.splice(this.jobs.indexOf(old),1);
     this.pump();return this.status(job);
   }
-  async submit({kind,source,params,resources}){
+  async submit({kind,source,params,resources,versionMapping}){
     if(this.closed)throw Error('应用正在退出');
     if(!['png','gif'].includes(kind)||!source||!params?.out||!path.isAbsolute(params.out))throw Error('导出参数无效');
     if(this.jobs.some(job=>!['completed','failed','cancelled'].includes(job.state)&&path.resolve(job.out).toLowerCase()===path.resolve(params.out).toLowerCase()))throw Error('这个文件已有导出任务，请选择其他文件名');
@@ -56,10 +56,10 @@ class BackgroundExports {
     const directory=await fs.mkdtemp(path.join(stagingRoot,'export-'));
     try{
       const input=path.join(directory,'source.litematic');await fs.copyFile(source,input);
-      params=structuredClone(params);resources=structuredClone(resources);
+      params=structuredClone(params);resources=structuredClone(resources);versionMapping=versionMapping?structuredClone(versionMapping):null;
       if(params.backgroundImage){const image=path.join(directory,'background'+path.extname(params.backgroundImage));await fs.copyFile(params.backgroundImage,image);params.backgroundImage=image;}
       if(this.closed)throw Error('应用正在退出');
-      const job={id:randomUUID(),kind,out,directory,input,params,resources,state:'queued',stage:'queued'};
+      const job={id:randomUUID(),kind,out,directory,input,params,resources,versionMapping,state:'queued',stage:'queued'};
       this.jobs.push(job);this.publish(job);
       // 保留最近完成结果，以及全部尚未结束的导出任务。
       const finished=this.jobs.filter(j=>['completed','failed','cancelled'].includes(j.state));
@@ -101,6 +101,7 @@ class BackgroundExports {
         result=await worker.call('writeAnimatedGif',{spool:job.spoolPath,out:output,width:job.params.width,height:job.params.height,frames:job.params.frames,delay:job.params.delay});alive();
       }else{
         await worker.call('loadResources',job.resources);alive();
+        if(job.versionMapping){await worker.call('setVersionMapping',job.versionMapping);alive();}
         job.stage='opening';this.publish(job);await worker.call('open',{path:job.input});alive();
         job.stage='building';this.publish(job);
         result=await worker.call(job.kind==='gif'?'renderAnimation':'render',{...job.params,out:output});alive();

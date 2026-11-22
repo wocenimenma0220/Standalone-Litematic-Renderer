@@ -53,7 +53,8 @@ public final class BlockTints {
             // 原版模型只在顶面与侧面覆盖层声明 tintindex=0，泥土底图保持 -1。
             return layer == 0 ? grass : -1;
         }
-        if (id.equals("minecraft:short_grass") || id.equals("minecraft:tall_grass")
+        if (id.equals("minecraft:short_grass") || id.equals("minecraft:grass") || id.equals("minecraft:tallgrass")
+            || id.equals("minecraft:tall_grass")
             || id.equals("minecraft:fern") || id.equals("minecraft:large_fern")
             || id.equals("minecraft:potted_fern") || id.equals("minecraft:bush")) {
             return grass;
@@ -84,7 +85,8 @@ public final class BlockTints {
 
 
         if (id.equals("minecraft:water") || id.equals("minecraft:bubble_column")
-            || id.equals("minecraft:water_cauldron")) {
+            || id.equals("minecraft:water_cauldron")
+            || (id.equals("minecraft:cauldron") && java.util.Set.of("1", "2", "3").contains(state.getValue("level")))) {
             return colormaps != null ? colormaps.waterColor() : Colormaps.WATER_DEFAULT;
         }
 

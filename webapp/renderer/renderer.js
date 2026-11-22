@@ -107,6 +107,8 @@ const state = {
   sheetView2: 'dimetric_back',
   sheetOutputDir: '',
   sheetCopyClipboard: true,
+  sheetStyle: null,
+  sheetAssets: {},
   defaultGameVersion: '',
   lastSheet: null,
   lodPreview: true, largeProjection:false,projectionMode:'auto',
@@ -1022,6 +1024,11 @@ function updateFullscreen(fullscreen) {
   state.fullscreen = fullscreen;
   els.fullscreen.textContent = `${fullscreen?'退出全屏':'全屏'} (${shortcutHint('fullscreen')})`;
   els.fullscreen.setAttribute('aria-pressed', String(fullscreen));
+  const studioFs = $('studioFullscreenBtn');
+  if (studioFs) {
+    studioFs.textContent = `${fullscreen ? '退出全屏' : '全屏'} (${shortcutHint('fullscreen')})`;
+    studioFs.setAttribute('aria-pressed', String(fullscreen));
+  }
   const winMax = $('winMaximize');
   if (winMax) winMax.disabled = !!fullscreen;
   drawView();
@@ -1105,6 +1112,8 @@ window.__uiReady = (async () => {
     state.sheetView2=settings.sheetView2||'dimetric_back';if(els.sheetView2)els.sheetView2.value=state.sheetView2;
     applySheetOutputDir(settings.sheetOutputDir||'');
     state.sheetCopyClipboard=settings.sheetCopyClipboard!==false;if($('sheetCopyClipboard'))$('sheetCopyClipboard').checked=state.sheetCopyClipboard;
+    state.sheetStyle=window.SheetStyle?window.SheetStyle.normalizeSheetStyle(settings.sheetStyle):null;
+    state.sheetAssets={...(settings.sheetAssets||{})};
     setSheetMode(settings.sheetMode===true,{persist:false,buildIfNeeded:false});
     state.largeProjection=settings.largeProjection===true;els.largeProjection.checked=state.largeProjection;
     state.projectionMode=settings.projectionMode||'auto';$('projectionMode').value=state.projectionMode;
@@ -1120,7 +1129,13 @@ window.__uiReady = (async () => {
     els.realLighting.checked = settings.realLighting === true;
     useBackground(settings.background);
     applySidebarCollapsed(settings.sidebarCollapsed);
-    if (settings.showWelcome) els.welcome.showModal();
+    window.__initialUiSettings = settings;
+    window.McVersionUi?.initFromSettings(settings);
+    window.SheetStudioUi?.initFromSettings?.(settings);
+    if (settings.showWelcome) {
+      els.welcome.showModal();
+      els.welcome.focus({ preventScroll: true });
+    }
   } catch (error) { log('界面设置加载失败：' + error.message, 'err'); }
 })();
 
@@ -1247,9 +1262,20 @@ if (typeof ResizeObserver !== 'undefined') {
 }
 
 
+function toggleSettingsMenu(force) {
+  const btn = $('menuSettings');
+  const drop = $('menuSettingsDrop');
+  if (!drop) return;
+  const show = force === undefined ? drop.classList.contains('hidden') : !!force;
+  drop.classList.toggle('hidden', !show);
+  if (btn) btn.setAttribute('aria-expanded', String(show));
+  if (show) els.menuFileDrop?.classList.add('hidden');
+}
+
 function toggleFileMenu(force) {
   const show = force === undefined ? els.menuFileDrop.classList.contains('hidden') : force;
   els.menuFileDrop.classList.toggle('hidden', !show);
+  if (show) toggleSettingsMenu(false);
 }
 
 els.menuFile.addEventListener('click', (e) => {
@@ -1257,7 +1283,16 @@ els.menuFile.addEventListener('click', (e) => {
   toggleFileMenu();
 });
 
-document.addEventListener('click', () => toggleFileMenu(false));
+$('menuSettings')?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  toggleSettingsMenu();
+});
+$('menuSettingsDrop')?.addEventListener('click', (e) => e.stopPropagation());
+
+document.addEventListener('click', () => {
+  toggleFileMenu(false);
+  toggleSettingsMenu(false);
+});
 els.menuFileDrop.addEventListener('click', (e) => e.stopPropagation());
 
 els.menuOpenSchematic.addEventListener('click', () => {
@@ -1376,6 +1411,7 @@ async function loadFile(file) {
   discardPreview();
   state.file=file;state.info=null;state.fileOpening=true;state.engineNeedsOpen=true;
   els.fileInfo.classList.add('hidden');
+  $('fileVersionBanner')?.classList.add('hidden');
   els.placeholder.textContent='正在打开投影…';
   setStatus('正在打开投影…','');
   els.open.disabled = true;
@@ -1399,6 +1435,7 @@ async function loadFile(file) {
     log(`已打开 ${info.name}（${info.regions.length} 个区域，${info.totalBlocks} 方块）`, 'ok');
     if (info.unresolved) log('存在无法解析的资源：' + JSON.stringify(info.unresolved), 'err');
     setBusy(false);
+    window.McVersionUi?.handleSchematicOpened(info);
     if (state.sheetMode) {
       await exportShowcaseSheet({ auto: true, openingToken: opening });
       return;
@@ -1496,11 +1533,29 @@ els.exportSheet?.addEventListener('click', () => exportShowcaseSheet({ auto: fal
 els.sheetMode?.addEventListener('click', () => setSheetMode(!state.sheetMode));
 els.sheetView1?.addEventListener('change', () => {
   state.sheetView1 = els.sheetView1.value;
-  window.appUi.setSheetSettings?.({ sheetView1: state.sheetView1 }).catch(() => {});
+  if (state.sheetStyle?.view1) {
+    const p = window.ViewPresets?.find(state.sheetView1);
+    state.sheetStyle.view1.mode = 'preset';
+    state.sheetStyle.view1.preset = state.sheetView1;
+    if (p) { state.sheetStyle.view1.yaw = p.yaw; state.sheetStyle.view1.slant = p.slant; }
+  }
+  window.appUi.setSheetSettings?.({
+    sheetView1: state.sheetView1,
+    ...(state.sheetStyle ? { sheetStyle: state.sheetStyle } : {}),
+  }).catch(() => {});
 });
 els.sheetView2?.addEventListener('change', () => {
   state.sheetView2 = els.sheetView2.value;
-  window.appUi.setSheetSettings?.({ sheetView2: state.sheetView2 }).catch(() => {});
+  if (state.sheetStyle?.view2) {
+    const p = window.ViewPresets?.find(state.sheetView2);
+    state.sheetStyle.view2.mode = 'preset';
+    state.sheetStyle.view2.preset = state.sheetView2;
+    if (p) { state.sheetStyle.view2.yaw = p.yaw; state.sheetStyle.view2.slant = p.slant; }
+  }
+  window.appUi.setSheetSettings?.({
+    sheetView2: state.sheetView2,
+    ...(state.sheetStyle ? { sheetStyle: state.sheetStyle } : {}),
+  }).catch(() => {});
 });
 $('btnSheetDirBrowse')?.addEventListener('click', async () => {
   try {
@@ -2026,10 +2081,13 @@ async function exportShowcaseSheet(options = {}) {
       file: state.file,
       info: state.info,
       defaultGameVersion: state.defaultGameVersion,
+      packs: state.packs,
       currentYaw: Number(els.rotation.value) || 45,
       currentSlant: Number(els.slant.value) || 30,
       sheetView1: opts.view1 || els.sheetView1?.value || state.sheetView1 || 'dimetric_front',
       sheetView2: opts.view2 || els.sheetView2?.value || state.sheetView2 || 'dimetric_back',
+      sheetStyle: opts.sheetStyle || state.sheetStyle,
+      sheetAssets: opts.sheetAssets || state.sheetAssets,
       exportMode: resolveExportMode(opts.mode),
       realLighting: els.realLighting.checked,
       lightingEnabled: els.lightingEnabled.checked,

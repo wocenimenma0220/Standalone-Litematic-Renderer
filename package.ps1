@@ -165,7 +165,7 @@ if ($IncludeSkinCache) {
 Write-Host "`n[5/7] Copying the Electron shell..."
 $stageWebapp = Join-Path $stageDir 'webapp'
 New-Item -ItemType Directory -Path $stageWebapp | Out-Null
-foreach ($f in @('main.js', 'preload.js', 'engine-client.js', 'background-exports.js', 'runtime.js', 'performance-policy.js', 'ui-settings.js', 'scene-transfer.js', 'cache-cleanup.js', 'schematic-formats.js', 'updater.js', 'package.json', 'app.ico', 'icon.png')) {
+foreach ($f in @('main.js', 'preload.js', 'engine-client.js', 'background-exports.js', 'runtime.js', 'performance-policy.js', 'ui-settings.js', 'scene-transfer.js', 'cache-cleanup.js', 'schematic-formats.js', 'updater.js', 'mc-linkage.js', 'sheet-style.js', 'package.json', 'app.ico', 'icon.png')) {
     Copy-Item (Join-Path $webapp $f) -Destination $stageWebapp
 }
 Copy-Item (Join-Path $webapp 'renderer') -Destination $stageWebapp -Recurse

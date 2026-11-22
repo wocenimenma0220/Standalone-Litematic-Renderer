@@ -10,7 +10,8 @@ const { randomUUID } = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { EngineClient } = require('./engine-client');
 const { resolveRuntime } = require('./runtime');
-const { UiSettings, AUTHOR_URL } = require('./ui-settings');
+const { UiSettings, AUTHOR_URL, cleanMappingRules } = require('./ui-settings');
+const { inspectMcFolder } = require('./mc-linkage');
 const { SceneTransfer, INLINE_LIMIT } = require('./scene-transfer');
 const { clearRenderingCache,clearInterruptedCache } = require('./cache-cleanup');
 const {BackgroundExports}=require('./background-exports');
@@ -45,7 +46,40 @@ let mainWindow = null;
 let windowDidFinishLoad = false;
 let engine = null;
 let renderStopPromise = null;
-let openedSchematic=null,resourceRoot=null;
+let openedSchematic=null,resourceRoot=null,linkedMcInfo=null;
+
+async function ensureLinkedMcInfo(forceRefresh = false) {
+  const settings = await uiSettings.read();
+  const dir = settings.linkedMcDir;
+  if (!dir) {
+    linkedMcInfo = null;
+    return null;
+  }
+  const resolved = path.resolve(dir);
+  if (!forceRefresh && linkedMcInfo && linkedMcInfo.root === resolved) {
+    return linkedMcInfo;
+  }
+  try {
+    linkedMcInfo = await inspectMcFolder(resolved);
+    return linkedMcInfo;
+  } catch (err) {
+    diagnostic('linked MC folder inspect failed: ' + (err?.message || err));
+    linkedMcInfo = null;
+    return null;
+  }
+}
+
+async function buildVersionMappingPayload(override = null) {
+  const settings = await uiSettings.read();
+  const mc = await ensureLinkedMcInfo(false);
+  return {
+    defaultAction: override?.defaultAction === 'legacy' ? 'legacy' : (override?.defaultAction === 'remap' ? 'remap' : settings.versionMappingDefault),
+    ruleActions: override?.ruleActions ? cleanMappingRules(override.ruleActions) : settings.versionMappingRules,
+    targetDataVersion: mc?.dataVersion || 0,
+    targetVersionLabel: mc?.gameVersion && mc.gameVersion !== '未识别' ? mc.gameVersion : '',
+    targetBlockIds: Array.isArray(mc?.targetBlockIds) ? mc.targetBlockIds : [],
+  };
+}
 const backgroundExports=new BackgroundExports({home:APP_HOME,runtime:resolveRuntime(APP_HOME),onUpdate:job=>{
   if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('exports:update',job);
 }});
@@ -215,9 +249,20 @@ function handleEngine(channel, handler) {
   });
 }
 async function loadEngineResources(client, root) {
-  const imports = await packStore.read();
+  const [imports, settings, mc] = await Promise.all([
+    packStore.read(),
+    uiSettings.read(),
+    ensureLinkedMcInfo(false),
+  ]);
   requireCurrentEngine(client);
-  const result = await client.call('loadResources', { ...(root ? { root } : {}), imports });
+  const baseJar = (settings.useLinkedMcJarAssets && mc?.jarPath) ? mc.jarPath : '';
+  const result = await client.call('loadResources', {
+    ...(root ? { root } : {}),
+    ...(baseJar ? { baseJar } : {}),
+    imports,
+  });
+  requireCurrentEngine(client);
+  await client.call('setVersionMapping', await buildVersionMappingPayload());
   requireCurrentEngine(client);
   backgroundExports.resetWorker().catch(()=>{});
   return client.resourcesLoaded = true,
@@ -273,7 +318,19 @@ ipcMain.handle('exports:start',async(_event,{kind,params})=>{
   if(!openedSchematic)throw Error('请先打开投影');
   const committed=await engine.call('commitEdits',{});if(committed.changed)openedSchematic=committed.path;
   const source=openedSchematic;
-  return backgroundExports.submit({kind,source,params:await uiSettings.renderParams(params),resources:{...(resourceRoot?{root:resourceRoot}:{}),imports:await packStore.read()}});
+  const [settings, mc, versionMapping] = await Promise.all([
+    uiSettings.read(),
+    ensureLinkedMcInfo(false),
+    buildVersionMappingPayload(),
+  ]);
+  const baseJar = (settings.useLinkedMcJarAssets && mc?.jarPath) ? mc.jarPath : '';
+  return backgroundExports.submit({
+    kind,
+    source,
+    params:await uiSettings.renderParams(params),
+    resources:{...(resourceRoot?{root:resourceRoot}:{}),...(baseJar?{baseJar}:{}),imports:await packStore.read()},
+    versionMapping,
+  });
 });
 const CRC32_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -528,6 +585,7 @@ function readResourceGameVersion() {
 }
 ipcMain.handle('ui:settings', async () => ({ ...(await uiSettings.settings()), defaultGameVersion: readResourceGameVersion() }));
 ipcMain.handle('ui:sheetSettings', async (_event, patch = {}) => {
+  const { normalizeSheetStyle } = require('./sheet-style');
   const next = {};
   if (typeof patch.sheetMode === 'boolean') next.sheetMode = patch.sheetMode;
   if (typeof patch.sheetView1 === 'string' && /^[a-z0-9_]{1,48}$/i.test(patch.sheetView1)) next.sheetView1 = patch.sheetView1;
@@ -538,8 +596,27 @@ ipcMain.handle('ui:sheetSettings', async (_event, patch = {}) => {
     next.sheetOutputDir = clean ? path.resolve(clean) : '';
   }
   if (typeof patch.sheetCopyClipboard === 'boolean') next.sheetCopyClipboard = patch.sheetCopyClipboard;
+  if (patch.sheetStyle && typeof patch.sheetStyle === 'object') {
+    next.sheetStyle = normalizeSheetStyle(patch.sheetStyle);
+    // Keep top-level view1/view2 synchronized when presets are active
+    if (next.sheetStyle.view1?.mode !== 'custom' && next.sheetStyle.view1?.preset) next.sheetView1 = next.sheetStyle.view1.preset;
+    if (next.sheetStyle.view2?.mode !== 'custom' && next.sheetStyle.view2?.preset) next.sheetView2 = next.sheetStyle.view2.preset;
+  }
   await uiSettings.save(next);
   return next;
+});
+ipcMain.handle('ui:chooseSheetAsset', async () => {
+  const choice = await dialog.showOpenDialog(mainWindow, {
+    title: '选择要插入导出图片的图标或插图',
+    properties: ['openFile'],
+    filters: [{ name: '图片文件', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
+  });
+  if (choice.canceled || !choice.filePaths.length) return { canceled: true };
+  return await uiSettings.importSheetAsset(choice.filePaths[0]);
+});
+ipcMain.handle('ui:removeSheetAsset', async (_event, id) => {
+  await uiSettings.deleteSheetAsset(id);
+  return { removed: true };
 });
 ipcMain.handle('dialog:chooseSheetDir', async () => {
   const cur = (await uiSettings.read()).sheetOutputDir;
@@ -811,6 +888,112 @@ ipcMain.handle('packs:move', async (_e, { path, direction }) => {
     await packStore.write(list);
   }
   return list;
+});
+
+handleEngine('engine:setVersionMapping', async (client, _event, request = {}) => {
+  const persist = request.persist !== false;
+  if (persist) {
+    const patch = {};
+    if (request.defaultAction === 'remap' || request.defaultAction === 'legacy') {
+      patch.versionMappingDefault = request.defaultAction;
+    }
+    if (request.ruleActions && typeof request.ruleActions === 'object') {
+      patch.versionMappingRules = cleanMappingRules(request.ruleActions);
+    }
+    if (typeof request.remember === 'boolean') {
+      patch.versionMappingRemember = request.remember;
+    }
+    await uiSettings.save(patch);
+  }
+  const payload = await buildVersionMappingPayload(persist ? null : request);
+  const info = await client.call('setVersionMapping', payload);
+  const settings = await uiSettings.read();
+  return {
+    info,
+    versionMappingDefault: settings.versionMappingDefault,
+    versionMappingRules: settings.versionMappingRules,
+    versionMappingRemember: settings.versionMappingRemember,
+  };
+});
+
+ipcMain.handle('mc:inspect', async (_event, options = {}) => {
+  const settings = await uiSettings.read();
+  const targetDir = typeof options?.dir === 'string' && options.dir.trim() ? options.dir.trim() : settings.linkedMcDir;
+  if (!targetDir) {
+    linkedMcInfo = null;
+    return { linked: false, info: null, useLinkedMcJarAssets: settings.useLinkedMcJarAssets };
+  }
+  try {
+    const info = await inspectMcFolder(targetDir);
+    linkedMcInfo = info;
+    if (engine?.isRunning() && engine.resourcesLoaded) {
+      await engine.call('setVersionMapping', await buildVersionMappingPayload()).catch(() => {});
+    }
+    return { linked: true, info, useLinkedMcJarAssets: settings.useLinkedMcJarAssets };
+  } catch (err) {
+    linkedMcInfo = null;
+    return { linked: false, error: err?.message || String(err), failedDir: targetDir, info: null, useLinkedMcJarAssets: settings.useLinkedMcJarAssets };
+  }
+});
+
+ipcMain.handle('mc:chooseDir', async () => {
+  const cur = (await uiSettings.read()).linkedMcDir;
+  const res = await dialog.showOpenDialog(mainWindow, {
+    title: '选择 Minecraft 版本文件夹（需包含 resourcepacks 目录）',
+    properties: ['openDirectory'],
+    ...(cur && fs.existsSync(cur) ? { defaultPath: cur } : {}),
+  });
+  if (res.canceled || !res.filePaths.length) return { canceled: true };
+  const dir = path.resolve(res.filePaths[0]);
+  const info = await inspectMcFolder(dir);
+  linkedMcInfo = info;
+  await uiSettings.save({ linkedMcDir: info.root });
+  let updatedSchematic = null;
+  if (engine?.isRunning() && engine.resourcesLoaded) {
+    const mappingRes = await engine.call('setVersionMapping', await buildVersionMappingPayload()).catch(() => null);
+    if (mappingRes && mappingRes.path) updatedSchematic = mappingRes;
+  }
+  return { canceled: false, info, updatedSchematic };
+});
+
+ipcMain.handle('mc:unlink', async () => {
+  const prev = await uiSettings.read();
+  const hadJar = prev.useLinkedMcJarAssets === true;
+  linkedMcInfo = null;
+  await uiSettings.save({ linkedMcDir: '', useLinkedMcJarAssets: false });
+  if (engine?.isRunning() && engine.resourcesLoaded) {
+    await engine.call('setVersionMapping', await buildVersionMappingPayload()).catch(() => {});
+  }
+  return { unlinked: true, reloadNeeded: hadJar };
+});
+
+ipcMain.handle('mc:setUseJarAssets', async (_event, enabled) => {
+  const next = enabled === true;
+  await uiSettings.save({ useLinkedMcJarAssets: next });
+  return { useLinkedMcJarAssets: next };
+});
+
+ipcMain.handle('mc:syncPacks', async (_event, { paths = [], mode = 'merge' } = {}) => {
+  const cleanPaths = Array.isArray(paths)
+    ? paths.filter(p => typeof p === 'string' && p.trim() && fs.existsSync(p)).map(p => path.resolve(p))
+    : [];
+  const current = await packStore.read();
+  let next;
+  if (mode === 'replace-mc' && linkedMcInfo?.resourcepacksDir) {
+    const mcRoot = path.resolve(linkedMcInfo.resourcepacksDir).toLowerCase() + path.sep;
+    const kept = current.filter(p => !path.resolve(p).toLowerCase().startsWith(mcRoot));
+    next = [...kept];
+    for (const p of cleanPaths) {
+      if (!next.some(x => path.resolve(x).toLowerCase() === p.toLowerCase())) next.push(p);
+    }
+  } else {
+    next = [...current];
+    for (const p of cleanPaths) {
+      if (!next.some(x => path.resolve(x).toLowerCase() === p.toLowerCase())) next.push(p);
+    }
+  }
+  await packStore.write(next);
+  return next;
 });
 
 ipcMain.handle('dialog:openSchematic', async () => {

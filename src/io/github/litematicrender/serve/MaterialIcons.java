@@ -17,7 +17,12 @@ final class MaterialIcons {
     private final Map<String,String> cache=new HashMap<>();
     private final Map<String,Map<String,String>> modelTextures=new HashMap<>();
     MaterialIcons(ResourceManager resources){this.resources=resources;}
-    String icon(String id){return cache.computeIfAbsent(id,this::create);}
+    String icon(String id){
+        if(cache.containsKey(id))return cache.get(id);
+        String value=create(id);
+        cache.put(id,value);
+        return value;
+    }
     private byte[] read(String id,String directory,String suffix) {
         if(id==null)return null;id=id.contains(":")?id:"minecraft:"+id;
         if(id.contains("..")||!id.matches("[a-z0-9_.-]+:[a-z0-9_./-]+"))return null;
@@ -119,7 +124,12 @@ final class MaterialIcons {
                 }
                 if(image==null){var block=texture(ns+"block/"+path);if(block!=null)image=flat(block);}
             }
-            if(image==null)return "";var output=new ByteArrayOutputStream();ImageIO.write(image,"png",output);return "data:image/png;base64,"+Base64.getEncoder().encodeToString(output.toByteArray());
+            if(image==null){
+                String fallback=io.github.litematicrender.world.VersionCompatibility.canonicalItemId(id);
+                if(fallback!=null&&!fallback.equals(id))return icon(fallback);
+                return "";
+            }
+            var output=new ByteArrayOutputStream();ImageIO.write(image,"png",output);return "data:image/png;base64,"+Base64.getEncoder().encodeToString(output.toByteArray());
         }catch(Exception ignored){return "";}
     }
 }

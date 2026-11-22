@@ -31,7 +31,26 @@ public final class MaterialList {
         data.forEach((k,v)->limits.put(k,((Number)v).intValue()));
         var estimates=MiniJson.asObject(metadata.get("blockEstimates"));if(estimates!=null)estimates.forEach((k,v)->blockEstimates.put(k,(String)v));
     }
-    private String name(String id){String key=id.replace(':','.');return names.getOrDefault("item."+key,names.getOrDefault("block."+key,id));}
+    private String name(String id){
+        String key=id.replace(':','.');
+        String direct=names.get("item."+key);
+        if(direct!=null)return direct;
+        direct=names.get("block."+key);
+        if(direct!=null)return direct;
+        String fallback=io.github.litematicrender.world.VersionCompatibility.canonicalItemId(id);
+        if(fallback!=null&&!fallback.equals(id)){
+            String fbKey=fallback.replace(':','.');
+            String fbName=names.getOrDefault("item."+fbKey,names.get("block."+fbKey));
+            if(fbName!=null)return fbName+"（旧版 ID）";
+        }
+        return id;
+    }
+    private int limitFor(String id){
+        int direct=limits.getOrDefault(id,0);
+        if(direct>0)return direct;
+        String fallback=io.github.litematicrender.world.VersionCompatibility.canonicalItemId(id);
+        return fallback!=null&&!fallback.equals(id)?limits.getOrDefault(fallback,0):0;
+    }
     private void add(Map<String,Entry> target,String key,String id,String label,long count,int limit) {
         if(count<=0||id.equals("minecraft:air"))return;
         if(limit==0)warnings.add("未知堆叠上限："+id+"，不推测盒数。");
@@ -62,12 +81,12 @@ public final class MaterialList {
     }
     private void block(BlockState state,long count) {
         String id=state.blockId,path=id.substring(id.indexOf(':')+1);long multiplier=1;
-        if(!id.startsWith("minecraft:")){add(building,id,id,name(id),count,limits.getOrDefault(id,0));return;}
+        if(!id.startsWith("minecraft:")){add(building,id,id,name(id),count,limitFor(id));return;}
         if(SKIP.contains(path))return;
-        if("true".equals(state.getValue("waterlogged")))add(building,"minecraft:water_bucket","minecraft:water_bucket",name("minecraft:water_bucket"),count,limits.get("minecraft:water_bucket"));
+        if("true".equals(state.getValue("waterlogged")))add(building,"minecraft:water_bucket","minecraft:water_bucket",name("minecraft:water_bucket"),count,limitFor("minecraft:water_bucket"));
         if(path.startsWith("potted_")) {
             add(building,"minecraft:flower_pot","minecraft:flower_pot",name("minecraft:flower_pot"),count,64);
-            String plant="minecraft:"+switch(path.substring(7)){case "azalea_bush"->"azalea";case "flowering_azalea_bush"->"flowering_azalea";default->path.substring(7);};add(building,plant,plant,name(plant),count,limits.getOrDefault(plant,0));return;
+            String plant="minecraft:"+switch(path.substring(7)){case "azalea_bush"->"azalea";case "flowering_azalea_bush"->"flowering_azalea";default->path.substring(7);};add(building,plant,plant,name(plant),count,limitFor(plant));return;
         }
         if(path.endsWith("candle_cake")) {
             add(building,"minecraft:cake","minecraft:cake",name("minecraft:cake"),count,1);
@@ -83,7 +102,8 @@ public final class MaterialList {
         if(path.equals("water")||path.equals("lava")) {
             if(!"0".equals(state.getValue("level")))return;
             id="minecraft:"+path+"_bucket";
-        } else if(path.endsWith("_wall_sign"))id=id.replace("_wall_sign","_sign");
+        } else if(path.equals("wall_sign")||path.equals("standing_sign"))id="minecraft:sign";
+        else if(path.endsWith("_wall_sign"))id=id.replace("_wall_sign","_sign");
         else if(path.endsWith("_wall_hanging_sign"))id=id.replace("_wall_hanging_sign","_hanging_sign");
         else if(path.endsWith("_wall_banner"))id=id.replace("_wall_banner","_banner");
         else if(path.endsWith("_wall_head")||path.endsWith("_wall_skull"))id=id.replace("_wall_","_");
@@ -101,8 +121,9 @@ public final class MaterialList {
             case "water_cauldron","lava_cauldron","powder_snow_cauldron"->"minecraft:cauldron";
             default->id;
         };
-        String replacement=blockEstimates.get(id);String label=name(id);int limit=limits.getOrDefault(id,0);
-        if(replacement!=null){limit=limits.getOrDefault(replacement,0);label+="（按"+name(replacement)+"备料）";warnings.add(name(id)+"没有对应背包物品，数量保留，按"+name(replacement)+"的堆叠上限估算备料。");}
+        String replacement=blockEstimates.get(id);String label=name(id);int limit=limitFor(id);
+        if(replacement==null){String fb=io.github.litematicrender.world.VersionCompatibility.canonicalItemId(id);if(fb!=null&&!fb.equals(id))replacement=blockEstimates.get(fb);}
+        if(replacement!=null){limit=limitFor(replacement);label+="（按"+name(replacement)+"备料）";warnings.add(name(id)+"没有对应背包物品，数量保留，按"+name(replacement)+"的堆叠上限估算备料。");}
         add(building,id,id,label,Math.multiplyExact(count,multiplier),limit);
         if(path.equals("lava_cauldron")||path.equals("powder_snow_cauldron")||path.equals("water_cauldron")&&"3".equals(state.getValue("level"))) {
             String fluid="minecraft:"+path.replace("_cauldron","_bucket");add(building,fluid,fluid,name(fluid),count,1);

@@ -199,7 +199,11 @@ public final class LitematicaSchematic {
     private Metadata metadata = new Metadata();
     private final LinkedHashMap<String, Region> regions = new LinkedHashMap<>();
     public int version;
+    public int subVersion;
     public int minecraftDataVersion;
+    public String sourceFormat = "";
+    public int pendingBlockTickCount;
+    public int pendingFluidTickCount;
 
     public static LitematicaSchematic load(Path file) throws IOException {
         if (!Files.isRegularFile(file)) throw new IOException("Not a file: " + file);
@@ -218,7 +222,11 @@ public final class LitematicaSchematic {
             throw new IOException("Missing schematic Version");
         }
         this.version = root.getIntOrDefault("Version", -1);
+        this.subVersion = root.getIntOrDefault("SubVersion", 0);
         this.minecraftDataVersion = root.getIntOrDefault("MinecraftDataVersion", 0);
+        this.sourceFormat = root.getStringOrDefault("SourceFormat", "");
+        this.pendingBlockTickCount = 0;
+        this.pendingFluidTickCount = 0;
         if (this.version < 1 || this.version > MAX_SUPPORTED_VERSION) {
             throw new IOException("Unsupported schematic version: " + this.version);
         }
@@ -245,6 +253,8 @@ public final class LitematicaSchematic {
             Region region = new Region(regionName, pos, size, null, readBlockEntities(regionTag, pos));
             region.storedPalette = List.copyOf(rawPalette);
             region.entities = SchematicEntity.read(regionTag,this.version);
+            regionTag.getList("PendingBlockTicks").ifPresent(list -> this.pendingBlockTickCount += list.size());
+            regionTag.getList("PendingFluidTicks").ifPresent(list -> this.pendingFluidTickCount += list.size());
             this.regions.put(regionName, region);
             this.rawContainers.put(regionName, new RawContainer(absSize.x(), absSize.y(), absSize.z(), bits, storage, rawPalette));
         }
@@ -262,33 +272,51 @@ public final class LitematicaSchematic {
 
     /** 注册表准备完成后统一解析原始调色板。 */
     public void materialize(BlockRegistry registry) {
+        materialize(registry, io.github.litematicrender.world.VersionCompatibility.Config.DEFAULT);
+    }
+
+    public void materialize(BlockRegistry registry, io.github.litematicrender.world.VersionCompatibility.Config mappingConfig) {
         for (Map.Entry<String, RawContainer> e : this.rawContainers.entrySet()) {
             Region region = this.regions.get(e.getKey());
             if (region == null) continue;
             RawContainer raw = e.getValue();
             BlockState[] palette = new BlockState[raw.rawPalette.size()];
             for (int i = 0; i < palette.length; i++) {
-                palette[i] = resolve(raw.rawPalette.get(i), registry);
+                palette[i] = resolve(raw.rawPalette.get(i), registry, mappingConfig);
             }
             region.blocks = new BlockContainer(raw.sizeX(), raw.sizeY(), raw.sizeZ(), raw.bits(), raw.storage(), palette);
         }
         this.rawContainers.clear();
     }
 
-    private static BlockState resolve(UnresolvedBlockState raw, BlockRegistry registry) {
-        String rawId = raw.blockId();
-        if ("minecraft:cauldron".equals(rawId)) {
-            String level = raw.properties().get("level");
-            if ("1".equals(level) || "2".equals(level) || "3".equals(level)) {
-                rawId = "minecraft:water_cauldron";
-            }
+    /** 切换跨版本方块映射策略后，利用已保存的原始调色板即时重解析。 */
+    public void rematerialize(BlockRegistry registry, io.github.litematicrender.world.VersionCompatibility.Config mappingConfig) {
+        if (!this.rawContainers.isEmpty()) {
+            materialize(registry, mappingConfig);
+            return;
         }
-        BlockRegistry.BlockInfo info = registry.getOrMissing(rawId);
+        for (Region region : this.regions.values()) {
+            if (region.blocks == null || region.storedPalette == null || region.storedPalette.isEmpty()) continue;
+            BlockState[] palette = new BlockState[region.storedPalette.size()];
+            for (int i = 0; i < palette.length; i++) {
+                palette[i] = resolve(region.storedPalette.get(i), registry, mappingConfig);
+            }
+            region.blocks = new BlockContainer(
+                region.blocks.sizeX, region.blocks.sizeY, region.blocks.sizeZ,
+                region.blocks.bits, region.blocks.storage, palette
+            );
+        }
+    }
+
+    private static BlockState resolve(UnresolvedBlockState raw, BlockRegistry registry,
+                                      io.github.litematicrender.world.VersionCompatibility.Config mappingConfig) {
+        var res = io.github.litematicrender.world.VersionCompatibility.resolve(raw, mappingConfig);
+        BlockRegistry.BlockInfo info = registry.getOrAlias(res.effectiveId(), res.visualFallbackId());
         BlockState state = info.defaultState;
         for (Map.Entry<String, String> e : raw.properties().entrySet()) {
             state = state.tryWith(e.getKey(), adaptLegacyProperty(info, e.getKey(), e.getValue()));
         }
-        return applyLegacyDefaults(rawId, state);
+        return applyLegacyDefaults(raw.blockId(), state);
     }
 
     /** 兼容旧版墙体连接等属性命名变化。 */

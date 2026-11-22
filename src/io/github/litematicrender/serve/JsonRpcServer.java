@@ -149,6 +149,8 @@ public final class JsonRpcServer {
             case "loadResources": {
                 String root = MiniJson.asString(p.get("root"), null);
                 Path path = root == null ? this.engine.defaultPackRoot() : Path.of(root);
+                String baseJar = MiniJson.asString(p.get("baseJar"), null);
+                Path baseJarPath = (baseJar == null || baseJar.isBlank()) ? null : Path.of(baseJar);
 
                 java.util.List<String> imports = new java.util.ArrayList<>();
                 java.util.List<Object> arr = MiniJson.asArray(p.get("imports"));
@@ -157,13 +159,15 @@ public final class JsonRpcServer {
                         if (o instanceof String s) imports.add(s);
                     }
                 }
-                return this.engine.loadResources(path, imports);
+                return this.engine.loadResources(path, imports, baseJarPath);
             }
 
             case "open": {
                 String file = require(p, "path");
                 return this.engine.open(Path.of(file));
             }
+            case "setVersionMapping":
+                return this.engine.setVersionMapping(p);
 
             case "editPick": {var selection=MiniJson.asObject(p.get("selection"));return this.engine.editPick(vector(p,"origin"),vector(p,"direction"),MiniJson.asDouble(p.get("maximum"),4096),selection==null?null:vector(selection,"min"),selection==null?null:vector(selection,"max"));}
             case "editStates": return this.engine.editStates(MiniJson.asArray(p.get("positions")));

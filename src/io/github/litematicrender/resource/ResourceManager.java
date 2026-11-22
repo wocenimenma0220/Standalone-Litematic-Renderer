@@ -46,7 +46,8 @@ public final class ResourceManager implements AutoCloseable {
 
     private static ResourcePack openPack(Path path) throws IOException {
         String id = path.getFileName().toString();
-        if (id.toLowerCase().endsWith(".zip")) id = id.substring(0, id.length() - 4);
+        String lower = id.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".zip") || lower.endsWith(".jar")) id = id.substring(0, id.length() - 4);
         return Files.isDirectory(path)
             ? ResourcePack.ofDirectory(id, path)
             : ResourcePack.ofZip(id, path);

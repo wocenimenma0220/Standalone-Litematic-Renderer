@@ -38,6 +38,7 @@ public final class RenderEngine implements AutoCloseable {
     private SpriteAtlas atlas;
     private ModelBaker baker;
     private Path loadedPackRoot;
+    private Path loadedBaseJar;
     private List<Path> loadedBuiltins = List.of();
     private List<String> loadedBuiltinNames = List.of();
     private List<Path> loadedUserPacks = List.of();
@@ -77,6 +78,8 @@ public final class RenderEngine implements AutoCloseable {
     private Path editAtlasPath;
     private long schematicStamp;
     private String schematicDigest,loadedResourceFingerprint;
+    private io.github.litematicrender.world.VersionCompatibility.Config versionConfig = io.github.litematicrender.world.VersionCompatibility.Config.DEFAULT;
+    private String materializedMappingFingerprint = "";
     private SceneCache diskCache;
     private String rendererFingerprint;
     private io.github.litematicrender.render.skin.SkinResolver streamSkins;
@@ -97,7 +100,7 @@ public final class RenderEngine implements AutoCloseable {
     private String materialKey;private Map<String,Object> materialReport;
     public synchronized Map<String,Object> materials()throws Exception {
         ensureResources();if(schematic==null)throw new IllegalStateException("请先打开投影");
-        String key=schematicPath+"|"+schematicDigest+"|"+System.identityHashCode(registry);
+        String key=schematicPath+"|"+schematicDigest+"|"+System.identityHashCode(registry)+"|"+versionConfig.fingerprint();
         if(!key.equals(materialKey)){materialReport=new MaterialList(resources,home).collect(schematic);materialKey=key;}
         return materialReport;
     }
@@ -130,7 +133,17 @@ public final class RenderEngine implements AutoCloseable {
         final String q=query;long[] count={0};var results=new ArrayList<Map<String,Object>>();
         for(var region:schematic.regions().values()){
             var matches=new java.util.HashMap<String,Boolean>();var labels=new java.util.HashMap<String,String>();
-            for(var state:region.blocks.palette){String id=state.blockId;String name=names.getOrDefault("block."+id.replace(':','.'),id);labels.put(id,name);matches.put(id,id.toLowerCase(java.util.Locale.ROOT).contains(q)||name.toLowerCase(java.util.Locale.ROOT).contains(q));}
+            for(var state:region.blocks.palette){
+                String id=state.blockId;
+                String name=names.get("block."+id.replace(':','.'));
+                if(name==null){
+                    String fb=io.github.litematicrender.world.VersionCompatibility.canonicalItemId(id);
+                    if(fb!=null&&!fb.equals(id))name=names.get("block."+fb.replace(':','.'));
+                }
+                if(name==null)name=id;
+                labels.put(id,name);
+                matches.put(id,id.toLowerCase(java.util.Locale.ROOT).contains(q)||name.toLowerCase(java.util.Locale.ROOT).contains(q));
+            }
             if(!matches.containsValue(true))continue;var origin=region.blockOrigin();
             region.blocks.forEachNonAir((x,y,z,b)->{if(!matches.getOrDefault(b.blockId,false))return;long n=count[0]++;if(n>=offset&&results.size()<10000)results.add(Map.of("position",List.of(origin.x()+x,origin.y()+y,origin.z()+z),"id",b.blockId,"name",labels.get(b.blockId),"state",b.propertyString()));});
         }
@@ -180,7 +193,7 @@ public final class RenderEngine implements AutoCloseable {
                 for(var entry:planned.entrySet()){var p=entry.getKey();changed|=edits.set(new int[]{p.x(),p.y(),p.z()},entry.getValue());}edits.squash(checkpoint,changed);
             }else throw new IllegalArgumentException("未知编辑操作");
             var result=new LinkedHashMap<String,Object>(edits.status());result.put("changed",changed);result.put("path",schematicPath.toAbsolutePath().toString());
-            if(changed){schematic=io.github.litematicrender.schematic.LitematicaSchematic.fromData(edits.data());schematic.materialize(registry);editsDirty=true;editRevision++;materialKey=null;inspector=null;result.put("revision",editRevision);result.put("info",editInfo());}
+            if(changed){schematic=io.github.litematicrender.schematic.LitematicaSchematic.fromData(edits.data());schematic.materialize(registry,this.versionConfig);editsDirty=true;editRevision++;materialKey=null;inspector=null;result.put("revision",editRevision);result.put("info",editInfo());}
             return result;
         }catch(Exception error){edits.restore(checkpoint);schematic=previous;throw error;}
     }
@@ -226,7 +239,7 @@ public final class RenderEngine implements AutoCloseable {
             boolean changed=count>0;
             var result=new LinkedHashMap<String,Object>(edits.status());
             result.put("changed",changed);result.put("count",count);result.put("path",schematicPath.toAbsolutePath().toString());
-            if(changed){schematic=io.github.litematicrender.schematic.LitematicaSchematic.fromData(edits.data());schematic.materialize(registry);editsDirty=true;editRevision++;materialKey=null;inspector=null;result.put("revision",editRevision);result.put("info",editInfo());result.put("rebuildRequired",edits.requiresRebuild());}
+            if(changed){schematic=io.github.litematicrender.schematic.LitematicaSchematic.fromData(edits.data());schematic.materialize(registry,this.versionConfig);editsDirty=true;editRevision++;materialKey=null;inspector=null;result.put("revision",editRevision);result.put("info",editInfo());result.put("rebuildRequired",edits.requiresRebuild());}
             return result;
         }catch(Exception error){edits.restore(checkpoint);schematic=previous;throw error;}
     }
@@ -384,17 +397,23 @@ public final class RenderEngine implements AutoCloseable {
     }
 
 
-    /** 资源加载顺序为原版、内置包、用户导入包；列表末尾优先级最高。 */
+    /** 资源加载顺序为原版、可选联动版本 JAR、内置包、用户导入包；列表末尾优先级最高。 */
     public Map<String, Object> loadResources(Path packRoot, List<String> imports) throws Exception {
+        return loadResources(packRoot, imports, null);
+    }
+
+    public Map<String, Object> loadResources(Path packRoot, List<String> imports, Path baseJar) throws Exception {
         cancelPreview();
         synchronized(this) {
         long resourceStart=System.nanoTime(),resourceStep=resourceStart;
         Map<String,Object> timings=new LinkedHashMap<>();
         List<Path> builtin = builtinPacks();
         List<Path> user = imports == null ? List.of() : imports.stream().map(Path::of).toList();
-        String fingerprint=CacheFingerprint.resources(packRoot,builtin,user);
+        Path resolvedBaseJar = (baseJar != null && Files.isRegularFile(baseJar)) ? baseJar : null;
+        String fingerprint=CacheFingerprint.resources(packRoot,resolvedBaseJar,builtin,user);
         timings.put("fingerprintMillis",(System.nanoTime()-resourceStep)/1e6);resourceStep=System.nanoTime();
         boolean same = this.resources != null && packRoot.equals(this.loadedPackRoot)
+            && java.util.Objects.equals(resolvedBaseJar, this.loadedBaseJar)
             && builtin.equals(this.loadedBuiltins) && user.equals(this.loadedUserPacks)&&fingerprint.equals(this.loadedResourceFingerprint);
         if (same) {
             Map<String, Object> hit = new LinkedHashMap<>();
@@ -410,6 +429,9 @@ public final class RenderEngine implements AutoCloseable {
         }
         closeResources();
         ResourceManager res = new ResourceManager(packRoot);
+        if (resolvedBaseJar != null) {
+            res.importPackUnchecked(resolvedBaseJar);
+        }
 
         List<String> builtinNames = new ArrayList<>();
         for (Path p : builtin) {
@@ -438,6 +460,7 @@ public final class RenderEngine implements AutoCloseable {
         this.atlas = at;
         this.baker = new ModelBaker(res, reg);
         this.loadedPackRoot = packRoot;
+        this.loadedBaseJar = resolvedBaseJar;
         this.loadedBuiltins = builtin;
         this.loadedBuiltinNames = builtinNames;
         this.loadedUserPacks = user;
@@ -474,36 +497,131 @@ public final class RenderEngine implements AutoCloseable {
         selectedScene=null;selectedSceneKey=null;
         if(edits!=null&&!file.toAbsolutePath().normalize().equals(editWorkingPath)){edits=null;editWorkingPath=null;editsDirty=false;editBaseBuilder=null;this.schematic=null;}
         LitematicaSchematic schem = loadSchematic(file);
-        LitematicaSchematic.Metadata md = schem.metadata();
+        return schematicSummary(file, schem);
+        }
+    }
 
+    /** 更新跨版本方块映射策略；若当前已打开投影则立即重解析调色板并清除旧网格缓存。 */
+    public synchronized Map<String, Object> setVersionMapping(Map<String, Object> request) throws Exception {
+        String defaultAction = io.github.litematicrender.util.MiniJson.asString(request.get("defaultAction"), io.github.litematicrender.world.VersionCompatibility.ACTION_REMAP);
+        var rules = new LinkedHashMap<String, String>();
+        var rawRules = io.github.litematicrender.util.MiniJson.asObject(request.get("ruleActions"));
+        if (rawRules != null) {
+            for (var e : rawRules.entrySet()) {
+                if (e.getValue() instanceof String val) rules.put(e.getKey(), val);
+            }
+        }
+        int targetDv = io.github.litematicrender.util.MiniJson.asInt(request.get("targetDataVersion"), 0);
+        String targetLabel = io.github.litematicrender.util.MiniJson.asString(request.get("targetVersionLabel"), "");
+        var targetBlocks = new java.util.HashSet<String>();
+        var rawBlocks = io.github.litematicrender.util.MiniJson.asArray(request.get("targetBlockIds"));
+        if (rawBlocks != null) {
+            for (Object item : rawBlocks) {
+                if (item instanceof String id) targetBlocks.add(id);
+            }
+        }
+        var nextConfig = new io.github.litematicrender.world.VersionCompatibility.Config(
+            defaultAction, rules, targetDv, targetLabel, targetBlocks
+        );
+        boolean changed = !nextConfig.fingerprint().equals(this.versionConfig.fingerprint())
+            || targetBlocks.size() != this.versionConfig.targetBlockIds.size()
+            || !targetBlocks.equals(this.versionConfig.targetBlockIds);
+        this.versionConfig = nextConfig;
+        if (this.schematic != null && this.registry != null) {
+            if (changed || !this.versionConfig.fingerprint().equals(this.materializedMappingFingerprint)) {
+                cancelPreview();
+                clearStream();
+                this.scene = null; this.sceneKey = null; this.sceneBuilder = null;
+                this.selectedScene = null; this.selectedSceneKey = null;
+                this.picker = null; this.pickedScene = null;
+                this.inspector = null; this.materialKey = null;
+                this.schematic.rematerialize(this.registry, this.versionConfig);
+                this.materializedMappingFingerprint = this.versionConfig.fingerprint();
+            }
+            return schematicSummary(this.schematicPath, this.schematic);
+        }
+        return Map.of("updated", true, "fingerprint", this.versionConfig.fingerprint());
+    }
+
+    private static String encodePreviewThumbnail(int[] pixels) {
+        if (pixels == null || pixels.length == 0) return "";
+        int dim = (int) Math.round(Math.sqrt(pixels.length));
+        if (dim <= 0 || dim * dim != pixels.length || dim > 512) return "";
+        try {
+            var img = new java.awt.image.BufferedImage(dim, dim, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+            img.setRGB(0, 0, dim, dim, pixels, 0, dim);
+            var baos = new java.io.ByteArrayOutputStream();
+            javax.imageio.ImageIO.write(img, "png", baos);
+            return "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(baos.toByteArray());
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private Map<String, Object> schematicSummary(Path file, LitematicaSchematic schem) {
+        LitematicaSchematic.Metadata md = schem.metadata();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("path", file.toAbsolutePath().toString());
+        out.put("fileName", file.getFileName() != null ? file.getFileName().toString() : "");
+        try {
+            out.put("fileSizeBytes", Files.isRegularFile(file) ? Files.size(file) : 0L);
+        } catch (Exception ignored) {
+            out.put("fileSizeBytes", 0L);
+        }
         out.put("name", md.name);
         out.put("author", md.author);
         out.put("description", md.description);
-        out.put("regionCount", md.regionCount);
+        out.put("regionCount", md.regionCount > 0 ? md.regionCount : schem.regions().size());
         out.put("totalBlocks", md.totalBlocks);
         out.put("totalVolume", md.totalVolume);
+        out.put("timeCreated", md.timeCreated);
+        out.put("timeModified", md.timeModified);
         Vec3i size = md.enclosingSize;
         out.put("size", Map.of("x", size.x(), "y", size.y(), "z", size.z()));
         out.put("schematicVersion", schem.version > 0 ? schem.version : md.schematicVersion);
+        out.put("subVersion", schem.subVersion);
+        out.put("sourceFormat", schem.sourceFormat != null ? schem.sourceFormat : "");
         out.put("minecraftDataVersion", schem.minecraftDataVersion > 0 ? schem.minecraftDataVersion : md.minecraftDataVersion);
-        out.put("hasPreviewImage", md.previewImageData != null && md.previewImageData.length > 0);
+        String previewDataUrl = encodePreviewThumbnail(md.previewImageData);
+        out.put("hasPreviewImage", !previewDataUrl.isEmpty() || (md.previewImageData != null && md.previewImageData.length > 0));
+        if (!previewDataUrl.isEmpty()) out.put("previewImageDataUrl", previewDataUrl);
+        out.put("versionCompatibility", io.github.litematicrender.world.VersionCompatibility.analyze(schem, this.versionConfig, this.resources));
 
+        int totalEntities = 0;
+        int totalBlockEntities = 0;
+        int paletteEntries = 0;
+        var uniqueBlockIds = new java.util.HashSet<String>();
         java.util.List<Map<String, Object>> regions = new java.util.ArrayList<>();
         for (var e : schem.regions().entrySet()) {
             var r = e.getValue();
+            totalEntities += r.entities.size();
+            totalBlockEntities += r.blockEntities.size();
+            paletteEntries += r.blocks != null ? r.blocks.palette.length : r.storedPalette.size();
+            if (r.storedPalette != null) {
+                for (var entry : r.storedPalette) {
+                    if (!"minecraft:air".equals(entry.blockId()) && !"minecraft:cave_air".equals(entry.blockId()) && !"minecraft:void_air".equals(entry.blockId())) {
+                        uniqueBlockIds.add(entry.blockId());
+                    }
+                }
+            }
             Map<String, Object> rm = new LinkedHashMap<>();
             rm.put("name", e.getKey());
             rm.put("size", Map.of("x", r.blocks.sizeX, "y", r.blocks.sizeY, "z", r.blocks.sizeZ));
             rm.put("position", Map.of("x", r.position.x(), "y", r.position.y(), "z", r.position.z()));
             rm.put("paletteSize", r.blocks.palette.length);
             rm.put("blockEntities", r.blockEntities.size());
+            rm.put("entities", r.entities.size());
             regions.add(rm);
         }
+        out.put("entityCount", totalEntities);
+        out.put("blockEntityCount", totalBlockEntities);
+        out.put("pendingBlockTickCount", schem.pendingBlockTickCount);
+        out.put("pendingFluidTickCount", schem.pendingFluidTickCount);
+        out.put("pendingTickCount", schem.pendingBlockTickCount + schem.pendingFluidTickCount);
+        out.put("uniqueBlockCount", uniqueBlockIds.size());
+        out.put("paletteEntryCount", paletteEntries);
         out.put("regions", regions);
         return out;
-        }
     }
 
 
@@ -571,7 +689,7 @@ public final class RenderEngine implements AutoCloseable {
         this.sceneLightingEnabled=lightingEnabled;
         this.sceneRealLighting=realLighting;
         String key = this.schematicDigest + "|" + this.loadedBuiltinNames + "|" + this.loadedUserPackNames
-            + "|" + System.identityHashCode(this.baker) + "|" + realLighting + "|" + lightingEnabled;
+            + "|" + System.identityHashCode(this.baker) + "|" + this.versionConfig.fingerprint() + "|" + realLighting + "|" + lightingEnabled;
         if (this.scene != null && key.equals(this.sceneKey)) {
             this.sceneFromMesh = true;
             progress.accept("cached");
@@ -719,7 +837,7 @@ public final class RenderEngine implements AutoCloseable {
     @SuppressWarnings("unchecked")
     private Map<String,Object> exportCachedStreamScene(boolean force,boolean realLighting,boolean lightingEnabled,BeforeBuild beforeBuild,PreviewJob liveJob)throws Exception {
         ensureResources();if(schematic==null)throw new IllegalStateException("请先打开投影");long begin=System.currentTimeMillis();var cache=diskCache();var snapshot=preparedSkins();
-        String key=CacheFingerprint.parts("scene-cache-lmesh6-v1",rendererFingerprint,schematicDigest,loadedResourceFingerprint,Boolean.toString(realLighting),Boolean.toString(lightingEnabled),snapshot.contentFingerprint());
+        String key=CacheFingerprint.parts("scene-cache-lmesh6-v1",rendererFingerprint,schematicDigest,loadedResourceFingerprint,versionConfig.fingerprint(),Boolean.toString(realLighting),Boolean.toString(lightingEnabled),snapshot.contentFingerprint());
         clearStream();SceneCache.Entry entry=force?null:cache.load(key);
         if(entry!=null) {
             try {
@@ -748,7 +866,7 @@ public final class RenderEngine implements AutoCloseable {
             };
             var metadata=exportStreamScene(atlasFile,meshFile,true,realLighting,lightingEnabled,snapshot,overview,progress);
             if(liveJob!=null){linkOrCopy(atlasFile,work.resolve("atlas.png"));linkOrCopy(meshFile,work.resolve("mesh.lmesh"));}
-            if(!CacheFingerprint.file(schematicPath).equals(schematicDigest)||!CacheFingerprint.resources(loadedPackRoot,loadedBuiltins,loadedUserPacks).equals(loadedResourceFingerprint))throw new java.io.IOException("投影或材质包在准备期间发生变化，请重新打开。");
+            if(!CacheFingerprint.file(schematicPath).equals(schematicDigest)||!CacheFingerprint.resources(loadedPackRoot,loadedBaseJar,loadedBuiltins,loadedUserPacks).equals(loadedResourceFingerprint))throw new java.io.IOException("投影或材质包在准备期间发生变化，请重新打开。");
             metadata.put("meshBuildCount",1);entry=cache.publish(key,work,metadata);success=true;
             var result=entry.result();result.put("meshBuildCount",1);result.put("diskCacheHit",false);result.put("exportMillis",System.currentTimeMillis()-begin);return result;
         }finally{if(!success)cache.discard(work);}
@@ -934,12 +1052,19 @@ public final class RenderEngine implements AutoCloseable {
         if (this.schematic != null && digest.equals(this.schematicDigest)) {
             this.schematicPath = file;
             this.schematicStamp = stamp;
+            if (!this.versionConfig.fingerprint().equals(this.materializedMappingFingerprint)) {
+                this.schematic.rematerialize(this.registry, this.versionConfig);
+                this.materializedMappingFingerprint = this.versionConfig.fingerprint();
+                clearStream();
+                scene=null;sceneKey=null;sceneBuilder=null;selectedScene=null;selectedSceneKey=null;picker=null;pickedScene=null;
+            }
             return this.schematic;
         }
         LitematicaSchematic schem = LitematicaSchematic.load(file);
         clearStream();
         scene=null;sceneKey=null;sceneBuilder=null;selectedScene=null;selectedSceneKey=null;picker=null;pickedScene=null;
-        schem.materialize(this.registry);
+        schem.materialize(this.registry, this.versionConfig);
+        this.materializedMappingFingerprint = this.versionConfig.fingerprint();
         this.schematic = schem;
         this.schematicPath = file;
         this.schematicStamp = stamp;
@@ -959,6 +1084,7 @@ public final class RenderEngine implements AutoCloseable {
         this.baker = null;
         this.pickedScene=null;this.picker=null;this.inspector=null;
         this.loadedPackRoot = null;
+        this.loadedBaseJar = null;
     }
 
     @Override

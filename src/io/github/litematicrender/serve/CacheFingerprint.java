@@ -43,7 +43,11 @@ final class CacheFingerprint {
         return hex(digest);
     }
     static String resources(Path vanilla,List<Path> builtins,List<Path> imports)throws IOException {
+        return resources(vanilla,null,builtins,imports);
+    }
+    static String resources(Path vanilla,Path baseJar,List<Path> builtins,List<Path> imports)throws IOException {
         var parts=new ArrayList<String>();parts.add("resources-v1");parts.add(tree(vanilla.resolve("assets")));parts.add(tree(vanilla.resolve("pack.mcmeta")));
+        if(baseJar!=null){parts.add("base-jar");parts.add(tree(baseJar));}
         for(Path pack:builtins)parts.add(tree(pack));parts.add("user-packs");for(Path pack:imports)parts.add(tree(pack));return parts(parts.toArray(String[]::new));
     }
     static String parts(String... parts){var digest=digest();for(String part:parts){digest.update(part.getBytes(StandardCharsets.UTF_8));digest.update((byte)0);}return hex(digest);}

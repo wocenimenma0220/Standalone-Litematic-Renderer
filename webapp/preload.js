@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('appUi', {
   setPreviewBackend: (backend) => ipcRenderer.invoke('ui:previewBackend', backend),
   setExportMode: (mode) => ipcRenderer.invoke('ui:exportMode', mode),
   setSheetSettings: (patch) => ipcRenderer.invoke('ui:sheetSettings', patch),
+  chooseSheetAsset: () => ipcRenderer.invoke('ui:chooseSheetAsset'),
+  removeSheetAsset: (id) => ipcRenderer.invoke('ui:removeSheetAsset', id),
   setLargeProjection: (enabled)=>ipcRenderer.invoke('ui:largeProjection',enabled),
   setProjectionMode: mode=>ipcRenderer.invoke('ui:projectionMode',mode),
   setLightingEnabled: (enabled)=>ipcRenderer.invoke('ui:lightingEnabled',enabled),
@@ -106,6 +108,7 @@ contextBridge.exposeInMainWorld('engine', {
   exportMaterials: (request)=>ipcRenderer.invoke('engine:exportMaterials',request),
   sceneCacheStats: ()=>ipcRenderer.invoke('engine:sceneCacheStats'),
   configureSceneCache: (request)=>ipcRenderer.invoke('engine:configureSceneCache',request),
+  setVersionMapping: request => ipcRenderer.invoke('engine:setVersionMapping', request),
   pickBlock: (ray) => ipcRenderer.invoke('engine:pickBlock', ray),
   onEvent: (cb) => {
     const h = (_e, evt) => cb(evt);
@@ -125,6 +128,14 @@ contextBridge.exposeInMainWorld('packs', {
   remove: (path) => ipcRenderer.invoke('packs:remove', path),
   removeBuiltin: (name) => ipcRenderer.invoke('packs:removeBuiltin', name),
   move: (path, direction) => ipcRenderer.invoke('packs:move', { path, direction }),
+});
+
+contextBridge.exposeInMainWorld('mcLink', {
+  inspect: (options) => ipcRenderer.invoke('mc:inspect', options),
+  chooseDir: () => ipcRenderer.invoke('mc:chooseDir'),
+  unlink: () => ipcRenderer.invoke('mc:unlink'),
+  setUseJarAssets: (enabled) => ipcRenderer.invoke('mc:setUseJarAssets', enabled),
+  syncPacks: (request) => ipcRenderer.invoke('mc:syncPacks', request),
 });
 
 contextBridge.exposeInMainWorld('skins', {

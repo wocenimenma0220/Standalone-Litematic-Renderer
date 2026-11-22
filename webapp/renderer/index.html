@@ -18,13 +18,27 @@
     <span class="version-badge" id="appVersionBadge"></span>
     <nav class="menu">
       <button class="menubtn" id="menuFile">文件</button>
+      <div class="menu-item-wrap">
+        <button class="menubtn" id="menuSettings" aria-haspopup="true" aria-expanded="false" title="设置导出模式样式、版本映射与偏好">设置</button>
+        <div class="dropdown hidden" id="menuSettingsDrop">
+          <button id="menuSheetSettings" type="button">导出模式设置…</button>
+          <div class="menusep"></div>
+          <button id="menuSettingsVersionMap" type="button">跨版本方块映射…</button>
+          <button id="menuSettingsMcLink" type="button">MC 本地资源联动…</button>
+          <button id="menuSettingsKeys" type="button">自定义按键…</button>
+        </div>
+      </div>
       <button class="menubtn" id="menuKeys">按键</button>
       <button class="menubtn" id="menuCommands">指令</button>
+      <button class="menubtn" id="menuMcLink" title="联动本地 Minecraft 版本文件夹（resourcepacks / schematics / 版本检测）">MC联动</button>
+      <button class="menubtn" id="menuHelp" title="查看操作说明、MC 本地联动与高低版本方块映射介绍">帮助</button>
       <button class="menubtn" id="menuBoard">二维搭建</button><button class="menubtn" id="menuEditProjection">更改投影 (G)</button>
       <div class="dropdown hidden" id="menuFileDrop">
         <button id="menuOpenSchematic">打开投影 / 结构…</button>
         <button id="menuImportPack">导入材质包…</button>
         <button id="menuImportPackFolder">导入材质包文件夹…</button>
+        <button id="menuLinkMcDir">关联 MC 版本文件夹…</button>
+        <button id="menuVersionMapping">跨版本方块映射…</button>
         <div class="menusep"></div>
         <button id="menuMaterials" disabled>查看 / 导出材料清单…</button>
         <button id="menuExportPng" disabled>导出 PNG…</button>
@@ -71,6 +85,10 @@
         <h2><img class="section-icon" src="icons/file-chest.png" width="16" height="16" alt="" aria-hidden="true" />投影文件</h2>
         <button id="btnOpen" class="primary">打开投影 / 结构…</button>
         <div id="fileInfo" class="fileinfo hidden"></div>
+        <div id="fileVersionBanner" class="version-banner hidden">
+          <span id="fileVersionBannerText" class="version-banner-text"></span>
+          <button id="btnOpenVersionMapping" type="button" class="mini-pill-btn">映射设置…</button>
+        </div>
       </section>
 
       <section class="group" id="blockSearchPanel"><h2><img class="section-icon" src="icons/search-redstone.png" width="16" height="16" alt="" aria-hidden="true" />方块搜索与定位</h2>
@@ -91,6 +109,13 @@
 
       <section class="group">
         <h2><img class="section-icon" src="icons/packs-painting.png" width="16" height="16" alt="" aria-hidden="true" />材质包</h2>
+        <div id="mcLinkSidebarBar" class="mc-link-sidebar">
+          <div class="mc-link-sidebar-top">
+            <span class="mc-link-badge" id="mcLinkSidebarBadge">MC 未联动</span>
+            <button id="btnSidebarMcLink" type="button" class="mc-link-sidebar-btn">联动目录…</button>
+          </div>
+          <p class="muted small" id="mcLinkSidebarDetail">可导入 MC 版本目录同步材质包与 schematics。</p>
+        </div>
         <p class="muted small">内置材质包可删除；导入包可调整顺序，越靠下优先级越高。</p>
         <ul id="packList" class="packlist"></ul>
       </section>
@@ -255,6 +280,7 @@
             </div>
           </div>
           <label class="check small"><input id="sheetCopyClipboard" type="checkbox" checked />自动复制到剪贴板</label>
+          <button id="btnOpenSheetStudio" type="button" class="sheet-studio-launch-btn">导出样式与可视化排版…</button>
         </div>
       </section>
 
@@ -385,17 +411,426 @@
     <div class="material-export"><label>导出范围 <select id="materialScope"><option value="combined">两类合并到同一个文件</option><option value="separate">两类分别导出为两个文件</option><option value="building">仅导出建材</option><option value="contents">仅导出容器内容物</option></select></label><label>格式 <select id="materialFormat"><option value="xlsx" selected>XLSX（Excel）</option><option value="csv">CSV</option></select></label><button id="materialExport" class="primary">导出材料表…</button></div>
     <p id="materialStatus" class="muted small" role="status"></p>
   </dialog>
-  <dialog id="welcomeDialog" class="welcome-dialog" aria-labelledby="welcomeTitle">
-    <img class="welcome-icon" src="../icon.png" alt="投影预览图标" />
-    <h2 id="welcomeTitle">欢迎使用投影预览</h2>
-    <p>作者 LiteKinda</p>
-    <p>喜欢的话支持一下作者吧</p>
-    <p><a id="authorLink" href="https://www.bilibili.com/video/BV1UT42167xb/?share_source=copy_web&amp;vd_source=d1e157c09b3321a7ecaf103abcde1586">网页链接</a></p>
-    <div class="welcome-actions">
-      <button id="welcomeClose">关闭</button>
-      <button id="welcomeNever" class="primary">后续不再显示</button>
+  <dialog id="welcomeDialog" class="welcome-dialog" aria-labelledby="welcomeTitle" tabindex="-1">
+    <div class="ore-dialog-header">
+      <span>投影预览 · 欢迎</span>
     </div>
-    <p id="welcomeError" class="welcome-error hidden" role="alert"></p>
+    <div class="welcome-body">
+      <img class="welcome-icon" src="../icon.png" alt="投影预览图标" />
+      <h2 id="welcomeTitle">欢迎使用投影预览</h2>
+      <p>作者 LiteKinda</p>
+      <p>喜欢的话支持一下作者吧</p>
+      <p class="welcome-link-row"><a id="authorLink" href="https://www.bilibili.com/video/BV1UT42167xb/?share_source=copy_web&amp;vd_source=d1e157c09b3321a7ecaf103abcde1586">网页链接</a></p>
+      <div class="welcome-actions">
+        <button id="welcomeClose" type="button">关闭</button>
+        <button id="welcomeNever" type="button" class="primary">后续不再显示</button>
+      </div>
+      <p id="welcomeError" class="welcome-error hidden" role="alert"></p>
+    </div>
+  </dialog>
+
+  <dialog id="mcLinkDialog" class="shortcut-dialog mc-link-dialog" aria-labelledby="mcLinkTitle" tabindex="-1">
+    <div class="dialog-title ore-modal-bar">
+      <h2 id="mcLinkTitle">Minecraft 本地资源与版本联动</h2>
+      <button id="mcLinkClose" type="button" aria-label="关闭 MC 联动面板">×</button>
+    </div>
+    <div class="mc-link-toolbar">
+      <input id="mcLinkPathInput" type="text" readonly value="尚未选择 Minecraft 版本文件夹" aria-label="已关联的 Minecraft 版本文件夹路径" />
+      <button id="mcLinkChooseBtn" type="button" class="primary">选择版本目录…</button>
+      <button id="mcLinkRefreshBtn" type="button" disabled>刷新</button>
+      <button id="mcLinkUnlinkBtn" type="button" disabled>取消联动</button>
+    </div>
+    <p id="mcLinkHint" class="muted small">支持选择任意版本的隔离目录或 .minecraft 目录（如 <code>1.21.11-Fabric 0.18.4</code>），目录内必须包含 <code>resourcepacks</code> 文件夹；若安装了投影 Mod 或存在 <code>schematics</code> 文件夹，也会一并识别。</p>
+    <div id="mcLinkSummaryGrid" class="mc-link-summary hidden">
+      <div class="mc-stat-box"><span>游戏版本</span><strong id="mcStatVersion">—</strong></div>
+      <div class="mc-stat-box"><span>加载器</span><strong id="mcStatLoader">—</strong></div>
+      <div class="mc-stat-box"><span>Litematica</span><strong id="mcStatLitematica">—</strong></div>
+      <div class="mc-stat-box"><span>资源包 / 投影</span><strong id="mcStatCounts">—</strong></div>
+    </div>
+    <div id="mcLinkTabs" class="mc-link-tabs hidden" role="tablist">
+      <button id="mcTabPacks" type="button" role="tab" aria-selected="true" class="mc-tab-btn is-active">资源包 (resourcepacks)</button>
+      <button id="mcTabSchematics" type="button" role="tab" aria-selected="false" class="mc-tab-btn">投影文件库 (schematics)</button>
+    </div>
+    <div id="mcPanelPacks" class="mc-link-panel hidden">
+      <div class="mc-panel-actions">
+        <button id="mcSyncEnabledPacksBtn" type="button" class="primary">一键同步 MC 已启用材质包</button>
+        <label class="check small" title="勾选后优先采用所选版本客户端 JAR 的原版方块贴图与模型（26.3 独占方块与中文翻译仍保留内置兜底）">
+          <input id="mcUseJarAssets" type="checkbox" />使用该版本客户端 JAR 原版贴图/模型
+        </label>
+      </div>
+      <div id="mcPackRows" class="mc-link-list"></div>
+    </div>
+    <div id="mcPanelSchematics" class="mc-link-panel hidden">
+      <input id="mcSchematicSearch" type="search" placeholder="搜索 schematics 文件夹中的投影名称…" aria-label="搜索 MC 投影库" />
+      <div id="mcSchematicRows" class="mc-link-list"></div>
+    </div>
+    <p id="mcLinkStatus" class="muted small" role="status" aria-live="polite"></p>
+  </dialog>
+
+  <dialog id="versionMappingDialog" class="shortcut-dialog version-map-dialog" aria-labelledby="versionMapTitle" tabindex="-1">
+    <div class="dialog-title ore-modal-bar">
+      <h2 id="versionMapTitle">跨版本方块差异与映射</h2>
+      <button id="versionMapClose" type="button" aria-label="关闭跨版本方块映射弹窗">×</button>
+    </div>
+    <div id="versionMapOverview" class="version-map-overview"></div>
+    <p class="muted small">不同 MC 版本间存在方块命名与状态差异（例如 1.21.9 的铁链 <code>chain</code>→<code>iron_chain</code>、1.20.3 的草 <code>grass</code>→<code>short_grass</code> 等）。您可以选择更改为目标版本映射，或按旧版原样保留。</p>
+    <div class="version-map-quick">
+      <button id="versionMapAllRemap" type="button">全部更改为目标映射</button>
+      <button id="versionMapAllLegacy" type="button">全部按旧版保留</button>
+    </div>
+    <div id="versionMapRows" class="version-map-rows"></div>
+    <div id="versionMapUnsupported" class="version-map-unsupported hidden"></div>
+    <label class="check small version-map-remember">
+      <input id="versionMapRemember" type="checkbox" />记住本次选择，后续渲染类似投影时自动应用（可在「文件 → 跨版本方块映射…」中修改）
+    </label>
+    <div class="version-map-actions">
+      <button id="versionMapKeepCurrent" type="button">关闭（保持当前）</button>
+      <button id="versionMapApply" type="button" class="primary">应用并重新渲染</button>
+    </div>
+  </dialog>
+
+  <dialog id="helpDialog" class="shortcut-dialog help-dialog" aria-labelledby="helpTitle" tabindex="-1">
+    <div class="dialog-title ore-modal-bar">
+      <h2 id="helpTitle">帮助与功能说明</h2>
+      <button id="helpClose" type="button" aria-label="关闭帮助">×</button>
+    </div>
+    <div class="help-content">
+      <section class="help-section">
+        <h3>1. Minecraft 本地资源联动（MC联动）</h3>
+        <p>点击顶部栏目 <strong>MC联动</strong> 或「文件 → 关联 MC 版本文件夹…」，可导入任意 Minecraft 版本隔离目录（例如 <code>.minecraft\versions\1.21.11-Fabric 0.18.4</code>）或 <code>.minecraft</code> 根目录。</p>
+        <ul>
+          <li><strong>目录校验</strong>：所选目录必须包含 <code>resourcepacks</code> 文件夹；软件会自动读取版本 JSON、客户端 JAR（获取精确版本与方块目录）、<code>options.txt</code>（识别游戏内已启用材质包及优先级）、<code>mods</code>（检测 Litematica）以及 <code>schematics</code> 文件夹。</li>
+          <li><strong>材质包与投影同步</strong>：支持在联动面板中一键同步 MC 已启用的 <code>.zip</code> / 文件夹材质包（注：<code>.7z</code> / <code>.rar</code> 需先解压为文件夹或转为 <code>.zip</code>），也可以直接浏览并一键渲染 <code>schematics</code> 文件夹中的 <code>.litematic / .nbt / .schem</code> 文件。</li>
+        </ul>
+      </section>
+      <section class="help-section">
+        <h3>2. 高低版本差异检测与映射选择</h3>
+        <p>渲染投影时，软件会自动比对投影的 <code>MinecraftDataVersion</code>、方块调色板与当前目标版本（未联动时为内置 <code>26.3</code>，联动后为所选 MC 版本）。当存在跨版本差异方块时，会弹出映射提示界面：</p>
+        <ul>
+          <li><strong>常见跨版本差异示例</strong>：
+            <br />• <strong>铁链</strong>：<code>1.21.9</code> 之前为 <code>minecraft:chain</code>，<code>1.21.9+</code> 更名为 <code>minecraft:iron_chain</code>；
+            <br />• <strong>矮草</strong>：<code>1.20.3</code> 之前为 <code>minecraft:grass</code>（1.12 为 <code>tallgrass</code>），<code>1.20.3+</code> 更名为 <code>minecraft:short_grass</code>；
+            <br />• <strong>草径 / 土径</strong>：<code>1.17</code> 之前为 <code>minecraft:grass_path</code>，<code>1.17+</code> 更名为 <code>minecraft:dirt_path</code>；
+            <br />• <strong>旧版告示牌</strong>：<code>1.14</code> 之前为 <code>minecraft:sign / wall_sign</code>，<code>1.14+</code> 拆分为 <code>oak_sign / oak_wall_sign</code>；
+            <br />• <strong>含水炼药锅与墙体属性</strong>：<code>1.17</code> 之前 <code>cauldron[level=1..3]</code> 拆分为 <code>water_cauldron</code>；<code>1.16</code> 之前墙体连接 <code>true/false</code> 升级为 <code>low/tall/none</code>。
+          </li>
+          <li><strong>两种选择区别</strong>：
+            <br />• <strong>更改映射（推荐）</strong>：将方块 ID 与属性转换为目标版本标准形式，材料清单、方块检查与三维模型均按目标版本展示；
+            <br />• <strong>按旧版保留</strong>：保留投影原始方块 ID（如 <code>minecraft:chain</code>、<code>minecraft:grass</code>）；若导入了对应旧版材质包则优先使用旧版材质，否则借用兼容模型渲染，材料清单与状态检查仍保留原旧版 ID。
+          </li>
+          <li>若勾选「记住本次选择」，后续渲染将自动应用该策略；任何时候均可通过顶部 <strong>文件 → 跨版本方块映射…</strong> 或左侧投影信息栏的「映射设置…」重新修改或调出。</li>
+        </ul>
+      </section>
+      <section class="help-section">
+        <h3>3. 三维预览、导出与常用快捷键</h3>
+        <ul>
+          <li><strong>视角与漫游</strong>：预览区左/右键拖动旋转，滚轮缩放；按 <code>V</code> 进入第一人称飞行漫游，<code>WASD</code> + <code>空格</code> / <code>Shift</code> 移动，左键拾取方块状态与箱子/漏斗库存。</li>
+          <li><strong>选区与指令</strong>：按 <code>B</code> 启用选区/逐层查看；按 <code>/</code> 输入全局指令（如 <code>/view</code>、<code>/search</code>、<code>/export</code>）或 <code>//</code> 选区编辑指令（如 <code>//set</code>、<code>//replace</code>）。</li>
+          <li><strong>导出模式与可视化排版</strong>：工具栏开启「导出模式」可生成展示图 PNG 并自动复制剪贴板；点击顶部 <strong>设置 → 导出模式设置…</strong> 可直接预览并拖动调整图标、标题、全部投影保存信息、自定义插图、背景色与双视角角度；按 <code>G</code> 打开「更改投影」36 格背包与调试棒进行三维修改；点击顶部「二维搭建」进入平面红石微时序沙盒。</li>
+        </ul>
+      </section>
+    </div>
+  </dialog>
+  <dialog id="sheetStudioDialog" class="sheet-studio-dialog" aria-labelledby="sheetStudioTitle" tabindex="-1">
+    <div class="studio-topbar">
+      <div class="studio-title-group">
+        <button id="studioClose" type="button" class="studio-back-btn" aria-label="返回主界面">← 返回</button>
+        <h2 id="sheetStudioTitle">导出模式设置 · 可视化排版编辑器</h2>
+        <span id="studioDimsBadge" class="mc-pill">实时预览</span>
+      </div>
+      <div class="studio-topbar-actions">
+        <button id="studioFullscreenBtn" type="button" aria-pressed="false" title="切换窗口全屏 (F11)；也可以直接点击最上方标题栏最大化">全屏 (F11)</button>
+      </div>
+    </div>
+
+    <div id="studioShell" class="studio-shell">
+      <section class="studio-workspace" aria-label="导出样式实时拖动预览">
+        <div class="studio-toolbar">
+          <button id="studioAddText" type="button">＋ 添加自定义文字</button>
+          <button id="studioAddImage" type="button">＋ 插入图片…</button>
+          <button id="studioArrangeFooter" type="button" title="将底部所有启用信息按列整齐重排">整齐排列底部信息</button>
+          <button id="studioCenterEl" type="button" disabled title="将当前选中元素水平居中">水平居中</button>
+          <button id="studioToggleSnap" type="button" aria-pressed="true" title="拖动时自动磁吸对齐其他元素（上下左右边缘、同行居中、等距间距）与画布参考线；拖动时按住 Alt 可临时自由微调">智能对齐: 开</button>
+          <button id="studioToggleGrid" type="button" aria-pressed="false" title="显示画布二分/三分/安全边距静态参考网格">参考网格</button>
+          <div class="studio-zoom-group" role="group" aria-label="预览缩放">
+            <button id="studioZoomOut" type="button" title="缩小预览">－</button>
+            <button id="studioZoomReset" type="button" title="恢复适应舞台">适应</button>
+            <button id="studioZoomIn" type="button" title="放大预览便于精细对齐">＋</button>
+          </div>
+          <button id="studioResetStyle" type="button">恢复默认排版</button>
+        </div>
+        <div id="studioStage" class="studio-stage">
+          <div id="studioCanvasBox" class="studio-canvas-box">
+            <img id="studioPreviewImg" class="studio-preview-img" alt="导出样式实时预览" draggable="false" />
+            <div id="studioGridLayer" class="studio-grid-layer hidden" aria-hidden="true"></div>
+            <div id="studioOverlay" class="studio-overlay"></div>
+            <div id="studioGuidesLayer" class="studio-guides-layer" aria-hidden="true"></div>
+          </div>
+        </div>
+        <p class="muted small studio-stage-hint">拖动元素自动显示智能对齐参考线（品红=元素边缘/同行对齐，青蓝=等距间距，绿=画布与视口中线）；按住 Alt 临时取消吸附，方向键 1px 微调；顶部最大化/全屏键随时可点。</p>
+      </section>
+
+      <div id="studioSplitter" class="studio-splitter" role="separator" aria-orientation="vertical" aria-label="拖动调整右侧调节栏宽度" title="左右拖动调整右侧属性调节栏宽度"></div>
+
+      <aside class="studio-inspector" aria-label="元素属性与样式配置">
+        <div class="mc-tabs studio-tabs" role="tablist">
+          <button id="studioTabElements" type="button" class="mc-tab is-active" role="tab" aria-selected="true">元素与信息</button>
+          <button id="studioTabAngles" type="button" class="mc-tab" role="tab" aria-selected="false">角度与输出</button>
+          <button id="studioTabBackground" type="button" class="mc-tab" role="tab" aria-selected="false">背景与外观</button>
+        </div>
+
+        <div id="studioPanelElements" class="studio-panel">
+          <div id="studioInspectorCard" class="studio-card">
+            <div class="studio-card-head">
+              <strong id="studioSelName">未选中元素（点击画布元素编辑）</strong>
+              <div class="studio-card-actions">
+                <button id="studioLayerUp" type="button" disabled title="上移图层">↑</button>
+                <button id="studioLayerDown" type="button" disabled title="下移图层">↓</button>
+                <button id="studioToggleEl" type="button" disabled>隐藏</button>
+                <button id="studioDeleteEl" type="button" class="danger hidden">删除</button>
+              </div>
+            </div>
+            <div id="studioPropsEmpty" class="muted small">点击左侧预览图中的任意元素，即可拖动调整位置并修改字体、颜色、标签文本或图片属性。</div>
+            <div id="studioPropsBody" class="studio-props-body hidden">
+              <div id="studioTextGroup" class="studio-prop-group">
+                <div id="studioFieldLabelRow" class="studio-prop-row">
+                  <label>标签名</label>
+                  <input id="studioElLabel" type="text" maxlength="32" placeholder="如：作者" />
+                  <label class="check small"><input id="studioElShowLabel" type="checkbox" checked />显示</label>
+                </div>
+                <div id="studioCustomTextRow" class="studio-prop-row">
+                  <label id="studioElTextTitle">文字内容</label>
+                  <input id="studioElText" type="text" maxlength="160" placeholder="显示文本或覆盖内容" />
+                </div>
+                <div id="studioAffixRow" class="studio-prop-row">
+                  <label>前 / 后缀</label>
+                  <input id="studioElPrefix" type="text" maxlength="32" placeholder="前缀" />
+                  <input id="studioElSuffix" type="text" maxlength="32" placeholder="后缀" />
+                </div>
+                <div class="studio-prop-row">
+                  <label>风格</label>
+                  <select id="studioElVariant">
+                    <option value="plain">纯文本</option>
+                    <option value="row">绿条信息行</option>
+                    <option value="pill">胶囊标签</option>
+                    <option value="card">独立信息卡</option>
+                  </select>
+                  <label>对齐</label>
+                  <select id="studioElAnchor">
+                    <option value="left">左对齐</option>
+                    <option value="center">居中</option>
+                    <option value="right">右对齐</option>
+                  </select>
+                </div>
+                <div class="studio-prop-row">
+                  <label>字号 <span id="studioElFontVal" class="val">15</span></label>
+                  <input id="studioElFontSize" type="range" min="9" max="54" step="1" value="15" />
+                  <label class="check small"><input id="studioElBold" type="checkbox" checked />粗体</label>
+                </div>
+                <div class="studio-prop-row">
+                  <label>最大宽 <span id="studioElMaxWVal" class="val">44%</span></label>
+                  <input id="studioElMaxW" type="range" min="10" max="96" step="2" value="44" />
+                </div>
+                <div class="studio-color-grid">
+                  <label class="studio-color-item"><span>文字色</span><input id="studioElColor" type="color" value="#eef0f4" /></label>
+                  <label class="studio-color-item"><span>标签色</span><input id="studioElLabelColor" type="color" value="#9aa0ad" /></label>
+                  <label class="studio-color-item"><span>装饰条</span><input id="studioElAccentColor" type="color" value="#3c8527" /><button id="studioClearAccent" type="button" title="清除装饰条">无</button></label>
+                  <label class="studio-color-item"><span>底色</span><input id="studioElBgColor" type="color" value="#23262f" /><button id="studioClearBg" type="button" title="透明底色">无</button></label>
+                  <label class="studio-color-item"><span>边框色</span><input id="studioElBorderColor" type="color" value="#3f4452" /><button id="studioClearBorder" type="button" title="无边框">无</button></label>
+                </div>
+              </div>
+
+              <div id="studioImageGroup" class="studio-prop-group hidden">
+                <div id="studioIconSourceRow" class="studio-prop-row">
+                  <label>图片来源</label>
+                  <select id="studioElImgSource">
+                    <option value="app">软件默认图标</option>
+                    <option value="schematicPreview">投影内嵌缩略图</option>
+                    <option value="asset">自定义上传图片</option>
+                  </select>
+                </div>
+                <div class="studio-prop-row">
+                  <button id="studioElReplaceImg" type="button">选择本地图片…</button>
+                  <label class="check small"><input id="studioElPixelated" type="checkbox" checked />像素锐化</label>
+                </div>
+                <div class="studio-prop-row">
+                  <label>尺寸 <span id="studioElImgSizeVal" class="val">30</span></label>
+                  <input id="studioElImgSize" type="range" min="14" max="420" step="2" value="30" />
+                </div>
+                <div class="studio-prop-row">
+                  <label>不透明 <span id="studioElOpacityVal" class="val">100%</span></label>
+                  <input id="studioElOpacity" type="range" min="10" max="100" step="5" value="100" />
+                </div>
+              </div>
+
+              <div class="studio-prop-row studio-pos-row">
+                <label>所在区</label>
+                <select id="studioElBand">
+                  <option value="header">顶部栏区</option>
+                  <option value="canvas">视口区</option>
+                  <option value="footer">底部信息区</option>
+                </select>
+                <label>X%</label><input id="studioElX" type="number" min="0" max="100" step="1" />
+                <label>Y%</label><input id="studioElY" type="number" min="2" max="98" step="1" />
+              </div>
+            </div>
+          </div>
+
+          <div class="studio-card">
+            <div class="studio-card-head">
+              <strong>投影信息与元素清单（勾选加入画布拖动）</strong>
+            </div>
+            <p class="muted small">已列出投影内保存的全部元数据与结构统计；勾选即可添加到画布并自由拖动排版。</p>
+            <div id="studioFieldCatalog" class="studio-field-catalog"></div>
+          </div>
+        </div>
+
+        <div id="studioPanelAngles" class="studio-panel hidden">
+          <div class="studio-card">
+            <div class="studio-card-head"><strong>视角排布与角度选择</strong></div>
+            <div class="studio-prop-row">
+              <label>排版方式</label>
+              <select id="studioPanelLayout">
+                <option value="dual">双视角（左右并排）</option>
+                <option value="stacked">双视角（上下叠放）</option>
+                <option value="single">单视角（居中大图）</option>
+              </select>
+            </div>
+            <label class="check small"><input id="studioShowAngleBadges" type="checkbox" checked />在每个视口左上角显示视角标签</label>
+          </div>
+
+          <div class="studio-card">
+            <div class="studio-card-head"><strong>主视角（视图 1）</strong></div>
+            <div class="studio-prop-row">
+              <label>角度预设</label>
+              <select id="studioView1Preset"></select>
+            </div>
+            <div class="studio-prop-row">
+              <label>水平旋转 <span id="studioView1YawVal" class="val">45°</span></label>
+              <input id="studioView1Yaw" type="range" min="0" max="360" step="1" value="45" />
+            </div>
+            <div class="studio-prop-row">
+              <label>俯仰角度 <span id="studioView1SlantVal" class="val">30°</span></label>
+              <input id="studioView1Slant" type="range" min="-89" max="89" step="1" value="30" />
+            </div>
+            <div class="studio-prop-row">
+              <label>视角标签</label>
+              <input id="studioView1Tag" type="text" maxlength="24" value="视图 1" />
+            </div>
+          </div>
+
+          <div id="studioView2Card" class="studio-card">
+            <div class="studio-card-head"><strong>副视角（视图 2）</strong></div>
+            <div class="studio-prop-row">
+              <label>角度预设</label>
+              <select id="studioView2Preset"></select>
+            </div>
+            <div class="studio-prop-row">
+              <label>水平旋转 <span id="studioView2YawVal" class="val">225°</span></label>
+              <input id="studioView2Yaw" type="range" min="0" max="360" step="1" value="225" />
+            </div>
+            <div class="studio-prop-row">
+              <label>俯仰角度 <span id="studioView2SlantVal" class="val">30°</span></label>
+              <input id="studioView2Slant" type="range" min="-89" max="89" step="1" value="30" />
+            </div>
+            <div class="studio-prop-row">
+              <label>视角标签</label>
+              <input id="studioView2Tag" type="text" maxlength="24" value="视图 2" />
+            </div>
+          </div>
+
+          <div class="studio-card">
+            <div class="studio-card-head"><strong>输出位置与剪贴板</strong></div>
+            <div class="studio-prop-row">
+              <input id="studioOutputDir" type="text" readonly value="与投影同目录" />
+              <button id="studioDirBrowse" type="button">选择…</button>
+              <button id="studioDirReset" type="button">默认</button>
+            </div>
+            <label class="check small"><input id="studioCopyClipboard" type="checkbox" checked />导出后自动复制图像到剪贴板</label>
+          </div>
+        </div>
+
+        <div id="studioPanelBackground" class="studio-panel hidden">
+          <div class="studio-card">
+            <div class="studio-card-head"><strong>整体导出图背景</strong></div>
+            <div class="studio-prop-row">
+              <label>背景类型</label>
+              <select id="studioBgMode">
+                <option value="solid">纯色背景</option>
+                <option value="gradient">双色渐变</option>
+                <option value="transparent">透明背景 PNG</option>
+                <option value="image">自定义图片背景</option>
+              </select>
+            </div>
+            <div class="studio-color-grid">
+              <label class="studio-color-item"><span>主背景色</span><input id="studioBgColor" type="color" value="#15161a" /></label>
+              <label id="studioBgColor2Wrap" class="studio-color-item"><span>渐变辅色</span><input id="studioBgColor2" type="color" value="#1d2230" /></label>
+            </div>
+            <div class="studio-swatches" id="studioBgSwatches" aria-label="快捷背景色板">
+              <button type="button" data-bg="#15161a" title="Ore UI 深炭"></button>
+              <button type="button" data-bg="#0b0c0e" title="纯黑曜石"></button>
+              <button type="button" data-bg="#121c29" title="深海蓝灰"></button>
+              <button type="button" data-bg="#152118" title="暮光森林"></button>
+              <button type="button" data-bg="#2a241f" title="温润橡木"></button>
+              <button type="button" data-bg="#f0f2f5" title="明亮展卡"></button>
+              <button type="button" data-bg="#ffffff" title="纯白画纸"></button>
+            </div>
+            <div id="studioBgImgRow" class="studio-prop-row hidden">
+              <button id="studioChooseBgImg" type="button">选择背景图片…</button>
+              <button id="studioClearBgImg" type="button">清除</button>
+            </div>
+          </div>
+
+          <div class="studio-card">
+            <div class="studio-card-head"><strong>顶部栏与底部信息盒样式</strong></div>
+            <label class="check small"><input id="studioShowHeaderBar" type="checkbox" checked />显示顶部装饰底栏</label>
+            <div class="studio-color-grid">
+              <label class="studio-color-item"><span>顶栏底色</span><input id="studioHeaderBg" type="color" value="#1e2027" /></label>
+              <label class="studio-color-item"><span>装饰彩条</span><input id="studioHeaderAccent" type="color" value="#3c8527" /></label>
+            </div>
+            <label class="check small"><input id="studioShowFooterBox" type="checkbox" checked />显示底部信息区背板</label>
+            <div class="studio-color-grid">
+              <label class="studio-color-item"><span>背板底色</span><input id="studioFooterBg" type="color" value="#1b1d23" /></label>
+              <label class="studio-color-item"><span>背板边框</span><input id="studioFooterBorder" type="color" value="#2f323c" /></label>
+            </div>
+            <div class="studio-prop-row">
+              <label>底部信息自动列数</label>
+              <select id="studioFooterCols">
+                <option value="1">1 列</option>
+                <option value="2" selected>2 列</option>
+                <option value="3">3 列</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="studio-card">
+            <div class="studio-card-head"><strong>三维视口卡片容器</strong></div>
+            <div class="studio-prop-row">
+              <label>卡片填充</label>
+              <select id="studioPanelBgMode">
+                <option value="radial">径向暗角光晕</option>
+                <option value="solid">纯色填充</option>
+                <option value="transparent">无底框（融入背景）</option>
+              </select>
+            </div>
+            <div class="studio-color-grid">
+              <label class="studio-color-item"><span>视口底色</span><input id="studioPanelBgColor" type="color" value="#21232b" /></label>
+              <label class="studio-color-item"><span>边框颜色</span><input id="studioPanelBorderColor" type="color" value="#383b46" /></label>
+            </div>
+            <label class="check small"><input id="studioShowPanelBorder" type="checkbox" checked />显示视口边框</label>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <div class="studio-footer">
+      <span id="studioStatus" class="muted small" role="status" aria-live="polite"></span>
+      <div class="studio-footer-actions">
+        <button id="studioExportNow" type="button" disabled>按此样式导出展示图…</button>
+        <button id="studioCancel" type="button">取消</button>
+        <button id="studioSaveApply" type="button" class="primary">保存并应用</button>
+      </div>
+    </div>
   </dialog>
   <dialog id="shortcutDialog" class="shortcut-dialog"><div class="dialog-title"><h2>自定义按键</h2><button id="closeShortcuts" type="button">关闭</button></div><p class="muted small">点击右侧绑定，再按新键或滚动滚轮。左右 Shift、Ctrl、Alt 视为同一键；鼠标键也可绑定。</p><div id="shortcutRows"></div><p id="shortcutFeedback" class="muted small" aria-live="polite"></p><button id="cancelBinding" class="hidden" type="button">取消本次绑定</button><button id="resetShortcuts" type="button">恢复默认按键</button><p class="muted small">视角：拖动鼠标旋转，滚轮缩放；更改投影中滚轮切换快捷栏物品，Alt＋滚轮缩放。漫游：移动鼠标转向。微调：按住设置的修饰键并滚动滚轮。</p></dialog>
   <dialog id="commandsDialog" class="shortcut-dialog"><div class="dialog-title"><h2>支持的指令</h2><button id="closeCommands" type="button">关闭</button></div><p class="muted small">分为一级全局指令（/ 开头）与二级选区/编辑指令（// 开头）。支持 ↑/↓ 历史记录与 Tab 自动补全；省略坐标时选取准星所指方块或当前视角位置。</p><div id="commandRows"></div><button id="commandsInput" type="button">打开指令输入</button></dialog>
@@ -439,8 +874,11 @@
   <script src="materials-panel.js"></script>
   <script src="view-presets.js"></script>
   <script src="gpu-exporter.js"></script>
+  <script src="../sheet-style.js"></script>
   <script src="sheet-exporter.js"></script>
   <script src="renderer.js"></script>
+  <script src="mc-version-ui.js"></script>
+  <script src="sheet-studio-ui.js"></script>
   <script src="selection-tools.js"></script>
   <script src="command-router.js"></script>
   <script src="shortcuts-ui.js"></script>

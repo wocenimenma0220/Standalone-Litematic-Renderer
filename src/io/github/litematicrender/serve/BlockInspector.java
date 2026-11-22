@@ -185,7 +185,18 @@ public final class BlockInspector {
         return new ArrayList<>(groups.values());
     }
     private String name(String id) {
-        String key=id.replace(':','.');return names.getOrDefault("block."+key,names.getOrDefault("item."+key,id));
+        String key=id.replace(':','.');
+        String direct=names.get("block."+key);
+        if(direct!=null)return direct;
+        direct=names.get("item."+key);
+        if(direct!=null)return direct;
+        String fallback=io.github.litematicrender.world.VersionCompatibility.canonicalItemId(id);
+        if(fallback!=null&&!fallback.equals(id)){
+            String fbKey=fallback.replace(':','.');
+            String fbName=names.getOrDefault("block."+fbKey,names.get("item."+fbKey));
+            if(fbName!=null)return fbName+"（旧版 ID）";
+        }
+        return id;
     }
     private String icon(String id) {
         if(id.contains("..")||!id.matches("[a-z0-9_.-]+:[a-z0-9_./-]+"))return "";
@@ -197,6 +208,8 @@ public final class BlockInspector {
             try {graphics.setRenderingHint(java.awt.RenderingHints.KEY_INTERPOLATION,java.awt.RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);int size=Math.min(source.getWidth(),source.getHeight());graphics.drawImage(source,0,0,32,32,0,0,size,size,null);}finally{graphics.dispose();}
             var out=new ByteArrayOutputStream();ImageIO.write(thumb,"png",out);return "data:image/png;base64,"+Base64.getEncoder().encodeToString(out.toByteArray());
         }catch(Exception ignored){}
+        String fallback=io.github.litematicrender.world.VersionCompatibility.canonicalItemId(id);
+        if(fallback!=null&&!fallback.equals(id))return icon(fallback);
         return "";
     }
     static int capacity(String id) {
