@@ -472,7 +472,7 @@ public final class ModelBaker {
             pv[i] = rawV / 16f;
         }
         // 锁定纹理时，UV 随方块状态修正，避免纹理跟着几何一起转动。
-        if (uvlock && (xRotOf(t) != 0 || yRotOf(t) != 0)) {
+        if (uvlock && (t.xRot != 0 || t.yRot != 0 || t.zRot != 0)) {
             float[][] rot = uvLockCorners(pu, pv, face, effectiveFace, t);
             pu = rot[0];
             pv = rot[1];
@@ -497,27 +497,28 @@ public final class ModelBaker {
         return q;
     }
 
-    /** UV 锁定使用面变换的逆旋转，绕贴图中心旋转，使纹理在世界坐标中保持对齐。 */
-    private static float[][] uvLockCorners(float[] u, float[] v, int face, int effectiveFace, Transform t) {
+    private static final double[][] FACE_U_DIR = {
+        {1, 0, 0}, {1, 0, 0}, {-1, 0, 0}, {1, 0, 0}, {0, 0, 1}, {0, 0, -1}
+    };
+    private static final double[][] FACE_V_DIR = {
+        {0, 0, -1}, {0, 0, 1}, {0, -1, 0}, {0, -1, 0}, {0, -1, 0}, {0, -1, 0}
+    };
 
-        int turnsX = ((t.xRot % 360) + 360) % 360 / 90;
-        int turnsY = ((t.yRot % 360) + 360) % 360 / 90;
-        int steps = (turnsY * 3 + turnsX) % 4;
-        if (turnsX != 0 && turnsY != 0) {
-            // 组合 X/Y 旋转不能简化为一次面内四分之一旋转，此处保留原结果。
-            return new float[][]{u, v};
-        }
+    /** 将旋转后原始面的 UV 基向量投影到目标世界面的 UV 基上，精确支持任意 X/Y/Z 复合旋转。 */
+    private static float[][] uvLockCorners(float[] u, float[] v, int face, int effectiveFace, Transform t) {
+        double[] uRot = t.transformPoint(FACE_U_DIR[face][0], FACE_U_DIR[face][1], FACE_U_DIR[face][2]);
+        double[] vRot = t.transformPoint(FACE_V_DIR[face][0], FACE_V_DIR[face][1], FACE_V_DIR[face][2]);
+        double[] uEff = FACE_U_DIR[effectiveFace];
+        double[] vEff = FACE_V_DIR[effectiveFace];
+        double a = uRot[0] * uEff[0] + uRot[1] * uEff[1] + uRot[2] * uEff[2];
+        double b = vRot[0] * uEff[0] + vRot[1] * uEff[1] + vRot[2] * uEff[2];
+        double c = uRot[0] * vEff[0] + uRot[1] * vEff[1] + uRot[2] * vEff[2];
+        double d = vRot[0] * vEff[0] + vRot[1] * vEff[1] + vRot[2] * vEff[2];
         float[] nu = new float[4], nv = new float[4];
         for (int i = 0; i < 4; i++) {
-            float cu = u[i] - 0.5f, cv = v[i] - 0.5f;
-            float ru = cu, rv = cv;
-            for (int s = 0; s < steps; s++) {
-                float tmp = ru;
-                ru = -rv;
-                rv = tmp;
-            }
-            nu[i] = ru + 0.5f;
-            nv[i] = rv + 0.5f;
+            double cu = u[i] - 0.5, cv = v[i] - 0.5;
+            nu[i] = (float) (cu * a + cv * b + 0.5);
+            nv[i] = (float) (cu * c + cv * d + 0.5);
         }
         return new float[][]{nu, nv};
     }
@@ -644,9 +645,39 @@ public final class ModelBaker {
     }
 
     private static double[] rotateVertex(double x, double y, double z, ModelDefinition.ElementRotation rot) {
-        double angle = Math.toRadians(rot.angle());
         double cx = x - rot.origin()[0] / 16f, cy = y - rot.origin()[1] / 16f, cz = z - rot.origin()[2] / 16f;
         double nx = cx, ny = cy, nz = cz;
+        if (rot.euler()) {
+            // 兼容 1.21.11 / 26.x 多轴欧拉角旋转（顺序 X -> Y -> Z，等价 JOML rotationZYX）。
+            if (rot.x() != 0f) {
+                double rx = Math.toRadians(rot.x()), c = Math.cos(rx), s = Math.sin(rx);
+                double ty = ny * c - nz * s, tz = ny * s + nz * c;
+                ny = ty; nz = tz;
+            }
+            if (rot.y() != 0f) {
+                double ry = Math.toRadians(rot.y()), c = Math.cos(ry), s = Math.sin(ry);
+                double tx = nx * c + nz * s, tz = -nx * s + nz * c;
+                nx = tx; nz = tz;
+            }
+            if (rot.z() != 0f) {
+                double rz = Math.toRadians(rot.z()), c = Math.cos(rz), s = Math.sin(rz);
+                double tx = nx * c - ny * s, ty = nx * s + ny * c;
+                nx = tx; ny = ty;
+            }
+            if (rot.rescale()) {
+                int nonZero = (rot.x() != 0f ? 1 : 0) + (rot.y() != 0f ? 1 : 0) + (rot.z() != 0f ? 1 : 0);
+                if (nonZero == 1) {
+                    String ax = rot.x() != 0f ? "x" : rot.y() != 0f ? "y" : "z";
+                    double ang = Math.toRadians(rot.x() != 0f ? rot.x() : rot.y() != 0f ? rot.y() : rot.z());
+                    double c = Math.cos(ang), s = Math.sin(ang);
+                    nx *= axisRescale(ax, c, s, 0);
+                    ny *= axisRescale(ax, c, s, 1);
+                    nz *= axisRescale(ax, c, s, 2);
+                }
+            }
+            return new double[]{nx + rot.origin()[0] / 16f, ny + rot.origin()[1] / 16f, nz + rot.origin()[2] / 16f};
+        }
+        double angle = Math.toRadians(rot.angle());
         double c = Math.cos(angle), s = Math.sin(angle);
         switch (rot.axis()) {
             case "x" -> {

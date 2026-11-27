@@ -225,7 +225,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             saved++;String identity=io.github.litematicrender.schematic.SchematicEntity.identity(entity.data());
             if(!identity.isEmpty()&&!identities.add(identity)){duplicates++;continue;}
             if(!EntityGeometry.supported(entity)){unsupported++;continue;}
-            if(entity.data().getBooleanOrDefault("Invisible",false)&&!EntityGeometry.frame(entity)){invisible++;continue;}
+            if(entity.data().getBooleanOrDefault("Invisible",false)&&!EntityGeometry.showsWhenInvisible(entity)){invisible++;continue;}
             rendered++;
         }
         return java.util.Map.of("saved",saved,"rendered",rendered,"invisible",invisible,"unsupported",unsupported,"duplicates",duplicates);
@@ -307,7 +307,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
     private SceneMesh assemble(boolean finishGeometry) {
         SceneMesh mesh = new SceneMesh();
         mesh.visibility=new SectionVisibility();
-        var entityGeometry=new EntityGeometry(this.baker,this.registry,this.generatedSprites).lightingEnabled(lightingEnabled);
+        var entityGeometry=new EntityGeometry(this.baker,this.registry,this.colormaps,this.generatedSprites).lightingEnabled(lightingEnabled);
         var entityIdentities=new java.util.HashSet<String>();
         int savedEntities=0,renderedEntities=0,invisibleEntities=0,unsupportedEntities=0,duplicateEntities=0;
         for (int ri = 0; ri < this.regions.size(); ri++) {
@@ -330,7 +330,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
                 String identity=io.github.litematicrender.schematic.SchematicEntity.identity(entity.data());
                 if(!identity.isEmpty()&&!entityIdentities.add(identity)){duplicateEntities++;continue;}
                 if(!EntityGeometry.supported(entity)){unsupportedEntities++;continue;}
-                if(entity.data().getBooleanOrDefault("Invisible",false)&&!EntityGeometry.frame(entity)){invisibleEntities++;continue;}
+                if(entity.data().getBooleanOrDefault("Invisible",false)&&!EntityGeometry.showsWhenInvisible(entity)){invisibleEntities++;continue;}
                 var blockOrigin=region.blockOrigin();
                 double x=off[0]+region.position.x()-blockOrigin.x()+entity.x(),y=off[1]+region.position.y()-blockOrigin.y()+entity.y(),z=off[2]+region.position.z()-blockOrigin.z()+entity.z();
                 if(selectionMin!=null&&!selectionContains((int)Math.floor(x),(int)Math.floor(y),(int)Math.floor(z)))continue;
@@ -568,9 +568,9 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
             } else {
                 var nbt = region.blockEntities.get(LitematicaSchematic.pack(lx, ly, lz));
                 if (nbt == null) return;
-                var text = BlockEntityData.readSign(nbt);
-                if (!text.hasText()) return;
                 if (this.font == null) this.font = this.baker.fontRenderer();
+                var text = BlockEntityData.readStyledSign(nbt, this.font.translations());
+                if (!text.hasText()) return;
                 SignGeometry.emit(mesh, state, text, this.font, x, y, z, rgb, this.generatedSprites);
             }
             });
@@ -670,7 +670,7 @@ public final class SceneBuilder implements io.github.litematicrender.render.Stre
 
             this.emitFluid(mesh, state, x, y, z);
         }
-        if (id.equals("minecraft:decorated_pot")||id.equals("minecraft:conduit")||SpecialBlockGeometry.banner(id)||BlockRegistry.isCopperGolemStatue(id)) return;
+        if (id.equals("minecraft:decorated_pot")||id.equals("minecraft:conduit")||id.equals("minecraft:end_portal")||id.equals("minecraft:end_gateway")||id.equals("minecraft:moving_piston")||SpecialBlockGeometry.banner(id)||BlockRegistry.isCopperGolemStatue(id)) return;
 
         // multipart 方块需要输出所有匹配模型，不能只选择一个。
 

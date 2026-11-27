@@ -52,7 +52,17 @@ public record SchematicEntity(String id,NbtCompound data,double x,double y,doubl
     private static void append(List<SchematicEntity> result,Set<String> seen,NbtCompound tag,double[] position,boolean riding,int depth) {
         if(depth>16)return;String identity=identity(tag);if(!identity.isEmpty()&&!seen.add(identity))return;
         String id=tag.getStringOrDefault("id","");
-        if(!id.contains(":"))id="minecraft:"+switch(id){case "MinecartRideable"->"minecart";case "MinecartChest"->"chest_minecart";case "MinecartHopper"->"hopper_minecart";case "MinecartFurnace"->"furnace_minecart";case "MinecartTNT"->"tnt_minecart";case "MinecartSpawner"->"spawner_minecart";case "MinecartCommandBlock"->"command_block_minecart";case "Boat"->"boat";case "SnowMan"->"snow_golem";case "VillagerGolem"->"iron_golem";default->id;};
+        if(!id.contains(":"))id="minecraft:"+switch(id){
+            case "MinecartRideable"->"minecart"; case "MinecartChest"->"chest_minecart"; case "MinecartHopper"->"hopper_minecart";
+            case "MinecartFurnace"->"furnace_minecart"; case "MinecartTNT"->"tnt_minecart"; case "MinecartSpawner"->"spawner_minecart";
+            case "MinecartCommandBlock"->"command_block_minecart"; case "Boat"->"boat"; case "SnowMan"->"snow_golem";
+            case "VillagerGolem"->"iron_golem"; case "ArmorStand"->"armor_stand"; case "Painting"->"painting";
+            case "EnderCrystal"->"end_crystal"; case "LeashKnot"->"leash_knot"; case "Villager"->"villager";
+            case "Shulker"->"shulker"; case "Zombie"->"zombie"; case "Skeleton"->"skeleton"; case "Creeper"->"creeper";
+            case "Enderman"->"enderman"; case "Slime"->"slime"; case "LavaSlime"->"magma_cube"; case "Blaze"->"blaze";
+            case "Ghast"->"ghast"; case "Witch"->"witch"; case "Guardian"->"guardian"; case "PigZombie"->"zombified_piglin";
+            default->id;
+        };
         if(id.equals("minecraft:ItemFrame"))id="minecraft:item_frame";
         if(id.equals("minecraft:GlowItemFrame"))id="minecraft:glow_item_frame";
         if(id.equals("minecraft:"))return;

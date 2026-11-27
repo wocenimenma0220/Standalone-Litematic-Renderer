@@ -5,10 +5,21 @@ import io.github.litematicrender.render.Image;
 import io.github.litematicrender.world.BlockState;
 import java.util.*;
 
-/** 原版告示牌文字面，支持普通光照和发光墨囊描边。 */
+/** 原版告示牌文字面，支持普通光照、发光墨囊描边、多语言及富文本样式。 */
 public final class SignGeometry {
     private SignGeometry() {}
+
     public static void emit(SceneMesh mesh, BlockState state, BlockEntityData.Sign sign, FontRenderer font,
+                            int x, int y, int z, float[] light, Map<String, Image> sprites) {
+        List<BlockEntityData.StyledLine> front = sign.frontLines().stream()
+            .map(BlockEntityData::parseSectionText).toList();
+        List<BlockEntityData.StyledLine> back = sign.backLines().stream()
+            .map(BlockEntityData::parseSectionText).toList();
+        emit(mesh, state, new BlockEntityData.StyledSign(front, back, sign.frontColor(), sign.backColor(),
+            sign.glowingFront(), sign.glowingBack()), font, x, y, z, light, sprites);
+    }
+
+    public static void emit(SceneMesh mesh, BlockState state, BlockEntityData.StyledSign sign, FontRenderer font,
                             int x, int y, int z, float[] light, Map<String, Image> sprites) {
         boolean hanging = state.blockId.contains("hanging_sign");
         boolean wall = state.blockId.contains("wall_sign") && !hanging;
@@ -21,12 +32,12 @@ public final class SignGeometry {
             angle = r * 22.5;
         }
         for (int side = 0; side < 2; side++) {
-            List<String> lines = side == 0 ? sign.frontLines() : sign.backLines();
+            List<BlockEntityData.StyledLine> lines = side == 0 ? sign.frontLines() : sign.backLines();
             if (lines.stream().noneMatch(font::canRenderAny)) continue;
             boolean glow = side == 0 ? sign.glowingFront() : sign.glowingBack();
             int color = side == 0 ? sign.frontColor() : sign.backColor();
-            var textPanel=font.signPanel(lines,color,glow,hanging);
-            Image panel=textPanel.image();String id=textPanel.spriteId();
+            var textPanel = font.signPanelStyled(lines, color, glow, hanging);
+            Image panel = textPanel.image(); String id = textPanel.spriteId();
             sprites.put(id, panel);
             double a = Math.toRadians(angle), c = Math.cos(a), s = Math.sin(a);
             double baseX = x + 0.5, baseZ = z + 0.5;

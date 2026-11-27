@@ -40,6 +40,8 @@ public final class SpriteAtlas {
         }
     }
 
+    public static final int MAX_ATLAS_DIM = Math.max(2048, Integer.getInteger("litematicrender.atlas.maxDim", 16384));
+
     public final String id;
     private final Map<String, SpriteContents> sprites = new HashMap<>();
     private final Map<String, SpriteContents> baseSprites = new HashMap<>();
@@ -65,13 +67,13 @@ public final class SpriteAtlas {
     }
     static SpriteAtlas readCache(java.io.DataInput in)throws java.io.IOException{
         String id=in.readUTF();int padding=in.readInt(),count=in.readInt();
-        if(!id.equals("blocks")||padding!=1||count<1||count>32768)throw new java.io.IOException("Invalid cached atlas");
+        if(!id.equals("blocks")||padding!=1||count<1||count>65536)throw new java.io.IOException("Invalid cached atlas");
         long pixels=0,frames=0;Map<String,SpriteContents> loaded=new HashMap<>();
         for(int i=0;i<count;i++){
             String name=in.readUTF();int fw=in.readInt(),fh=in.readInt(),w=in.readInt(),h=in.readInt(),fc=in.readInt(),ft=in.readInt();
             boolean interpolate=in.readBoolean();int n=in.readInt();pixels+=(long)w*h;frames+=n;
             if(name.length()>512||loaded.containsKey(name)||w<1||h<1||w>16384||h>16384||fw<1||fh<1||fw>w||fh>h||w%fw!=0||h%fh!=0
-                ||fc!=(w/fw)*(h/fh)||ft<1||n<1||frames>1048576||pixels>32L*1024*1024)throw new java.io.IOException("Invalid cached sprite");
+                ||fc!=(w/fw)*(h/fh)||ft<1||n<1||frames>1048576||pixels>192L*1024*1024)throw new java.io.IOException("Invalid cached sprite");
             // 保留动画元数据原值，与普通加载路径保持一致。
 
             var order=new ArrayList<Integer>(n);for(int k=0;k<n;k++)order.add(in.readInt());
@@ -118,35 +120,36 @@ public final class SpriteAtlas {
         this.id = id;
         this.padding = padding;
         this.baseSprites.putAll(loaded);
-        // 按高度降序采用货架式布局拼接图集。
+        // 按高度降序采用货架式布局拼接图集，并保证宽高在 GPU 纹理上限内。
         List<SpriteContents> sorted = new ArrayList<>(loaded.values());
-        sorted.sort((a, b) -> {
-            int cmp = Integer.compare(b.frameHeight + 2 * padding, a.frameHeight + 2 * padding);
-            return cmp != 0 ? cmp : a.name.compareTo(b.name);
-        });
         int pad = padding;
+        sorted = fitWithinLimit(sorted, pad, MAX_ATLAS_DIM);
+        sortSprites(sorted, pad);
 
-        long totalArea = 0;
-        int maxDim = 0;
+        int maxDim = 16;
         for (SpriteContents s : sorted) {
-            totalArea += (long) (s.frameWidth + 2 * pad) * (s.frameHeight + 2 * pad);
             maxDim = Math.max(maxDim, s.frameWidth + 2 * pad);
         }
-        int estWidth = (int) Math.max(maxDim, Math.ceil(Math.sqrt(totalArea * 1.15)));
-        int width = Math.min(4096, roundUpPow2(Math.max(estWidth, 16)));
-
-
-        int[] layout = packShelves(sorted, width, pad);
-        int height = roundUpPow2(Math.max(layout[0], 16));
-        if (height > 4096 && width < 8192) {
-            int wideWidth = 8192;
-            int[] wideLayout = packShelves(sorted, wideWidth, pad);
-            int wideHeight = roundUpPow2(Math.max(wideLayout[0], 16));
-            if (wideHeight < height) {
-                width = wideWidth;
-                layout = wideLayout;
-                height = wideHeight;
+        int minWidth = Math.min(MAX_ATLAS_DIM, roundUpPow2(Math.max(maxDim, 16)));
+        int width = minWidth;
+        int height = roundUpPow2(Math.max(packShelves(sorted, width, pad)[0], 16));
+        long bestArea = (long) width * height;
+        int bestMax = Math.max(width, height);
+        boolean bestFits = width <= MAX_ATLAS_DIM && height <= MAX_ATLAS_DIM;
+        for (int candidateW = minWidth; candidateW <= MAX_ATLAS_DIM; candidateW <<= 1) {
+            int candidateH = roundUpPow2(Math.max(packShelves(sorted, candidateW, pad)[0], 16));
+            boolean fits = candidateW <= MAX_ATLAS_DIM && candidateH <= MAX_ATLAS_DIM;
+            long area = (long) candidateW * candidateH;
+            int maxSide = Math.max(candidateW, candidateH);
+            if ((fits && !bestFits)
+                || (fits == bestFits && (area < bestArea || (area == bestArea && maxSide < bestMax)))) {
+                width = candidateW;
+                height = candidateH;
+                bestArea = area;
+                bestMax = maxSide;
+                bestFits = fits;
             }
+            if (candidateW == MAX_ATLAS_DIM) break;
         }
         this.stitched = new Image(width, height);
         int cx = 0, cy = 0, crow = 0;
@@ -231,6 +234,83 @@ public final class SpriteAtlas {
         return new AnimationCycle((int)period,true);
     }
 
+
+    private static void sortSprites(List<SpriteContents> list, int pad) {
+        list.sort((a, b) -> {
+            int cmp = Integer.compare(b.frameHeight + 2 * pad, a.frameHeight + 2 * pad);
+            return cmp != 0 ? cmp : a.name.compareTo(b.name);
+        });
+    }
+
+    /** 超高分辨率资源包超出 GPU 上限时，优先降采样超大贴图，再整体降采样至可容纳尺寸。 */
+    private static List<SpriteContents> fitWithinLimit(List<SpriteContents> input, int pad, int limit) {
+        List<SpriteContents> list = new ArrayList<>(input);
+        int maxSprite = limit - 2 * pad;
+        for (int i = 0; i < list.size(); i++) {
+            SpriteContents s = list.get(i);
+            while (s.frameWidth > maxSprite || s.frameHeight > maxSprite) {
+                s = downscaleHalf(s);
+            }
+            list.set(i, s);
+        }
+        sortSprites(list, pad);
+        int pass = 0;
+        while (roundUpPow2(Math.max(packShelves(list, limit, pad)[0], 16)) > limit && pass < 8) {
+            int threshold = pass == 0 ? 256 : pass == 1 ? 128 : 16;
+            boolean changed = false;
+            for (int i = 0; i < list.size(); i++) {
+                SpriteContents s = list.get(i);
+                if (s.frameWidth > threshold || s.frameHeight > threshold) {
+                    list.set(i, downscaleHalf(s));
+                    changed = true;
+                }
+            }
+            if (!changed && threshold > 16) {
+                pass++;
+                continue;
+            }
+            if (!changed) break;
+            sortSprites(list, pad);
+            pass++;
+        }
+        return list;
+    }
+
+    private static SpriteContents downscaleHalf(SpriteContents s) {
+        int newFw = Math.max(1, s.frameWidth / 2);
+        int newFh = Math.max(1, s.frameHeight / 2);
+        int cols = Math.max(1, s.sheet.width / s.frameWidth);
+        int rows = Math.max(1, s.sheet.height / s.frameHeight);
+        Image dst = new Image(cols * newFw, rows * newFh);
+        for (int fy = 0; fy < rows; fy++) {
+            for (int fx = 0; fx < cols; fx++) {
+                int sx0 = fx * s.frameWidth, sy0 = fy * s.frameHeight;
+                int dx0 = fx * newFw, dy0 = fy * newFh;
+                for (int y = 0; y < newFh; y++) {
+                    int y0 = sy0 + Math.min(s.frameHeight - 1, y * 2);
+                    int y1 = sy0 + Math.min(s.frameHeight - 1, y * 2 + 1);
+                    for (int x = 0; x < newFw; x++) {
+                        int x0 = sx0 + Math.min(s.frameWidth - 1, x * 2);
+                        int x1 = sx0 + Math.min(s.frameWidth - 1, x * 2 + 1);
+                        int p0 = s.sheet.pixel(x0, y0), p1 = s.sheet.pixel(x1, y0);
+                        int p2 = s.sheet.pixel(x0, y1), p3 = s.sheet.pixel(x1, y1);
+                        int a0 = Image.alpha(p0), a1 = Image.alpha(p1), a2 = Image.alpha(p2), a3 = Image.alpha(p3);
+                        int aSum = a0 + a1 + a2 + a3;
+                        int outA = (aSum + 2) / 4;
+                        if (aSum == 0) {
+                            dst.setPixel(dx0 + x, dy0 + y, 0);
+                        } else {
+                            int r = (Image.red(p0) * a0 + Image.red(p1) * a1 + Image.red(p2) * a2 + Image.red(p3) * a3 + aSum / 2) / aSum;
+                            int g = (Image.green(p0) * a0 + Image.green(p1) * a1 + Image.green(p2) * a2 + Image.green(p3) * a3 + aSum / 2) / aSum;
+                            int b = (Image.blue(p0) * a0 + Image.blue(p1) * a1 + Image.blue(p2) * a2 + Image.blue(p3) * a3 + aSum / 2) / aSum;
+                            dst.setPixel(dx0 + x, dy0 + y, Image.argb(outA, r, g, b));
+                        }
+                    }
+                }
+            }
+        }
+        return new SpriteContents(s.name, newFw, newFh, dst, s.frameCount, s.frameTime, s.frames, s.interpolate);
+    }
 
     private static int[] packShelves(List<SpriteContents> sorted, int width, int pad) {
         int x = 0, y = 0, rowH = 0;
@@ -337,6 +417,7 @@ public final class SpriteAtlas {
                     for (String[] pair : resources.listResources("textures/" + sourceDir, ".png")) {
                         String ns = pair[0];
                         String rel = pair[1];
+                        if (isShaderPbrMap(rel)) continue;
 
                         String relNoExt = rel.substring(0, rel.length() - 4);
                         String spriteId = ns + ":" + prefix + relNoExt.substring(("textures/" + sourceDir + "/").length());
@@ -364,6 +445,12 @@ public final class SpriteAtlas {
 
         loaded.putIfAbsent("minecraft:missingno", missingContents());
         return new SpriteAtlas(atlasId, loaded, 1);
+    }
+
+    /** 过滤光影专用 LabPBR/SEUS 法线与高光贴图（_n/_s），避免无用贴图撑爆图集。 */
+    private static boolean isShaderPbrMap(String relPath) {
+        if (!relPath.endsWith("_n.png") && !relPath.endsWith("_s.png")) return false;
+        return relPath.startsWith("textures/block/") || relPath.startsWith("textures/entity/");
     }
 
     private static void loadSprite(ResourceManager resources, Map<String, SpriteContents> loaded,

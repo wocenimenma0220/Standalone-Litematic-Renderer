@@ -140,6 +140,10 @@ public final class BlockRegistry {
             propValues.putIfAbsent("facing", valuesFor(List.of("north","east","south","west")));
             propValues.putIfAbsent("copper_golem_pose", valuesFor(List.of("standing","sitting","running","star")));
         }
+        if (blockId.equals("minecraft:moving_piston")) {
+            propValues.putIfAbsent("facing", valuesFor(List.of("down", "up", "north", "south", "west", "east")));
+            propValues.putIfAbsent("type", valuesFor(List.of("normal", "sticky")));
+        }
         if (blockId.endsWith("_wall_banner"))propValues.putIfAbsent("facing",valuesFor(List.of("north","east","south","west")));
         else if(blockId.endsWith("_banner"))propValues.putIfAbsent("rotation",valuesFor(java.util.stream.IntStream.range(0,16).mapToObj(Integer::toString).toList()));
         if ((blockId.endsWith("_wall_head") || blockId.endsWith("_wall_skull")) && !propValues.containsKey("facing")) {
@@ -210,7 +214,11 @@ public final class BlockRegistry {
 
 
     private static final java.util.Set<String> MODELLESS_BLOCKS = java.util.Set.of(
-        "minecraft:chest", "minecraft:trapped_chest", "minecraft:ender_chest"
+        "minecraft:chest", "minecraft:trapped_chest", "minecraft:ender_chest",
+        "minecraft:copper_chest", "minecraft:exposed_copper_chest",
+        "minecraft:weathered_copper_chest", "minecraft:oxidized_copper_chest",
+        "minecraft:waxed_copper_chest", "minecraft:waxed_exposed_copper_chest",
+        "minecraft:waxed_weathered_copper_chest", "minecraft:waxed_oxidized_copper_chest"
     );
 
     private static final java.util.Set<String> COPPER_GOLEM_STATUES = java.util.Set.of(

@@ -25,7 +25,7 @@ final class SpecialBlockGeometry {
         for(int i=0;i<pairs.length;i+=2)LEGACY_PATTERNS.put(pairs[i],pairs[i+1]);
     }
     SpecialBlockGeometry(EntityGeometry geometry,Map<String,Image> generated,Blocks blocks,java.util.function.Predicate<BlockState> opaque,int top){this.geometry=geometry;this.generated=generated;this.blocks=blocks;this.opaque=opaque;this.top=top;}
-    static boolean supports(String id){return banner(id)||id.equals("minecraft:lectern")||id.equals("minecraft:conduit")||id.equals("minecraft:beacon")||BlockRegistry.isCopperGolemStatue(id);}
+    static boolean supports(String id){return banner(id)||id.equals("minecraft:lectern")||id.equals("minecraft:conduit")||id.equals("minecraft:beacon")||id.equals("minecraft:end_portal")||id.equals("minecraft:end_gateway")||id.equals("minecraft:moving_piston")||BlockRegistry.isCopperGolemStatue(id);}
     static boolean banner(String id){return id.startsWith("minecraft:")&&(id.endsWith("_banner")||id.endsWith("_wall_banner"));}
     static int dye(String name){for(int i=0;i<DYES.length;i++)if(DYES[i].equals(name))return COLORS[i];return COLORS[0];}
     private static int dye(NbtElement value){if(value instanceof NbtScalars.NbtString s)return dye(s.value);return COLORS[Math.max(0,Math.min(15,(int)SchematicEntity.number(value,0)))];}
@@ -34,6 +34,9 @@ final class SpecialBlockGeometry {
         else if(state.blockId.equals("minecraft:lectern")&&"true".equals(state.getValue("has_book")))book(mesh,state,x,y,z,light);
         else if(state.blockId.equals("minecraft:conduit"))conduit(mesh,x,y,z,light);
         else if(state.blockId.equals("minecraft:beacon"))beacon(mesh,x,y,z);
+        else if(state.blockId.equals("minecraft:end_portal"))endPortal(mesh,x,y,z);
+        else if(state.blockId.equals("minecraft:end_gateway"))endGateway(mesh,x,y,z);
+        else if(state.blockId.equals("minecraft:moving_piston"))movingPiston(mesh,state,tag,x,y,z,light);
         else if(BlockRegistry.isCopperGolemStatue(state.blockId))CopperGolemStatueGeometry.emit(geometry,mesh,state,x,y,z,texture(CopperGolemStatueGeometry.texture(state.blockId)),light);
     }
     private String texture(String id){Image image=geometry.image(id);if(image!=null)generated.putIfAbsent(id,image);return id;}
@@ -134,5 +137,116 @@ final class SpecialBlockGeometry {
         SceneMesh.Layer layer=glow?SceneMesh.Layer.TRANSLUCENT:SceneMesh.Layer.SOLID;
         for(int side=0;side<4;side++){float[] a=points[side],b=points[(side+1)%4];var q=new SceneMesh.MeshQuad(new float[]{a[0],a[0],b[0],b[0]},new float[]{upper,bottom,bottom,upper},new float[]{a[1],a[1],b[1],b[1]},0,0,0,(upper-bottom)/16f,1,(upper-bottom)/16f,1,0,sprite,-1,texture,1,1,1,1,null,layer,true);(glow?mesh.translucent:mesh.solid).add(q);}
     }
+    private Image endPortalTexture() {
+        String sprite = "litematicrender:special/end_portal";
+        return generated.computeIfAbsent(sprite, key -> {
+            Image src = geometry.image("minecraft:entity/end_portal/end_portal");
+            int w = src != null ? Math.min(256, src.width) : 64;
+            int h = src != null ? Math.min(256, src.height) : 64;
+            Image out = new Image(w, h);
+            int[] layerColors = {0x1A2E4C, 0x2B4C7E, 0x5288B5, 0x3D2E6B, 0x62B8B0};
+            int[][] shifts = {{0, 0}, {w / 3, h / 5}, {w * 2 / 3, h * 3 / 7}, {w / 5, h * 2 / 3}, {w * 4 / 7, h / 2}};
+            for (int yy = 0; yy < h; yy++) {
+                for (int xx = 0; xx < w; xx++) {
+                    int r = 6, g = 5, b = 16;
+                    if (src != null) {
+                        for (int l = 0; l < layerColors.length; l++) {
+                            int sx = (xx + shifts[l][0]) % src.width;
+                            int sy = (yy + shifts[l][1]) % src.height;
+                            int p = src.pixel(sx, sy);
+                            int lum = (Image.red(p) + Image.green(p) + Image.blue(p)) / 3;
+                            int c = layerColors[l];
+                            r += lum * ((c >> 16) & 255) / 510;
+                            g += lum * ((c >> 8) & 255) / 510;
+                            b += lum * (c & 255) / 510;
+                        }
+                    }
+                    out.setPixel(xx, yy, Image.argb(255, Math.min(255, r), Math.min(255, g), Math.min(255, b)));
+                }
+            }
+            return out;
+        });
+    }
+
+    private void endPortal(SceneMesh mesh, int x, int y, int z) {
+        String sprite = "litematicrender:special/end_portal";
+        Image img = endPortalTexture();
+        BlockState above = blocks.at(x, y + 1, z);
+        BlockState below = blocks.at(x, y - 1, z);
+        if (above == null || (!above.blockId.equals("minecraft:end_portal") && !opaque.test(above))) {
+            mesh.solid.add(new SceneMesh.MeshQuad(
+                new float[]{x, x, x + 1, x + 1}, new float[]{y + 0.75f, y + 0.75f, y + 0.75f, y + 0.75f},
+                new float[]{z, z + 1, z + 1, z}, 0, 0, 0, 1, 1, 1, 1, 0,
+                sprite, 0xFFFFFFFF, img, 1, 1, 1, 1, null, SceneMesh.Layer.SOLID, false));
+        }
+        if (below == null || (!below.blockId.equals("minecraft:end_portal") && !opaque.test(below))) {
+            mesh.solid.add(new SceneMesh.MeshQuad(
+                new float[]{x, x + 1, x + 1, x}, new float[]{y + 0.25f, y + 0.25f, y + 0.25f, y + 0.25f},
+                new float[]{z, z, z + 1, z + 1}, 0, 0, 1, 0, 1, 1, 0, 1,
+                sprite, 0xFFFFFFFF, img, 1, 1, 1, 1, null, SceneMesh.Layer.SOLID, false));
+        }
+    }
+
+    private void endGateway(SceneMesh mesh, int x, int y, int z) {
+        String sprite = "litematicrender:special/end_portal";
+        Image img = endPortalTexture();
+        int[][] deltas = {{0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}};
+        float[][][] verts = {
+            {{0,0,1},{0,0,0},{1,0,0},{1,0,1}},
+            {{0,1,0},{0,1,1},{1,1,1},{1,1,0}},
+            {{1,1,0},{1,0,0},{0,0,0},{0,1,0}},
+            {{0,1,1},{0,0,1},{1,0,1},{1,1,1}},
+            {{0,1,0},{0,0,0},{0,0,1},{0,1,1}},
+            {{1,1,1},{1,0,1},{1,0,0},{1,1,0}}
+        };
+        for (int f = 0; f < 6; f++) {
+            BlockState nb = blocks.at(x + deltas[f][0], y + deltas[f][1], z + deltas[f][2]);
+            if (nb != null && (nb.blockId.equals("minecraft:end_gateway") || opaque.test(nb))) continue;
+            float[] xs = new float[4], ys = new float[4], zs = new float[4];
+            for (int i = 0; i < 4; i++) {
+                xs[i] = x + verts[f][i][0]; ys[i] = y + verts[f][i][1]; zs[i] = z + verts[f][i][2];
+            }
+            mesh.solid.add(new SceneMesh.MeshQuad(xs, ys, zs, 0, 0, 0, 1, 1, 1, 1, 0,
+                sprite, 0xFFFFFFFF, img, 1, 1, 1, 1, null, SceneMesh.Layer.SOLID, false));
+        }
+    }
+
+    private void movingPiston(SceneMesh mesh, BlockState state, NbtCompound tag, int x, int y, int z, float[] light) {
+        BlockState moved = null;
+        int facingIdx = 0;
+        double progress = 0.5;
+        boolean extending = true;
+        if (tag != null) {
+            NbtCompound bsTag = tag.getCompound("blockState").orElseGet(() -> tag.getCompound("block_state").orElse(null));
+            if (bsTag != null) {
+                var raw = io.github.litematicrender.schematic.LitematicaSchematic.readBlockState(bsTag);
+                if (!raw.blockId().equals("minecraft:air") && !raw.blockId().equals("minecraft:moving_piston")) {
+                    moved = geometry.resolveBlockState(raw.blockId(), raw.properties());
+                }
+            }
+            NbtElement fEl = tag.get("facing").orElse(null);
+            if (fEl instanceof NbtScalars.NbtString s) {
+                facingIdx = switch (s.value) { case "up" -> 1; case "north" -> 2; case "south" -> 3; case "west" -> 4; case "east" -> 5; default -> 0; };
+            } else if (fEl != null) {
+                facingIdx = Math.max(0, Math.min(5, (int) SchematicEntity.number(fEl, 0)));
+            }
+            progress = Math.max(0.0, Math.min(1.0, SchematicEntity.number(tag, "progress", 0.5)));
+            extending = tag.getBooleanOrDefault("extending", true);
+        } else {
+            String f = state.getValue("facing");
+            if (f != null) facingIdx = switch (f) { case "up" -> 1; case "north" -> 2; case "south" -> 3; case "west" -> 4; case "east" -> 5; default -> 0; };
+        }
+        if (moved == null || moved.isAir()) {
+            String[] names = {"down", "up", "north", "south", "west", "east"};
+            String type = "sticky".equals(state.getValue("type")) ? "sticky" : "normal";
+            moved = geometry.resolveBlockState("minecraft:piston_head", Map.of("facing", names[facingIdx], "type", type, "short", "false"));
+            progress = 1.0;
+        }
+        int[][] dirs = {{0, -1, 0}, {0, 1, 0}, {0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}};
+        double dist = extending ? (progress - 1.0) : (1.0 - progress);
+        int[] d = dirs[facingIdx];
+        geometry.emitMovingBlock(mesh, moved, Mat.identity().translate(x + d[0] * dist, y + d[1] * dist, z + d[2] * dist), light);
+    }
+
     private static int number(String value){try{return Integer.parseInt(value);}catch(Exception e){return 0;}}
 }

@@ -450,7 +450,7 @@ public final class RenderEngine implements AutoCloseable {
         BlockRegistry reg = BlockRegistry.load(res);
         timings.put("registryMillis",(System.nanoTime()-resourceStep)/1e6);resourceStep=System.nanoTime();
         if(rendererFingerprint==null)rendererFingerprint=CacheFingerprint.tree(home.resolve("bin"));
-        String imageKey=CacheFingerprint.parts("resource-images-v1",rendererFingerprint,fingerprint);
+        String imageKey=CacheFingerprint.parts("resource-images-v2",rendererFingerprint,fingerprint);
         var images=io.github.litematicrender.render.ResourceImageCache.load(home,imageKey,res);
         Colormaps cm=images.colors();SpriteAtlas at=images.atlas();
         timings.put("imageMillis",(System.nanoTime()-resourceStep)/1e6);

@@ -16,8 +16,12 @@ final class CopperGolemStatueGeometry {
     }
 
     static void emit(EntityGeometry geometry,SceneMesh mesh,BlockState state,int x,int y,int z,String texture,float[] light) {
-        Part root=POSES.getOrDefault(String.valueOf(state.getValue("copper_golem_pose")),POSES.get("standing"));
         Mat world=Mat.identity().translate(x+.5,y,z+.5).rotateY(Math.toRadians(180-SpecialBlockGeometry.yaw(state.getValue("facing"))));
+        emitAt(geometry,mesh,state,world,texture,light);
+    }
+
+    static void emitAt(EntityGeometry geometry,SceneMesh mesh,BlockState state,Mat world,String texture,float[] light) {
+        Part root=POSES.getOrDefault(String.valueOf(state.getValue("copper_golem_pose")),POSES.get("standing"));
         geometry.parts(mesh,root,world,texture,64,64,light);
     }
 

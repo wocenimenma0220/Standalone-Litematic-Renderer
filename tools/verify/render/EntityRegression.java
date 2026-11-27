@@ -48,8 +48,8 @@ public class EntityRegression {
             registry=BlockRegistry.load(resources); baker=new ModelBaker(resources,registry);
             colors=new Colormaps(); colors.load(resources); atlas=SpriteAtlas.load(resources,"blocks");
             FontRenderer font=FontRenderer.load(resources);
-            for (int cp : "中文告示牌荧光English123，。".codePoints().toArray()) check(font.hasGlyph(cp),"Missing default MC glyph: "+Integer.toHexString(cp));
-            check(!font.hasGlyph('한') && !font.hasGlyph('あ') && !font.hasGlyph(0x1F600),"Unsupported languages must stay hidden");
+            for (int cp : "中文告示牌荧光English123，。あア한Дéα→—…".codePoints().toArray()) check(font.hasGlyph(cp),"Missing Unicode glyph: "+Integer.toHexString(cp));
+            check(font.hasGlyph(0x1F600),"Missing Emoji glyph");
             check(font.renderLine("A A",-1,90,null).width-font.renderLine("AA",-1,90,null).width==8,"MC space width must be four logical pixels");
             check(BlockEntityData.plainText("{\"text\":\"中文\",\"extra\":[{\"text\":\"English\",\"color\":\"red\"}]}").equals("中文English"),"JSON component parsing leaked structural keys");
             check(BlockEntityData.plainText("\"\\u4e2d\\u6587\"").equals("中文"),"Unicode escapes were corrupted");

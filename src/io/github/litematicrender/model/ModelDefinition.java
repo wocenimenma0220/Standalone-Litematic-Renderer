@@ -9,7 +9,12 @@ import java.util.Map;
 
 /** 已解析的模型定义；父模型链由 ModelBaker 在外部处理。 */
 public final class ModelDefinition {
-    public record ElementRotation(float[] origin, String axis, float angle, boolean rescale) {}
+    public record ElementRotation(float[] origin, String axis, float angle,
+                                  float x, float y, float z, boolean euler, boolean rescale) {
+        public ElementRotation(float[] origin, String axis, float angle, boolean rescale) {
+            this(origin, axis, angle, 0f, 0f, 0f, false, rescale);
+        }
+    }
 
     public record Face(Map<String, Object> raw) {
         /** UV 的最小值和最大值保留原始顺序，允许反向区间；排序会翻转侦测器等模型的纹理。 */
@@ -143,10 +148,17 @@ public final class ModelDefinition {
         Map<String, Object> rotObj = MiniJson.asObject(em.get("rotation"));
         if (rotObj != null) {
             float[] origin = readVec(rotObj.get("origin"), new float[]{8, 8, 8});
-            String axis = MiniJson.asString(rotObj.get("axis"), "y");
-            float angle = (float) MiniJson.asDouble(rotObj.get("angle"), 0);
             boolean rescale = MiniJson.asBool(rotObj.get("rescale"), false);
-            rotation = new ElementRotation(origin, axis, angle, rescale);
+            if (rotObj.containsKey("x") || rotObj.containsKey("y") || rotObj.containsKey("z")) {
+                float rx = (float) MiniJson.asDouble(rotObj.get("x"), 0);
+                float ry = (float) MiniJson.asDouble(rotObj.get("y"), 0);
+                float rz = (float) MiniJson.asDouble(rotObj.get("z"), 0);
+                rotation = new ElementRotation(origin, "y", 0f, rx, ry, rz, true, rescale);
+            } else {
+                String axis = MiniJson.asString(rotObj.get("axis"), "y");
+                float angle = (float) MiniJson.asDouble(rotObj.get("angle"), 0);
+                rotation = new ElementRotation(origin, axis, angle, rescale);
+            }
         }
         String shadeOverride = MiniJson.asString(em.get("shade_direction_override"), null);
         int lightEmission = MiniJson.asInt(em.get("light_emission"), 0);

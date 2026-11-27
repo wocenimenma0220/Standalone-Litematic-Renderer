@@ -707,11 +707,33 @@ class GpuView {
 
   uploadAtlas(image) {
     const gl = this.gl;
+    const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE) || 4096;
+    let source = image;
+    if (image.width > maxTex || image.height > maxTex) {
+      const targetW = Math.min(image.width, maxTex);
+      const targetH = Math.min(image.height, maxTex);
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error(`图集尺寸 ${image.width}×${image.height} 超出显卡纹理上限 ${maxTex}`);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(image, 0, 0, targetW, targetH);
+      source = canvas;
+      console.warn(`[GpuView] Atlas ${image.width}x${image.height} exceeded MAX_TEXTURE_SIZE=${maxTex}, scaled to ${targetW}x${targetH}`);
+    }
+    while (gl.getError() !== gl.NO_ERROR) {}
     if (this.texture) gl.deleteTexture(this.texture);
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    const err = gl.getError();
+    if (err !== gl.NO_ERROR) {
+      gl.deleteTexture(tex);
+      this.texture = null;
+      throw new Error(`显卡无法上传纹理图集（${source.width}×${source.height}，上限 ${maxTex}，WebGL 错误 ${err}）`);
+    }
     // 最近邻过滤保留像素边缘，防止相邻图集贴图串色。
 
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);

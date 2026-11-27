@@ -34,7 +34,10 @@ public final class MiniJson {
         private final String s;
         private int pos;
 
-        Parser(String s) { this.s = s; }
+        Parser(String s) {
+            this.s = s;
+            if (!s.isEmpty() && s.charAt(0) == '\uFEFF') this.pos = 1;
+        }
 
         JsonException error(String msg) {
             int line = 1, col = 1;
@@ -49,8 +52,23 @@ public final class MiniJson {
         void skipWs() {
             while (pos < s.length()) {
                 char c = s.charAt(pos);
-                if (c == ' ' || c == '\t' || c == '\n' || c == '\r') pos++;
-                else break;
+                if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                    pos++;
+                } else if (c == '/' && pos + 1 < s.length()) {
+                    char next = s.charAt(pos + 1);
+                    if (next == '/') {
+                        pos += 2;
+                        while (pos < s.length() && s.charAt(pos) != '\n' && s.charAt(pos) != '\r') pos++;
+                    } else if (next == '*') {
+                        pos += 2;
+                        boolean closed = false;
+                        while (pos + 1 < s.length()) {
+                            if (s.charAt(pos) == '*' && s.charAt(pos + 1) == '/') { pos += 2; closed = true; break; }
+                            pos++;
+                        }
+                        if (!closed) throw error("unterminated block comment");
+                    } else break;
+                } else break;
             }
         }
 
